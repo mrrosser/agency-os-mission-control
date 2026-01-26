@@ -1,0 +1,42 @@
+openapi: 3.1.0
+info:
+  title: Agency OS Mission Control
+  description: The Operating System for autonomous agencies. Manage leads, secrets, and outreach campaigns.
+  version: 1.0.0
+servers:
+  - url: https://leadflow-review.web.app
+    description: Production Server (Firebase)
+  - url: http://localhost:3000
+    description: Local Development
+paths:
+  /api/run-leadops:
+    post:
+      operationId: runLeadOps
+      summary: Trigger a LeadOps Campaign
+      description: Launches the autonomous agent to find, qualify, and contact leads.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                limit:
+                  type: integer
+                  description: Number of leads to find (default 10)
+                niche:
+                  type: string
+                  description: Target industry (e.g. Healthcare)
+      responses:
+        "200":
+          description: Campaign Started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "started"
+                  jobId:
+                    type: string

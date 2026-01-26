@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner() {
+      return isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    function isOwnerCreate() {
+      return isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Allow authenticated users to read/write their own identity and user profile
+    match /identities/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Allow authenticated users to read/write their own campaigns
+    match /campaigns/{campaignId} {
+      allow read, write: if isOwner() || isOwnerCreate();
+    }
+
+    // Allow authenticated users to manage their own leads
+    match /leads/{leadId} {
+      allow create: if isOwnerCreate();
+      allow read, delete: if isOwner();
+      allow update: if isOwner() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Telemetry and Mission Status
+    match /activities/{activityId} {
+      allow create: if isOwnerCreate();
+      allow read: if isOwner();
+    }
+    match /analytics/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if false; // Only Admin SDK (API) should update analytics
+    }
+
+    // Allow authenticated users to submit feedback
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn();
+      allow read: if isOwner();
+    }
+    
+    // Default: deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

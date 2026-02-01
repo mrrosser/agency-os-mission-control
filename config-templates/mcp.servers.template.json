@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "${MCP_CONTEXT7_API_KEY}"
+      }
+    },
+    "google-workspace": {
+      "command": "node",
+      "args": [
+        "PLACEHOLDER_PATH_TO_GOOGLE_WORKSPACE_MCP_SERVER"
+      ]
+    },
+    "firestore": {
+      "command": "node",
+      "args": [
+        "PLACEHOLDER_PATH_TO_FIRESTORE_MCP_SERVER"
+      ]
+    }
+  }
+}

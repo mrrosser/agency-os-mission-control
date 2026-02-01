@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Rocket, Shield, Key, PenTool, LayoutDashboard, Zap } from "lucide-react";
+import { Rocket, Shield, Key, PenTool, LayoutDashboard, Zap, Mail } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { AuthGuard } from "@/components/guards/auth-guard";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,8 @@ export default function DashboardLayout({
         { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
         { href: "/dashboard/identity", label: "Identity (The Offer)", icon: PenTool },
         { href: "/dashboard/operations", label: "Operations", icon: Rocket },
+        { href: "/dashboard/inbox", label: "Inbox", icon: Mail },
+        { href: "/dashboard/calendar", label: "Calendar", icon: LayoutDashboard },
         { href: "/dashboard/integrations", label: "Integrations", icon: Zap },
         { href: "/dashboard/settings", label: "API Vault", icon: Key },
     ];

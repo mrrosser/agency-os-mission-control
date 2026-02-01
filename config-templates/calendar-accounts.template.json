@@ -1,0 +1,14 @@
+[
+  {
+    "label": "account-1",
+    "email": "PLACEHOLDER_EMAIL_1",
+    "credentialsFile": "/home/openclaw/.openclaw/credentials/calendar-account-1.json",
+    "readOnly": true
+  },
+  {
+    "label": "account-2",
+    "email": "PLACEHOLDER_EMAIL_2",
+    "credentialsFile": "/home/openclaw/.openclaw/credentials/calendar-account-2.json",
+    "readOnly": true
+  }
+]

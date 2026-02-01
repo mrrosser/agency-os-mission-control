@@ -19,7 +19,9 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
     match /users/{userId} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
+      allow read, delete: if isSignedIn() && request.auth.uid == userId;
     }
     
     // Allow authenticated users to read/write their own campaigns

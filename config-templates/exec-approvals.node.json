@@ -1,0 +1,43 @@
+{
+  "version": "1",
+  "mode": "ask_on_miss",
+  "default": "deny",
+  "allow": [
+    {
+      "id": "pwd",
+      "cmd": "pwd",
+      "args": []
+    },
+    {
+      "id": "ls",
+      "cmd": "ls",
+      "args": ["-la"]
+    },
+    {
+      "id": "rg",
+      "cmd": "rg",
+      "args": ["--files"]
+    },
+    {
+      "id": "git-status",
+      "cmd": "git",
+      "args": ["status", "--short"]
+    },
+    {
+      "id": "git-diff",
+      "cmd": "git",
+      "args": ["diff"]
+    },
+    {
+      "id": "git-branch",
+      "cmd": "git",
+      "args": ["branch", "-vv"]
+    },
+    {
+      "id": "git-log",
+      "cmd": "git",
+      "args": ["log", "--oneline", "-n", "20"]
+    }
+  ],
+  "deny": []
+}

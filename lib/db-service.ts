@@ -75,8 +75,10 @@ export const dbService = {
 
     // Users
     async syncUser(user: any) {
+        if (!user || !user.uid) return;
+
         const userRef = doc(db, "users", user.uid);
-        await setDoc(userRef, {
+        const userData = {
             uid: user.uid,
             email: user.email,
             displayName: user.displayName,
@@ -84,6 +86,15 @@ export const dbService = {
             providerId: user.providerData?.[0]?.providerId || 'password',
             lastLogin: serverTimestamp(),
             updatedAt: serverTimestamp()
-        }, { merge: true });
+        };
+
+        try {
+            await setDoc(userRef, userData, { merge: true });
+        } catch (error: any) {
+            console.warn("SyncUser failed initially, retrying...", error);
+            // Retry once after a small delay to allow Auth to propagate
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await setDoc(userRef, userData, { merge: true });
+        }
     }
 };

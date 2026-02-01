@@ -4,35 +4,58 @@ import { withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
-import { listUpcomingEvents } from "@/lib/google/calendar";
-import { dbAdmin } from "@/lib/db-admin";
+import { listEvents, createEvent, CreateEventInput } from "@/lib/google/calendar";
 
-const bodySchema = z.object({
-  maxResults: z.number().int().min(1).max(250).optional(),
-  calendarId: z.string().optional(),
+const getQuerySchema = z.object({
+  maxResults: z.number().int().min(1).max(100).optional(),
+  timeMin: z.string().optional(),
+});
+
+const createEventSchema = z.object({
+  summary: z.string().min(1),
+  description: z.string().optional(),
+  start: z.object({
+    dateTime: z.string().optional(),
+    date: z.string().optional(),
+    timeZone: z.string().optional(),
+  }),
+  end: z.object({
+    dateTime: z.string().optional(),
+    date: z.string().optional(),
+    timeZone: z.string().optional(),
+  }),
+  location: z.string().optional(),
+  attendees: z.array(z.object({
+    email: z.string().email(),
+  })).optional(),
 });
 
 export const POST = withApiHandler(
   async ({ request, log }) => {
-    const body = await parseJson(request, bodySchema);
+    const url = new URL(request.url);
+    const action = url.searchParams.get("action");
+
     const user = await requireFirebaseAuth(request, log);
     const accessToken = await getAccessTokenForUser(user.uid, log);
 
-    const events = await listUpcomingEvents(
-      accessToken,
-      body.maxResults || 10,
-      body.calendarId || "primary",
-      log
-    );
+    if (action === "list") {
+      const body = await parseJson(request, getQuerySchema);
+      const result = await listEvents(
+        accessToken,
+        body.maxResults || 10,
+        body.timeMin,
+        log
+      );
+      return NextResponse.json(result);
+    }
 
-    await dbAdmin.logActivity({
-      userId: user.uid,
-      action: "Calendar checked",
-      details: `${events.length} events found`,
-      type: "calendar"
-    });
+    if (action === "create") {
+      const body = await parseJson(request, createEventSchema);
+      const result = await createEvent(accessToken, body as CreateEventInput, log);
+      return NextResponse.json(result);
+    }
 
-    return NextResponse.json({ events });
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   },
   { route: "calendar.events" }
 );

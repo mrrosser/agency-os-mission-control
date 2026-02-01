@@ -14,6 +14,7 @@ import { KnowledgeBase } from "@/components/operations/KnowledgeBase";
 import { ScriptGenerator } from "@/lib/ai/script-generator";
 import { buildAuthHeaders } from "@/lib/api/client";
 import { dbService } from "@/lib/db-service";
+import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 interface Lead {
     companyName: string;
@@ -34,15 +35,7 @@ export default function OperationsPage() {
     }, [isRunning]);
 
     const [logs, setLogs] = useState<string[]>([]);
-    const [config, setConfig] = useState<{
-        leadOpsUrl?: string;
-        leadOpsApiKey?: string;
-        twilioSid?: string;
-        twilioToken?: string;
-        elevenLabsKey?: string;
-        heyGenKey?: string;
-        twilioPhone?: string;
-    }>({});
+    const { status: secretStatus } = useSecretsStatus();
     const [limit, setLimit] = useState(10);
     const [targetIndustry, setTargetIndustry] = useState("");
     const [useSMS, setUseSMS] = useState(false);
@@ -50,31 +43,9 @@ export default function OperationsPage() {
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
 
-    useEffect(() => {
-        if (!user) return;
-
-        const loadConfig = async () => {
-            // Priority 1: Firestore
-            try {
-                const identityDoc = await getDoc(doc(db, "identities", user.uid));
-                if (identityDoc.exists()) {
-                    const data = identityDoc.data();
-                    if (data.apiKeys) {
-                        setConfig(data.apiKeys);
-                        return;
-                    }
-                }
-            } catch (e) { console.error("Cloud config error", e); }
-
-            // Priority 2: LocalStorage
-            const saved = localStorage.getItem("mission_control_secrets");
-            if (saved) {
-                setConfig(JSON.parse(saved));
-            }
-        };
-
-        loadConfig();
-    }, [user]);
+    const hasTwilio = secretStatus.twilioSid !== "missing" && secretStatus.twilioToken !== "missing";
+    const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
+    const hasHeyGen = secretStatus.heyGenKey !== "missing";
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
@@ -291,7 +262,7 @@ export default function OperationsPage() {
                 // 2. Sales Power-Ups using Context
 
                 // SMS
-                if (useSMS && config.twilioSid && config.twilioToken) {
+                if (useSMS && hasTwilio) {
                     addLog(`📱 Sending SMS follow-up...`);
                     try {
                         const smsHeaders = await buildAuthHeaders(user, {
@@ -301,8 +272,6 @@ export default function OperationsPage() {
                             method: 'POST',
                             headers: smsHeaders,
                             body: JSON.stringify({
-                                twilioSid: config.twilioSid,
-                                twilioToken: config.twilioToken,
                                 to: "+15550000000",
                                 message: `Hi ${lead.founderName}, just sent you an email regarding ${lead.companyName}. - ${identity.founderName}`
                             })
@@ -312,7 +281,7 @@ export default function OperationsPage() {
                 }
 
                 // AI Outbound Call (NEW)
-                if (useOutboundCall && config.twilioSid && config.twilioToken && config.elevenLabsKey) {
+                if (useOutboundCall && hasTwilio && hasElevenLabs) {
                     addLog(`📞 Initiating AI Outbound Call...`);
                     try {
                         // A. Generate Script
@@ -327,7 +296,6 @@ export default function OperationsPage() {
                             method: 'POST',
                             headers: audioHeaders,
                             body: JSON.stringify({
-                                elevenLabsKey: config.elevenLabsKey,
                                 text: callScript
                             })
                         });
@@ -343,10 +311,7 @@ export default function OperationsPage() {
                         const callResponse = await fetch('/api/twilio/make-call', {
                             method: 'POST',
                             body: JSON.stringify({
-                                twilioSid: config.twilioSid,
-                                twilioToken: config.twilioToken,
                                 to: "+15550000000",
-                                from: config.twilioPhone,
                                 audioUrl: publicAudioUrl
                             })
                         });
@@ -358,7 +323,7 @@ export default function OperationsPage() {
                 }
 
                 // Avatar Video (Enhanced with Context)
-                if (useAvatar && config.heyGenKey) {
+                if (useAvatar && hasHeyGen) {
                     addLog(`🎬 Creating context-aware avatar video...`);
                     try {
                         const videoScript = await ScriptGenerator.generate(context, lead, 'video');
@@ -371,7 +336,6 @@ export default function OperationsPage() {
                             method: 'POST',
                             headers: avatarHeaders,
                             body: JSON.stringify({
-                                heyGenKey: config.heyGenKey,
                                 script: videoScript
                             }) // ...
                         });
@@ -478,7 +442,7 @@ export default function OperationsPage() {
                                                     id="useSMS"
                                                     checked={useSMS}
                                                     onChange={(e) => setUseSMS(e.target.checked)}
-                                                    disabled={!config.twilioSid}
+                                                    disabled={!hasTwilio}
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-blue-600 focus:ring-blue-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
@@ -494,7 +458,7 @@ export default function OperationsPage() {
                                                     id="useOutboundCall"
                                                     checked={useOutboundCall}
                                                     onChange={(e) => setUseOutboundCall(e.target.checked)}
-                                                    disabled={!config.twilioSid || !config.elevenLabsKey}
+                                                    disabled={!hasTwilio || !hasElevenLabs}
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-red-600 focus:ring-red-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
@@ -513,7 +477,7 @@ export default function OperationsPage() {
                                                     id="useAvatar"
                                                     checked={useAvatar}
                                                     onChange={(e) => setUseAvatar(e.target.checked)}
-                                                    disabled={!config.heyGenKey}
+                                                    disabled={!hasHeyGen}
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-green-600 focus:ring-green-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">

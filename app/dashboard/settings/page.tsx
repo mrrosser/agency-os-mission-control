@@ -10,14 +10,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Save, Key, Building2, User, Loader2, CheckCircle2, AlertCircle, Mail, Power } from "lucide-react";
+import { Save, Key, Building2, User, Loader2, CheckCircle2, Mail, Power } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buildAuthHeaders } from "@/lib/api/client";
+import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 export default function SettingsPage() {
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
     const [googleStatus, setGoogleStatus] = useState({ connected: false, loading: true });
+    const { status: secretStatus, loading: secretsLoading, refresh: refreshSecrets } = useSecretsStatus();
 
     // Identity State
     const [identity, setIdentity] = useState({
@@ -47,18 +49,6 @@ export default function SettingsPage() {
                 const identityDoc = await getDoc(doc(db, "identities", user.uid));
                 if (identityDoc.exists()) {
                     setIdentity(identityDoc.data() as any);
-                }
-
-                const localKeys = localStorage.getItem("mission_control_secrets");
-                if (localKeys) {
-                    setApiKeys(prev => ({ ...prev, ...JSON.parse(localKeys) }));
-                }
-
-                if (identityDoc.exists()) {
-                    const data = identityDoc.data();
-                    if (data.apiKeys) {
-                        setApiKeys(prev => ({ ...prev, ...data.apiKeys }));
-                    }
                 }
 
                 // Check Google Status
@@ -125,14 +115,77 @@ export default function SettingsPage() {
         if (!user) return;
         setLoading(true);
         try {
-            await setDoc(doc(db, "identities", user.uid), { apiKeys }, { merge: true });
-            localStorage.setItem("mission_control_secrets", JSON.stringify(apiKeys));
-            toast.success("API Keys synchronized to mission profile");
+            const payload: Record<string, string> = {};
+            Object.entries(apiKeys).forEach(([key, value]) => {
+                if (typeof value === "string" && value.trim().length > 0) {
+                    payload[key] = value.trim();
+                }
+            });
+
+            if (Object.keys(payload).length === 0) {
+                toast.error("Enter at least one API key to save");
+                return;
+            }
+
+            const headers = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const response = await fetch("/api/secrets", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ apiKeys: payload }),
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result?.error || "Failed to save API keys");
+            }
+
+            setApiKeys({
+                openaiKey: "",
+                twilioSid: "",
+                twilioToken: "",
+                elevenLabsKey: "",
+                heyGenKey: "",
+            });
+            await refreshSecrets();
+            toast.success("API keys saved securely in Secret Manager");
         } catch (e) {
-            toast.error("Failed to sync keys");
+            toast.error("Failed to save API keys");
         } finally {
             setLoading(false);
         }
+    };
+
+    const renderSecretBadge = (status: "secret" | "env" | "missing") => {
+        if (secretsLoading) {
+            return (
+                <Badge variant="secondary" className="bg-zinc-800 text-zinc-500">
+                    Checking...
+                </Badge>
+            );
+        }
+
+        if (status === "secret") {
+            return (
+                <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
+                    <CheckCircle2 className="mr-1 h-3 w-3" /> Connected
+                </Badge>
+            );
+        }
+
+        if (status === "env") {
+            return (
+                <Badge variant="secondary" className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                    Env
+                </Badge>
+            );
+        }
+
+        return (
+            <Badge variant="secondary" className="bg-zinc-800 text-zinc-500">
+                Not Configured
+            </Badge>
+        );
     };
 
     return (
@@ -212,7 +265,7 @@ export default function SettingsPage() {
                         <Card className="bg-zinc-950 border-zinc-800">
                             <CardHeader>
                                 <CardTitle>API Configuration</CardTitle>
-                                <CardDescription>Your keys are stored locally on this device.</CardDescription>
+                                <CardDescription>Your keys are stored securely in Secret Manager.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-6">
                                 {/* Google Section */}
@@ -258,13 +311,7 @@ export default function SettingsPage() {
                                 <div className="space-y-4">
                                     <Label className="flex justify-between">
                                         OpenAI API Key
-                                        {apiKeys.openaiKey ? (
-                                            <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
-                                                <CheckCircle2 className="mr-1 h-3 w-3" /> Connected
-                                            </Badge>
-                                        ) : (
-                                            <Badge variant="secondary" className="bg-zinc-800 text-zinc-500">Not Configured</Badge>
-                                        )}
+                                        {renderSecretBadge(secretStatus.openaiKey)}
                                     </Label>
                                     <div className="relative">
                                         <Key className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
@@ -281,7 +328,7 @@ export default function SettingsPage() {
                                     <div className="space-y-2">
                                         <Label className="flex justify-between">
                                             Twilio SID
-                                            {apiKeys.twilioSid ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : null}
+                                            {renderSecretBadge(secretStatus.twilioSid)}
                                         </Label>
                                         <Input
                                             className="bg-zinc-900 border-zinc-700"
@@ -292,7 +339,7 @@ export default function SettingsPage() {
                                     <div className="space-y-2">
                                         <Label className="flex justify-between">
                                             Twilio Auth Token
-                                            {apiKeys.twilioToken ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : null}
+                                            {renderSecretBadge(secretStatus.twilioToken)}
                                         </Label>
                                         <Input
                                             type="password"
@@ -305,11 +352,7 @@ export default function SettingsPage() {
                                 <div className="space-y-2">
                                     <Label className="flex justify-between">
                                         ElevenLabs API Key
-                                        {apiKeys.elevenLabsKey ? (
-                                            <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
-                                                <CheckCircle2 className="mr-1 h-3 w-3" /> Connected
-                                            </Badge>
-                                        ) : null}
+                                        {renderSecretBadge(secretStatus.elevenLabsKey)}
                                     </Label>
                                     <Input
                                         type="password"
@@ -321,11 +364,7 @@ export default function SettingsPage() {
                                 <div className="space-y-2">
                                     <Label className="flex justify-between">
                                         HeyGen API Key
-                                        {apiKeys.heyGenKey ? (
-                                            <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
-                                                <CheckCircle2 className="mr-1 h-3 w-3" /> Connected
-                                            </Badge>
-                                        ) : null}
+                                        {renderSecretBadge(secretStatus.heyGenKey)}
                                     </Label>
                                     <Input
                                         type="password"

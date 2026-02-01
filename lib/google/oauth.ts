@@ -99,40 +99,71 @@ export async function getStoredGoogleTokens(uid: string) {
 }
 
 export async function getAccessTokenForUser(uid: string, log?: Logger) {
+  log?.info("oauth.getAccessToken.start", { uid });
+
   const tokens = await getStoredGoogleTokens(uid);
   if (!tokens?.refreshToken) {
-    throw new ApiError(403, "Google account not connected");
+    log?.warn("oauth.no_tokens", { uid, hasTokens: !!tokens });
+    const error = new ApiError(403, "Google account not connected");
+    log?.warn("oauth.throwing_403", {
+      uid,
+      isApiError: error instanceof ApiError,
+      errorStatus: error.status,
+      errorMessage: error.message
+    });
+    throw error;
   }
 
-  const client = getOAuthClient();
-  client.setCredentials({
-    refresh_token: tokens.refreshToken,
-    access_token: tokens.accessToken || undefined,
-    expiry_date: tokens.expiryDate || undefined,
-  });
+  log?.info("oauth.tokens_found", { uid });
 
-  const accessTokenResponse = await client.getAccessToken();
-  const accessToken = accessTokenResponse?.token;
+  try {
+    const client = getOAuthClient();
+    client.setCredentials({
+      refresh_token: tokens.refreshToken,
+      access_token: tokens.accessToken || undefined,
+      expiry_date: tokens.expiryDate || undefined,
+    });
 
-  if (!accessToken) {
-    throw new ApiError(500, "Failed to refresh Google access token");
+    log?.info("oauth.refreshing_token", { uid });
+    const accessTokenResponse = await client.getAccessToken();
+    const accessToken = accessTokenResponse?.token;
+
+    if (!accessToken) {
+      log?.error("oauth.no_access_token", { uid, response: accessTokenResponse });
+      throw new ApiError(500, "Failed to refresh Google access token");
+    }
+
+    const updatedTokens = client.credentials;
+    await storeGoogleTokens(
+      uid,
+      {
+        access_token: updatedTokens.access_token,
+        refresh_token: updatedTokens.refresh_token,
+        expiry_date: updatedTokens.expiry_date,
+        scope: updatedTokens.scope,
+        token_type: updatedTokens.token_type,
+      },
+      log
+    );
+
+    log?.info("google.oauth.access_token", { uid });
+    return accessToken;
+  } catch (error: any) {
+    log?.error("oauth.refresh_failed", {
+      uid,
+      errorMessage: error.message,
+      errorCode: error.code,
+      errorStatus: error.status
+    });
+
+    // If it's already an ApiError, rethrow it
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    // Otherwise wrap it
+    throw new ApiError(500, `Failed to refresh access token: ${error.message}`);
   }
-
-  const updatedTokens = client.credentials;
-  await storeGoogleTokens(
-    uid,
-    {
-      access_token: updatedTokens.access_token,
-      refresh_token: updatedTokens.refresh_token,
-      expiry_date: updatedTokens.expiry_date,
-      scope: updatedTokens.scope,
-      token_type: updatedTokens.token_type,
-    },
-    log
-  );
-
-  log?.info("google.oauth.access_token", { uid });
-  return accessToken;
 }
 
 export async function revokeGoogleTokens(uid: string, log?: Logger) {

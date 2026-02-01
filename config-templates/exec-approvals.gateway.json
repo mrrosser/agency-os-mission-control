@@ -1,0 +1,38 @@
+{
+  "version": "1",
+  "mode": "ask_on_miss",
+  "default": "deny",
+  "allow": [
+    {
+      "id": "openclaw-status",
+      "cmd": "openclaw",
+      "args": ["status"]
+    },
+    {
+      "id": "openclaw-health",
+      "cmd": "openclaw",
+      "args": ["health"]
+    },
+    {
+      "id": "openclaw-security-audit",
+      "cmd": "openclaw",
+      "args": ["security", "audit"]
+    },
+    {
+      "id": "openclaw-security-audit-deep",
+      "cmd": "openclaw",
+      "args": ["security", "audit", "--deep"]
+    },
+    {
+      "id": "openclaw-approvals-get",
+      "cmd": "openclaw",
+      "args": ["approvals", "get"]
+    },
+    {
+      "id": "openclaw-approvals-set",
+      "cmd": "openclaw",
+      "args": ["approvals", "set"]
+    }
+  ],
+  "deny": []
+}

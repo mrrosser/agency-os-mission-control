@@ -19,10 +19,7 @@ export interface ApiHandlerContext {
   params?: Record<string, string>;
 }
 
-type RouteContext =
-  | { params: Promise<Record<string, string> | {}> }
-  | { params: Record<string, string> | {} }
-  | undefined;
+type RouteContext = { params: Promise<Record<string, string> | {}> };
 
 export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
@@ -36,7 +33,7 @@ export function withApiHandler(
     log.info("request.received", { method: request.method, path });
 
     try {
-      const params = context?.params ? await context.params : undefined;
+      const params = await context.params;
       const response = await handler({
         request,
         correlationId,

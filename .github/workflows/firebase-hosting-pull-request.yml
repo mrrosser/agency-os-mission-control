@@ -16,6 +16,9 @@ jobs:
       - run: npm ci
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
       - run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+          NEXT_TELEMETRY_DISABLED: "1"
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}

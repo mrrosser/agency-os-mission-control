@@ -27,7 +27,6 @@ RUN apt-get update \
   && curl -fsSL https://github.com/steipete/gogcli/releases/download/v0.9.0/gogcli_0.9.0_linux_amd64.tar.gz \
      | tar -xz -C /usr/local/bin \
   && chmod +x /usr/local/bin/gog \
-  && curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -b /usr/local/bin \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -ms /bin/bash openclaw

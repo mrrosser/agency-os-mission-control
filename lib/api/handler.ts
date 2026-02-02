@@ -19,14 +19,16 @@ export interface ApiHandlerContext {
   params?: Record<string, string>;
 }
 
+type RouteContext =
+  | { params: Promise<Record<string, string> | {}> }
+  | { params: Record<string, string> | {} }
+  | undefined;
+
 export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
   options?: { route: string }
 ) {
-  return async function (
-    request: NextRequest,
-    context?: { params?: Record<string, string> }
-  ) {
+  return async function (request: NextRequest, context: RouteContext) {
     const correlationId = getCorrelationId(request);
     const log = createLogger({ correlationId, route: options?.route });
     const path = request.nextUrl?.pathname || "unknown";
@@ -34,11 +36,12 @@ export function withApiHandler(
     log.info("request.received", { method: request.method, path });
 
     try {
+      const params = context?.params ? await context.params : undefined;
       const response = await handler({
         request,
         correlationId,
         log,
-        params: context?.params,
+        params,
       });
       response.headers.set("x-correlation-id", correlationId);
       log.info("request.completed", { status: response.status, path });

@@ -27,8 +27,13 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           NEXT_TELEMETRY_DISABLED: "1"
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Firebase preview deploy (skips if service account secret missing)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 != '' }}
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
-          projectId: leadflow-review
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 }}
+          projectId: vibecheck-ik969
+      - name: Firebase preview deploy skipped (missing secret)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 == '' }}
+        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969; preview deploy skipped."

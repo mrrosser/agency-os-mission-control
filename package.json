@@ -14,10 +14,12 @@
     "test:watch": "vitest",
     "test:pw": "playwright test",
     "test:pw:ui": "playwright test --ui",
-    "test:pw:install": "playwright install"
+    "test:pw:install": "playwright install",
+    "pw:helper": "node scripts/playwright-helper.mjs"
   },
   "dependencies": {
     "@11labs/client": "^0.2.0",
+    "@google-cloud/secret-manager": "^6.1.0",
     "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-avatar": "^1.1.11",

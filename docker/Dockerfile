@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-     ca-certificates curl git gnupg jq tini \
+     ca-certificates curl git gnupg jq tar tini \
   && install -m 0755 -d /usr/share/keyrings \
   && curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg \
@@ -19,6 +19,9 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends google-cloud-cli \
   && apt-get install -y --no-install-recommends tailscale \
+  && curl -fsSL https://github.com/steipete/gog/releases/latest/download/gog_Linux_x86_64.tar.gz \
+     | tar -xz -C /usr/local/bin \
+  && chmod +x /usr/local/bin/gog \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -ms /bin/bash openclaw

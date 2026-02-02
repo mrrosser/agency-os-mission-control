@@ -12,12 +12,28 @@ const firebaseConfig = {
 };
 
 const missingConfig = Object.entries(firebaseConfig).filter(([, value]) => !value);
-if (missingConfig.length > 0) {
+const allowMissingConfig =
+    process.env.CI === "true" ||
+    process.env.NODE_ENV === "test" ||
+    process.env.NEXT_PHASE === "phase-production-build";
+
+if (missingConfig.length > 0 && !allowMissingConfig) {
     throw new Error(`Missing Firebase config values: ${missingConfig.map(([key]) => key).join(", ")}`);
 }
 
+const placeholderConfig = {
+    apiKey: "missing",
+    authDomain: "missing.firebaseapp.com",
+    projectId: "missing",
+    storageBucket: "missing.appspot.com",
+    messagingSenderId: "0000000000",
+    appId: "1:0000000000:web:missing",
+};
+
+const configForInit = missingConfig.length > 0 ? placeholderConfig : firebaseConfig;
+
 // Initialize Firebase (Singleton)
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const app = !getApps().length ? initializeApp(configForInit) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 

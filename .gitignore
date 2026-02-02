@@ -52,6 +52,7 @@ next-env.d.ts
 
 # secrets
 sa-key.json
+secrets/
 
 
 # openclaw runtime

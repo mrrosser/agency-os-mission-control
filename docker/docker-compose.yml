@@ -14,6 +14,7 @@ services:
       OPENCLAW_CONFIG_PATH: /home/openclaw/.openclaw/openclaw.json
     volumes:
       - ../data/openclaw:/home/openclaw/.openclaw
+      - ../data/gogcli:/home/openclaw/.config/gogcli
     ports:
       - "127.0.0.1:${OPENCLAW_PORT}:18789"
     healthcheck:

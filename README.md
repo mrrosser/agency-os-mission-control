@@ -63,3 +63,5 @@ Revenue-first, secure-by-default deployment that keeps an always-on OpenClaw Gat
 - Smoke: `bash tests/openclaw_smoke/smoke_files.sh`
 
 
+## GitHub Actions Watch
+- `docs/runbook-github-actions-watch.md`

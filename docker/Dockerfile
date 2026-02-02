@@ -19,7 +19,7 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends google-cloud-cli \
   && apt-get install -y --no-install-recommends tailscale \
-  && curl -fsSL https://github.com/steipete/gog/releases/latest/download/gog_Linux_x86_64.tar.gz \
+  && curl -fsSL https://github.com/steipete/gogcli/releases/download/v0.9.0/gogcli_0.9.0_linux_amd64.tar.gz \
      | tar -xz -C /usr/local/bin \
   && chmod +x /usr/local/bin/gog \
   && rm -rf /var/lib/apt/lists/*

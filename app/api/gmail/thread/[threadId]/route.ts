@@ -6,7 +6,7 @@ import { getThread } from "@/lib/google/gmail";
 
 export const GET = withApiHandler(
     async ({ request, params, log }) => {
-        const { threadId } = await params;
+        const threadId = params?.threadId;
         const user = await requireFirebaseAuth(request, log);
         const accessToken = await getAccessTokenForUser(user.uid, log);
 

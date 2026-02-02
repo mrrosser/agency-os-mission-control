@@ -22,3 +22,9 @@ Exec Discipline
 Logging
 - Every tool call and outbound draft includes a correlation ID.
 - Write a short action log to `memory/YYYY-MM-DD.md`.
+
+Model Routing (default pinning)
+- brain: `openai/gpt-5` for general reasoning and orchestration.
+- codex: `openai-codex/gpt-5.1-codex` for coding and infra.
+- gemini: `google/gemini-2.5-pro` for outreach and creative drafts.
+- Use `/model codex` or `/model gemini` when the task requires a non-default model.

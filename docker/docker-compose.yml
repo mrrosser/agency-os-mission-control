@@ -12,9 +12,11 @@ services:
       - .env
     environment:
       OPENCLAW_CONFIG_PATH: /home/openclaw/.openclaw/openclaw.json
+      TS_SOCKET: /var/run/tailscale/tailscaled.sock
     volumes:
       - ../data/openclaw:/home/openclaw/.openclaw
       - ../data/gogcli:/home/openclaw/.config/gogcli
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
     ports:
       - "127.0.0.1:${OPENCLAW_PORT}:18789"
     healthcheck:

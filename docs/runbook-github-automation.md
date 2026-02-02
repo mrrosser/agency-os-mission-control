@@ -25,3 +25,23 @@ Safety
 - Keep tokens in env vars or Secret Manager.
 - Use least privilege scopes for GitHub tokens.
 
+Auto Sync (optional)
+- Scripts: `scripts/auto-sync.ps1` (Windows) or `scripts/auto-sync.sh` (Linux/WSL).
+- Set `AUTO_SYNC=1` to enable.
+- Optional:
+  - `AUTO_SYNC_MESSAGE="chore: autosync"`
+  - `AUTO_SYNC_INTERVAL=300` (seconds)
+  - `AUTO_SYNC_SKIP_TESTS=1` (skip `npm test`)
+
+Windows (PowerShell)
+1) `setx AUTO_SYNC 1`
+2) `powershell -File scripts\\auto-sync.ps1`
+
+Linux/WSL
+1) `export AUTO_SYNC=1`
+2) `bash scripts/auto-sync.sh`
+
+Notes
+- Auto sync only runs on `main` and skips pushes on other branches.
+- Stop with Ctrl+C.
+

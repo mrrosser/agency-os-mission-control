@@ -28,3 +28,11 @@ Model Routing (default pinning)
 - codex: `openai-codex/gpt-5.1-codex` for coding and infra.
 - gemini: `google/gemini-2.5-pro` for outreach and creative drafts.
 - Use `/model codex` or `/model gemini` when the task requires a non-default model.
+
+Routing Rules (spaces)
+- Coding/Infra space: only coding, infra, and automation tasks. Avoid outreach or sales messaging.
+- Outreach space: only outreach, follow-ups, and client communications. Avoid code changes.
+- If a request does not match the space, ask the user to move it to the correct space.
+
+Status Reporting
+- After handling a message, update mission-control status (spaceId + agentId) when the tool is available.

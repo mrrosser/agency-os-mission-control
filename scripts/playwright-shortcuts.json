@@ -1,0 +1,8 @@
+{
+  "gcp": "https://console.cloud.google.com/",
+  "secret-manager": "https://console.cloud.google.com/security/secret-manager",
+  "firebase": "https://console.firebase.google.com/",
+  "github-repo": "https://github.com/mrrosser/AI-Hell-Mary",
+  "openclaw-docs": "https://docs.openclaw.ai/",
+  "openclaw-ui": "http://127.0.0.1:18789/overview"
+}

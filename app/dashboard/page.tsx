@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Activity, Mail, Users, Rocket, Globe, TrendingUp, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { AnimatedList } from "@/components/ui/animated-list";
 import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, where, onSnapshot, getDocs, doc, limit, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { buildAuthHeaders } from "@/lib/api/client";
 
 interface AnalyticsData {
     totalLeads: number;
@@ -16,6 +17,13 @@ interface AnalyticsData {
     conversionRate: number;
     emailsSent: number;
     meetingsScheduled: number;
+}
+
+interface AgentSpaceStatus {
+    agentId: string;
+    updatedAt?: string | null;
+    source?: string | null;
+    messageId?: string | null;
 }
 
 export default function DashboardPage() {
@@ -31,6 +39,36 @@ export default function DashboardPage() {
     });
 
     const [activities, setActivities] = useState<any[]>([]);
+    const [agentStatus, setAgentStatus] = useState<Record<string, AgentSpaceStatus>>({});
+    const [agentStatusLoading, setAgentStatusLoading] = useState(false);
+    const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
+
+    const fetchAgentStatus = useCallback(async () => {
+        if (!user) return;
+        setAgentStatusLoading(true);
+        setAgentStatusError(null);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const response = await fetch("/api/agents/status", {
+                method: "GET",
+                headers,
+            });
+            if (!response.ok) {
+                throw new Error("Failed to load agent routing status");
+            }
+            const payload = await response.json();
+            setAgentStatus(payload?.spaces || {});
+        } catch (error: any) {
+            setAgentStatusError(error?.message || "Unable to load agent status");
+        } finally {
+            setAgentStatusLoading(false);
+        }
+    }, [user]);
+
+    useEffect(() => {
+        if (!user) return;
+        fetchAgentStatus();
+    }, [user, fetchAgentStatus]);
 
     useEffect(() => {
         if (!user) {
@@ -143,6 +181,18 @@ export default function DashboardPage() {
         }
     ];
 
+    const spaceLabels: Record<string, string> = {
+        "spaces/AAQA62xqRGQ": "Outreach",
+        "spaces/AAQALocqO7Q": "Coding/Infra",
+    };
+
+    const agentStatusItems = Object.entries(agentStatus).map(([spaceId, status]) => ({
+        spaceId,
+        label: spaceLabels[spaceId] || spaceId,
+        agentId: status.agentId,
+        updatedAt: status.updatedAt ? new Date(status.updatedAt).toLocaleString() : "No activity yet",
+    }));
+
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">
             <div className="max-w-7xl mx-auto space-y-8">
@@ -208,7 +258,7 @@ export default function DashboardPage() {
                         )}
 
                         {/* Activity Cards */}
-                        <div className="grid gap-6 md:grid-cols-2">
+                        <div className="grid gap-6 md:grid-cols-3">
                             <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
                                 <CardContent className="p-6">
                                     <div className="flex items-start gap-4">
@@ -256,6 +306,57 @@ export default function DashboardPage() {
                                                 <span className="text-xs text-green-500 font-medium">● Online</span>
                                             </div>
                                         </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
+                                <CardContent className="p-6">
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="flex items-start gap-4">
+                                            <div className="p-3 rounded-lg bg-emerald-500/10 shrink-0">
+                                                <Activity className="h-6 w-6 text-emerald-500" />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <h3 className="font-semibold text-white">Agent Routing</h3>
+                                                <p className="text-sm text-zinc-400">
+                                                    Latest agent handling per space
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            onClick={fetchAgentStatus}
+                                            variant="outline"
+                                            size="sm"
+                                            className="border-zinc-700 text-zinc-200 hover:bg-zinc-900"
+                                            disabled={agentStatusLoading}
+                                        >
+                                            Refresh
+                                        </Button>
+                                    </div>
+
+                                    <div className="mt-4 space-y-3">
+                                        {agentStatusLoading && (
+                                            <p className="text-xs text-zinc-500">Loading routing status...</p>
+                                        )}
+                                        {agentStatusError && (
+                                            <p className="text-xs text-red-400">{agentStatusError}</p>
+                                        )}
+                                        {!agentStatusLoading && agentStatusItems.length === 0 && (
+                                            <p className="text-xs text-zinc-500">No routing activity yet.</p>
+                                        )}
+                                        {agentStatusItems.map((item) => (
+                                            <div key={item.spaceId} className="flex items-center justify-between gap-4">
+                                                <div>
+                                                    <p className="text-sm text-white font-medium">{item.label}</p>
+                                                    <p className="text-xs text-zinc-500">{item.spaceId}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs text-zinc-400">{item.agentId}</p>
+                                                    <p className="text-xs text-zinc-500">{item.updatedAt}</p>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </CardContent>
                             </Card>

@@ -15,7 +15,8 @@
     "test:pw": "playwright test",
     "test:pw:ui": "playwright test --ui",
     "test:pw:install": "playwright install",
-    "pw:helper": "node scripts/playwright-helper.mjs"
+    "pw:helper": "node scripts/playwright-helper.mjs",
+    "pw:shortcuts": "node scripts/playwright-shortcuts.mjs"
   },
   "dependencies": {
     "@11labs/client": "^0.2.0",

@@ -1,5 +1,9 @@
 # Runbook: GCP Gateway (OpenClaw in Docker)
 
+Note
+- Docker is supported, but the native install is recommended for max stability.
+- For native install, use: `docs/runbook-gcp-gateway-native.md`.
+
 PLACEHOLDERS (set these before running commands)
 - GCP_PROJECT_ID=ai-hell-mary
 - GCP_REGION=us-central1
@@ -80,3 +84,7 @@ Notes
 - Keep the gateway bound to `127.0.0.1`.
 - Do not mount secrets in repo; use env vars or Secret Manager.
 
+
+
+Docker Gmail smoke check (local, avoids IAP)
+- `bash scripts/vm_gmail_smoke_local.sh`

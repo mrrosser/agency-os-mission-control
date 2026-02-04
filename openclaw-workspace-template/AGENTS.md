@@ -24,10 +24,15 @@ Logging
 - Write a short action log to `memory/YYYY-MM-DD.md`.
 
 Model Routing (default pinning)
-- brain: `openai/gpt-5` for general reasoning and orchestration.
-- codex: `openai-codex/gpt-5.1-codex` for coding and infra.
+- brain: GPT-5.2 (if available) with reasoning effort set to high.
+- fallback: GPT-5, then GPT-5.1 if GPT-5.2 is not available.
+- codex: `openai-codex/gpt-5.1-codex` for coding and infra only.
 - gemini: `google/gemini-2.5-pro` for outreach and creative drafts.
 - Use `/model codex` or `/model gemini` when the task requires a non-default model.
+
+Cost Controls
+- Heartbeat model: `brain-fast` (or `gemini-lite`) to reduce background cost.
+- Heartbeat interval: 60 minutes unless urgent operations require more.
 
 Routing Rules (spaces)
 - Coding/Infra space: only coding, infra, and automation tasks. Avoid outreach or sales messaging.

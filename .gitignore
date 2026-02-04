@@ -58,6 +58,8 @@ secrets/
 # openclaw runtime
 /data/openclaw/
 /data/openclaw/workspace/
+/data/gogcli/
+**/.config/gogcli/
 **/.openclaw/credentials
 **/.openclaw/sessions
 **/.openclaw/tokens

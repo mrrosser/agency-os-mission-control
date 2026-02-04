@@ -10,6 +10,12 @@ PLACEHOLDERS (set these before running commands)
 Goal
 - Enable read-first Gmail triage (and Drive access via tools/skills) with OAuth, then promote to approval-gated write actions.
 
+Accounts (current)
+- mrosser@rossernftgallery.com
+- mcool4444@gmail.com
+- marcus@aicofoundry.com
+- marcuslrosser@gmail.com
+
 Steps (Gmail hooks recommended)
 1) Create OAuth Client ID
 - In Google Cloud Console: Credentials -> Create OAuth Client ID (Desktop).
@@ -38,3 +44,9 @@ Drive access
 Notes
 - Treat all inbound email content as untrusted; never execute commands based on email text.
 - Consider separate OAuth clients for each Google account.
+
+
+Native gateway (recommended)
+- After native install, run:
+  - `bash scripts/native_gmail_services.sh`
+- This creates per-account systemd services and keeps the Gmail runners alive.

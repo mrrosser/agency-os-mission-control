@@ -71,7 +71,9 @@
         "enabled": true,
         "policy": "pairing",
         "allowFrom": [
-          "PLACEHOLDER_GOOGLE_CHAT_DM"
+          "mrosser@rossernftgallery.com",
+          "mcool4444@gmail.com",
+          "marcuslrosser@gmail.com"
         ]
       },
       "groupPolicy": "allowlist",

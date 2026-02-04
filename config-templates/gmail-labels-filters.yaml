@@ -1,0 +1,88 @@
+labels:
+  base:
+    - Needs-Reply
+    - Lead
+    - Client
+    - Quote
+    - Follow-Up
+    - Ignore
+  optional:
+    rosser_nft_gallery:
+      mailbox: mrosser@rossernftgallery.com
+      labels:
+        - RNG/NFT
+        - RNG/Commission
+        - RNG/3D-Print
+        - RNG/Preservation
+        - RNG/Event
+        - RNG/Reputation
+    rt_solutions:
+      mailbox: mrosser@rossernftgallery.com
+      labels:
+        - RTS/Workshop
+        - RTS/PD
+        - RTS/AfterSchool
+        - RTS/Consulting
+    ai_cofoundry:
+      mailbox: marcus@aicofoundry.com
+      labels:
+        - AICF/Discovery
+        - AICF/Pilot
+        - AICF/Build
+        - AICF/Support
+
+filters:
+  rosser_nft_gallery:
+    lead_query: >-
+      (commission OR commissioned OR "custom art" OR "custom sculpture" OR "3d print" OR
+      "3d printing" OR "3d scan" OR "3d scanning" OR photogrammetry OR stl OR obj OR cad OR
+      prototype OR figurine OR bust OR mini OR "digital twin" OR nft OR mint OR minting OR
+      "smart contract" OR "contract deploy" OR "erc-721" OR "erc-1155" OR "token gated" OR
+      on-chain OR metadata OR ipfs OR wallet OR crossmint OR ar OR vr OR xr OR
+      "augmented reality" OR "virtual reality" OR "mixed reality" OR metaverse OR gallery OR
+      exhibition OR exhibit OR installation OR "pop-up" OR activation OR event OR seo OR
+      "local seo" OR serp OR "search results" OR "reputation management" OR orm OR
+      "review removal" OR "negative review" OR "google reviews" OR "google business profile" OR
+      suppression OR takedown OR dmca)
+    sublabels:
+      "RNG/NFT": 'nft OR mint OR minting OR "smart contract" OR "erc-721" OR "erc-1155" OR crossmint OR ipfs'
+      "RNG/Commission": 'commission OR commissioned OR "custom art" OR "custom sculpture" OR bespoke OR "made-to-order"'
+      "RNG/3D-Print": '"3d print" OR "3d printing" OR "3d scan" OR "3d scanning" OR photogrammetry OR stl OR obj OR cad'
+      "RNG/Preservation": '"digital twin" OR preservation OR archive OR "virtual gallery" OR "museum"'
+      "RNG/Event": 'gallery OR exhibition OR exhibit OR installation OR "pop-up" OR activation OR event OR "private event"'
+      "RNG/Reputation": 'seo OR serp OR "search results" OR "reputation management" OR orm OR suppression OR takedown'
+
+  rt_solutions:
+    lead_query: >-
+      (school OR district OR charter OR classroom OR student OR students OR teacher OR teachers OR
+      educator OR principal OR superintendent)
+      (workshop OR training OR "professional development" OR pd OR in-service OR "staff development"
+      OR "ai literacy" OR "responsible ai" OR curriculum OR "lesson plan" OR "after-school" OR
+      afterschool OR enrichment OR club OR camp OR "summer camp" OR stem OR "computer science" OR
+      coding)
+    sublabels:
+      "RTS/Workshop": 'workshop OR training OR seminar OR assembly'
+      "RTS/PD": '"professional development" OR pd OR in-service OR "teacher training"'
+      "RTS/AfterSchool": '"after-school" OR afterschool OR enrichment OR club OR camp OR "summer camp"'
+      "RTS/Consulting": 'advisory OR consulting OR "program design" OR "curriculum design"'
+
+  ai_cofoundry:
+    lead_query: >-
+      ("ai agent" OR "ai agents" OR agentic OR automation OR automate OR workflow OR process OR sop OR
+      playbook OR routing OR "email routing" OR auto-reply OR "draft replies" OR "intake form" OR
+      integration OR integrate OR api OR webhook OR zapier OR make.com OR n8n OR crm OR hubspot OR
+      salesforce OR airtable OR notion OR slack OR mvp OR pilot OR poc OR "proof of concept" OR
+      prototype OR beta OR "build an app" OR "app build" OR "web app" OR "mobile app" OR dashboard OR
+      "admin panel" OR rag OR retrieval OR "knowledge base" OR embeddings OR "vector database" OR
+      prompt OR "system prompt" OR "function calling")
+    sublabels:
+      "AICF/Discovery": '"discovery" OR "fit call" OR "diagnostic workshop" OR intake OR "scoping call"'
+      "AICF/Pilot": '"pilot" OR "proof of concept" OR poc OR "cohort" OR "beta"'
+      "AICF/Build": '"build an app" OR "app build" OR "web app" OR "mobile app" OR "dashboard" OR integration'
+      "AICF/Support": 'support OR retainer OR "ongoing ops" OR "managed" OR "maintenance"'
+
+routing_notes:
+  - "If ANY Rosser priority trigger matches -> route Rosser."
+  - "Else if ANY RT Solutions priority trigger matches (school/district/teachers/students/PD/camp) -> route RT Solutions."
+  - "Else if ANY AI CoFoundry priority trigger matches -> route AI CoFoundry."
+  - "If multiple match: prefer Rosser when NFT/3D/art terms appear; prefer RT when school terms appear; otherwise prefer AI CoFoundry."

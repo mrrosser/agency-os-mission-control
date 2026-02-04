@@ -2,7 +2,7 @@
 
 This repo deploys OpenClaw as an always-on assistant using a hybrid topology:
 
-1) Gateway (GCP VM, Docker)
+1) Gateway (GCP VM, native recommended)
 - Always-on brain, runs tools and integrations.
 - Bound to loopback; reachable via SSH tunnel or Tailscale Serve.
 - Stores state in `data/openclaw` and `data/openclaw/workspace`.
@@ -33,6 +33,7 @@ Revenue-first behaviors:
 - Maintain a single source of truth for services/pricing and lead status.
 
 Key repo areas:
+- `docs/runbook-gcp-gateway-native.md`: native install (recommended for stability).
 - `docker/`: Dockerfile and compose for gateway.
 - `config-templates/`: gateway config and exec approvals templates.
 - `openclaw-workspace-template/`: agent behavior and memory templates.

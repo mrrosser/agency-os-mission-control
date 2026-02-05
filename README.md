@@ -1,73 +1,52 @@
-# AI Hell Mary - OpenClaw Hybrid Digital Employee (Gateway + Windows Node)
+# LeadFlow Mission Control
 
-Revenue-first, secure-by-default deployment that keeps an always-on OpenClaw Gateway in GCP and connects your Windows machine as a Node host for hands-on work. Draft-first outbound, approvals for exec, least-privilege integrations, and a manual stop switch are baked in. Project codename: AI Hell Mary.
+Lead generation command center: source leads, score them, and visualize the outreach journey across MCP + AI steps. Built as a Firebase-backed Next.js app with a real-time dashboard and an API vault for tenant-specific keys.
 
-## First 60 Minutes Checklist
-1. Provision Gateway VM (GCP).
-2. Deploy OpenClaw Gateway (recommended: Native install; Docker also supported).
-3. Connect one chat channel (Google Chat preferred; Telegram fallback).
-4. Connect Windows Node host via SSH tunnel or Tailscale.
-5. Run security audit and apply fixes.
+## Run Locally
+1) Install deps:
+```bash
+npm ci
+```
+2) Create `.env.local` from the template:
+```bash
+copy .env.local.example .env.local
+```
+3) Fill in required values in `.env.local`:
+- `NEXT_PUBLIC_FIREBASE_*` (Firebase web app config)
+- `FIREBASE_PROJECT_ID`
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
+- Optional: `GOOGLE_PLACES_API_KEY` (for live lead sourcing)
+- Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 
-## How to Run Locally (for testing)
-- Copy templates into the runtime data directory:
-  - `config-templates/openclaw.json.template` -> `data/openclaw/openclaw.json`
-  - `config-templates/exec-approvals.gateway.json` -> `data/openclaw/exec-approvals.json`
-  - `openclaw-workspace-template/` -> `data/openclaw/workspace/`
-- Create env file: `copy docker/.env.template docker/.env` (Windows) or `cp docker/.env.template docker/.env` (Linux/WSL).
-- Run: `docker compose -f docker/docker-compose.yml --env-file docker/.env up -d --build`
+4) Start dev server:
+```bash
+npm run dev
+```
 
-## Lead Sourcing (Mission Control UI)
-- Optional: configure `GOOGLE_PLACES_API_KEY` (or set a user-scoped secret named `googlePlacesKey`) to enable live lead sourcing.
-- Without a Places key, the Lead Engine will pull from existing CRM leads.
+## Lead Sourcing + Scoring
+- The Lead Engine lives in `app/dashboard/operations`.
+- If `GOOGLE_PLACES_API_KEY` (or a user-scoped secret `googlePlacesKey`) is set, live lead sourcing is enabled.
+- Without a Places key, the Lead Engine pulls from existing CRM leads.
 
-## How to Deploy (GCP VM + optional Cloud Run)
-- GCP VM (native): follow `docs/runbook-gcp-gateway-native.md`.
-- GCP VM (Docker): follow `docs/runbook-gcp-gateway.md`.
-- Windows Node: follow `docs/runbook-windows-node.md`.
-- Optional Cloud Run (read-first): `docs/runbook-gcp-cloudrun.md` shows how to set up discovery and approval-gated deploys.
+## Google OAuth Redirect URIs (recommended)
+- Local: `http://localhost:3000/api/google/callback`
+- Production: `https://leadflow-review.web.app/api/google/callback`
 
-## Docs
-- `docs/overview.md`
-- `docs/runbook-gcp-gateway-native.md`
-- `docs/runbook-gcp-gateway.md`
-- `docs/runbook-windows-node.md`
-- `docs/runbook-channels-googlechat.md`
-- `docs/runbook-channels-telegram.md`
-- `docs/runbook-gmail-drive.md`
-- `docs/runbook-playwright.md`
-- `docs/runbook-web-browsing.md`
-- `docs/runbook-skills.md`
-- `docs/runbook-mcp-integrations.md`
-- `docs/runbook-social-networks.md`
-- `docs/runbook-twilio.md`
-- `docs/runbook-elevenlabs.md`
-- `docs/runbook-calendar.md`
-- `docs/runbook-github-automation.md`
-- `docs/runbook-context7.md`
-- `docs/runbook-firestore.md`
-- `docs/runbook-google-workspace.md`
-- `docs/runbook-write-mode.md`
-- `docs/runbook-github-prs.md`
-- `docs/runbook-gcp-cloudrun.md`
-- `docs/security-checklist.md`
-- `docs/incident-response.md`
-- `docs/execplans/openclaw-digital-employee.md`
+## Deploy (Firebase Hosting)
+The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
 
-## Observability
-- JSON structured logs are expected for gateway and node; include a correlation ID on every tool call and outbound message.
-- Logging is configured in `openclaw.json` under `logging` (JSON lines).
+Required GitHub Actions secrets:
+- `ENV_LOCAL` (full `.env.local` content)
+- `FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW` (Firebase Admin SDK JSON)
 
-## Security Defaults
-- Gateway bound to `127.0.0.1` and accessed via SSH tunnel or Tailscale.
-- Exec approvals enforced with a minimal allowlist on gateway and node.
-- Draft-first outbound messaging; explicit approval required.
-- Stop switch: disable channels and add `message` + `group:runtime` + `group:fs` to `tools.deny`, then restart.
+Expected live URL (Firebase Hosting default):
+- `https://leadflow-review.web.app/`
 
 ## Tests
-- Unit: `python tests/openclaw_unit/test_config_templates.py`
-- Smoke: `bash tests/openclaw_smoke/smoke_files.sh`
+```bash
+npm test
+```
 
-
-## GitHub Actions Watch
-- `docs/runbook-github-actions-watch.md`
+## Repo Notes
+- Core app code: `app/`, `components/`, `lib/`, `tests/`
+- Unrelated or archived materials are staged under `please-review/`

@@ -1,0 +1,138 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/home/openclaw/.openclaw/workspace",
+      "model": {
+        "primary": "openai/gpt-5"
+      },
+      "models": {
+        "openai/gpt-5": {
+          "alias": "brain"
+        },
+        "openai/gpt-5-mini": {
+          "alias": "brain-fast"
+        },
+        "openai-codex/gpt-5.1-codex": {
+          "alias": "codex"
+        },
+        "openai-codex/gpt-5.1-codex-mini": {
+          "alias": "codex-fast"
+        },
+        "google/gemini-2.5-pro": {
+          "alias": "gemini"
+        },
+        "google/gemini-2.5-flash": {
+          "alias": "gemini-fast"
+        },
+        "google/gemini-2.5-flash-lite": {
+          "alias": "gemini-lite"
+        }
+      }
+    }
+  },
+  "logging": {
+    "level": "info",
+    "file": "/tmp/openclaw/openclaw.log",
+    "consoleLevel": "info",
+    "consoleStyle": "json",
+    "redactSensitive": "tools"
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "PLACEHOLDER_GATEWAY_TOKEN"
+    }
+  },
+  "tools": {
+    "deny": [],
+    "web": {
+      "search": {
+        "enabled": true
+      },
+      "fetch": {
+        "enabled": true
+      }
+    },
+    "elevated": {
+      "enabled": true,
+      "allowFrom": {}
+    }
+  },
+  "channels": {
+    "googlechat": {
+      "enabled": false,
+      "serviceAccountFile": "/home/openclaw/.openclaw/credentials/openclaw-googlechat-sa.json",
+      "audienceType": "app-url",
+      "audience": "PLACEHOLDER_GOOGLE_CHAT_AUDIENCE",
+      "webhookPath": "/googlechat",
+      "botUser": "users/mcool44",
+      "dm": {
+        "enabled": true,
+        "policy": "pairing",
+        "allowFrom": [
+          "PLACEHOLDER_GOOGLE_CHAT_DM"
+        ]
+      },
+      "groupPolicy": "allowlist",
+      "groups": {
+        "spaces/AAQAJt-QD1I": {
+          "allow": true,
+          "requireMention": true
+        }
+      }
+    },
+    "telegram": {
+      "enabled": false,
+      "botToken": "PLACEHOLDER_TELEGRAM_BOT_TOKEN",
+      "dmPolicy": "pairing",
+      "allowFrom": [
+        "PLACEHOLDER_TELEGRAM_USER"
+      ],
+      "groups": {
+        "PLACEHOLDER_TELEGRAM_GROUP": {
+          "requireMention": true
+        }
+      }
+    }
+  },
+  "messages": {
+    "tts": {
+      "auto": "tagged",
+      "mode": "final",
+      "provider": "elevenlabs",
+      "elevenlabs": {
+        "voiceId": "PLACEHOLDER_ELEVENLABS_VOICE_ID",
+        "modelId": "PLACEHOLDER_ELEVENLABS_MODEL_ID"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "googlechat": {
+        "enabled": true
+      },
+      "voice-call": {
+        "enabled": false,
+        "config": {
+          "provider": "twilio",
+          "fromNumber": "+15555550123",
+          "toNumber": "+15555550124",
+          "twilio": {
+            "accountSid": "PLACEHOLDER_TWILIO_ACCOUNT_SID",
+            "authToken": "PLACEHOLDER_TWILIO_AUTH_TOKEN"
+          },
+          "serve": {
+            "port": 3334,
+            "path": "/voice/webhook"
+          },
+          "streaming": {
+            "enabled": true,
+            "streamPath": "/voice/stream"
+          }
+        }
+      }
+    }
+  }
+}
+

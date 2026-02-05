@@ -1,0 +1,4 @@
+interface:
+  display_name: "SocialOps Audit"
+  short_description: "SocialOps security scans, safe fixes, smoke tests."
+  default_prompt: "Run a security audit for SocialOps repos, apply safe fixes, and summarize results."

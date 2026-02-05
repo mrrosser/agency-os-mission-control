@@ -1,0 +1,4 @@
+interface:
+  display_name: "SocialOps Roster Sync"
+  short_description: "Sync roster brand profiles and drive changes."
+  default_prompt: "Sync the roster brand profile sheet and scan client drive changes."

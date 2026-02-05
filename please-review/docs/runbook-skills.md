@@ -15,6 +15,9 @@ Steps (Windows PowerShell)
 - `New-Item -ItemType Directory -Force -Path $WORKSPACE_SKILLS_DIR`
 - `robocopy $GLOBAL_SKILLS_DIR $WORKSPACE_SKILLS_DIR /E`
 
+Packaging (.skills bundles)
+- `.\scripts\package_skills.ps1 -SkillsDir .\skills -OutputDir .\dist\skills`
+
 Rules
 - Never copy secrets into skills.
 - Review each skill for tool access and prompt-injection risks.

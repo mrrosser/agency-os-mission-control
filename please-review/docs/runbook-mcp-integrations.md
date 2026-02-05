@@ -36,6 +36,9 @@ Registry lookup (recommended)
 Context7 (recommended)
 - See `docs/runbook-context7.md` for the official Context7 MCP endpoint and setup.
 
+Magic UI (official)
+- See `docs/runbook-magicui-mcp.md` for Magic UI MCP install and config.
+
 Reference servers (official)
 - The MCP reference servers (filesystem, git, fetch, memory, etc.) are in the MCP servers repo.
 

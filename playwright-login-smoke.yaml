@@ -1,0 +1,17 @@
+name: login-smoke
+base_url: https://leadflow-review.web.app
+timeout_ms: 20000
+viewport:
+  width: 1365
+  height: 768
+steps:
+  - goto: /login
+  - expect_text:
+      selector: "body"
+      text: "Mission Control"
+  - expect_text:
+      selector: "body"
+      text: "Sign in with Google"
+  - screenshot:
+      path: "login-page.png"
+      full_page: true

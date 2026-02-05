@@ -1,0 +1,25 @@
+FROM debian:bookworm-slim
+
+ARG OPENCLAW_VERSION=latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     ca-certificates curl git gnupg jq tini \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -ms /bin/bash openclaw
+WORKDIR /home/openclaw
+
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && npm install -g "openclaw@${OPENCLAW_VERSION}"
+
+RUN mkdir -p /home/openclaw/.openclaw/workspace
+
+USER openclaw
+ENV OPENCLAW_HOME=/home/openclaw/.openclaw
+
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["openclaw","gateway","--port","18789","--verbose"]

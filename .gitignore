@@ -19,6 +19,7 @@
 
 # production
 /build
+/dist/
 
 # misc
 .DS_Store
@@ -35,6 +36,13 @@ firebase-debug.log
 # playwright
 /playwright-report/
 .playwright-profile/
+/please-review/from-root/playwright-artifacts/
+
+# review staging (generated artifacts)
+please-review/out/
+please-review/dist/
+please-review/playwright-report/
+please-review/memory/
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -53,6 +61,7 @@ next-env.d.ts
 # secrets
 sa-key.json
 secrets/
+please-review/_keep/
 
 
 # openclaw runtime
@@ -69,3 +78,4 @@ secrets/
 openclaw.json
 openclaw-attest.log
 .env.mcp
+.firecrawl/

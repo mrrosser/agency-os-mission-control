@@ -27,7 +27,7 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
       - name: Check Firebase service account secret
         run: |
-          if [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 }}" ]; then
+          if [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}" ]; then
             echo "FIREBASE_SA_SET=1" >> $GITHUB_ENV
           else
             echo "FIREBASE_SA_SET=0" >> $GITHUB_ENV
@@ -37,9 +37,9 @@ jobs:
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
           channelId: live
-          projectId: vibecheck-ik969
+          projectId: leadflow-review
       - name: Firebase deploy skipped (missing secret)
         if: ${{ env.FIREBASE_SA_SET != '1' }}
-        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969; deploy skipped."
+        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; deploy skipped."

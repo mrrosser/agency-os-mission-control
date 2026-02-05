@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { MessageSquare, Send, Loader2, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders } from "@/lib/api/client";
+import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 interface SentMessage {
     to: string;
@@ -20,6 +21,7 @@ interface SentMessage {
 
 export function SmsSender() {
     const { user } = useAuth();
+    const { status: secretStatus } = useSecretsStatus();
     const [to, setTo] = useState("");
     const [message, setMessage] = useState("");
     const [sending, setSending] = useState(false);
@@ -40,9 +42,11 @@ export function SmsSender() {
             return;
         }
 
-        const config = JSON.parse(localStorage.getItem("mission_control_secrets") || "{}");
+        const hasTwilio =
+            secretStatus.twilioSid !== "missing" &&
+            secretStatus.twilioToken !== "missing";
 
-        if (!config.twilioSid || !config.twilioToken) {
+        if (!hasTwilio) {
             toast.error("Twilio credentials not configured", {
                 description: "Go to API Vault to add your Twilio SID and Auth Token"
             });
@@ -64,8 +68,6 @@ export function SmsSender() {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                    twilioSid: config.twilioSid,
-                    twilioToken: config.twilioToken,
                     to: to,
                     message: message,
                 })

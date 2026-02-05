@@ -17,6 +17,10 @@ Revenue-first, secure-by-default deployment that keeps an always-on OpenClaw Gat
 - Create env file: `copy docker/.env.template docker/.env` (Windows) or `cp docker/.env.template docker/.env` (Linux/WSL).
 - Run: `docker compose -f docker/docker-compose.yml --env-file docker/.env up -d --build`
 
+## Lead Sourcing (Mission Control UI)
+- Optional: configure `GOOGLE_PLACES_API_KEY` (or set a user-scoped secret named `googlePlacesKey`) to enable live lead sourcing.
+- Without a Places key, the Lead Engine will pull from existing CRM leads.
+
 ## How to Deploy (GCP VM + optional Cloud Run)
 - GCP VM (native): follow `docs/runbook-gcp-gateway-native.md`.
 - GCP VM (Docker): follow `docs/runbook-gcp-gateway.md`.

@@ -21,6 +21,8 @@ interface Lead {
     founderName: string;
     email: string;
     status: "new" | "contacted" | "meeting" | "closed" | "lost";
+    score?: number;
+    source?: string;
     value?: number;
     lastContact?: any;
 }
@@ -46,7 +48,7 @@ export default function CRMPage() {
         if (!user) return;
 
         // Listen for leads
-        // Note: We need to create a 'leads' collection or use existing campaigns data
+        // Note: We need to create a 'leads' collection or use existing lead runs data
         // For this demo, we'll assume a 'leads' collection exists linked to user
         const q = query(collection(db, "leads"), where("userId", "==", user.uid));
 
@@ -111,8 +113,8 @@ export default function CRMPage() {
         <div className="min-h-screen bg-black p-6 md:p-8 overflow-x-auto">
             <div className="flex items-center justify-between mb-8">
                 <div>
-                    <h1 className="text-3xl font-bold text-white">Deal Pipeline</h1>
-                    <p className="text-zinc-400">Manage your opportunities</p>
+                    <h1 className="text-3xl font-bold text-white">Lead Pipeline</h1>
+                    <p className="text-zinc-400">Manage and advance qualified leads</p>
                 </div>
 
                 <Dialog open={newLeadOpen} onOpenChange={setNewLeadOpen}>
@@ -188,9 +190,16 @@ export default function CRMPage() {
                                                                 }`}
                                                         >
                                                             <CardContent className="p-4 space-y-3">
-                                                                <div>
-                                                                    <h3 className="font-semibold text-white truncate">{lead.companyName}</h3>
-                                                                    <p className="text-sm text-zinc-400 truncate">{lead.founderName}</p>
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div>
+                                                                        <h3 className="font-semibold text-white truncate">{lead.companyName}</h3>
+                                                                        <p className="text-sm text-zinc-400 truncate">{lead.founderName}</p>
+                                                                    </div>
+                                                                    {typeof lead.score === "number" && (
+                                                                        <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
+                                                                            {lead.score}
+                                                                        </Badge>
+                                                                    )}
                                                                 </div>
                                                                 <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
                                                                     <div className="flex items-center gap-2 text-xs text-zinc-500">

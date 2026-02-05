@@ -22,9 +22,22 @@
   }
 }
 
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -2%, 0) scale(1.02);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 @theme {
   --animate-border-beam: border-beam calc(var(--duration)*1s) infinite linear;
   --animate-shine: shine var(--duration) infinite linear;
+  --animate-aurora-drift: aurora-drift 18s ease-in-out infinite;
 }
 
 @theme {

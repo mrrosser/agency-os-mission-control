@@ -42,7 +42,7 @@ class ErrorBoundary extends Component<Props, State> {
                         <CardContent className="space-y-4 text-center">
                             <p className="text-sm text-zinc-400">
                                 A critical error occurred in the Mission Control interface.
-                                All active campaigns are still safe on the backend.
+                                All active lead runs are still safe on the backend.
                             </p>
                             <Button
                                 onClick={() => window.location.reload()}

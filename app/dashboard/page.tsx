@@ -198,9 +198,9 @@ export default function DashboardPage() {
             <div className="max-w-7xl mx-auto space-y-8">
                 {/* Header */}
                 <div className="space-y-2">
-                    <h1 className="text-3xl font-bold text-white">Mission Status</h1>
+                    <h1 className="text-3xl font-bold text-white">Leadflow Status</h1>
                     <p className="text-zinc-400">
-                        Real-time metrics and campaign performance
+                        Real-time lead sourcing, outreach, and conversion performance
                     </p>
                 </div>
 
@@ -242,16 +242,16 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
                                     <div className="space-y-2">
-                                        <h3 className="text-xl font-bold text-white">Mission Ready?</h3>
+                                        <h3 className="text-xl font-bold text-white">Lead Engine Ready?</h3>
                                         <p className="text-zinc-400 max-w-sm mx-auto">
-                                            Your command center is online. Configure your agency identity and API keys to start your first autonomous campaign.
+                                            Your lead command center is online. Configure your profile and API keys to launch your first lead run.
                                         </p>
                                     </div>
                                     <Button
                                         onClick={() => router.push("/dashboard/settings")}
                                         className="bg-blue-600 hover:bg-blue-500 text-white"
                                     >
-                                        Setup Mission Profile
+                                        Configure Lead Profile
                                     </Button>
                                 </CardContent>
                             </Card>
@@ -266,9 +266,9 @@ export default function DashboardPage() {
                                             <Rocket className="h-6 w-6 text-blue-500" />
                                         </div>
                                         <div className="space-y-1">
-                                            <h3 className="font-semibold text-white">Active Campaigns</h3>
+                                            <h3 className="font-semibold text-white">Active Lead Runs</h3>
                                             <p className="text-sm text-zinc-400">
-                                                Google Workspace Integration Active
+                                                Google Workspace + Outreach APIs Active
                                             </p>
                                             <div className="mt-3 h-2 bg-zinc-900 rounded-full overflow-hidden">
                                                 <div className="h-full w-[85%] bg-blue-500 animate-pulse"></div>

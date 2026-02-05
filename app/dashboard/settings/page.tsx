@@ -37,7 +37,8 @@ export default function SettingsPage() {
         twilioSid: "",
         twilioToken: "",
         elevenLabsKey: "",
-        heyGenKey: ""
+        heyGenKey: "",
+        googlePlacesKey: ""
     });
 
     useEffect(() => {
@@ -146,6 +147,7 @@ export default function SettingsPage() {
                 twilioToken: "",
                 elevenLabsKey: "",
                 heyGenKey: "",
+                googlePlacesKey: "",
             });
             await refreshSecrets();
             toast.success("API keys saved securely in Secret Manager");
@@ -193,7 +195,7 @@ export default function SettingsPage() {
             <div className="max-w-4xl mx-auto space-y-8">
                 <div>
                     <h1 className="text-3xl font-bold text-white">Settings</h1>
-                    <p className="text-zinc-400">Manage your agency identity and integrations</p>
+                    <p className="text-zinc-400">Manage your lead engine profile and outreach stack</p>
                 </div>
 
                 <Tabs defaultValue="identity" className="w-full">
@@ -206,8 +208,8 @@ export default function SettingsPage() {
                     <TabsContent value="identity">
                         <Card className="bg-zinc-950 border-zinc-800">
                             <CardHeader>
-                                <CardTitle>Agency Profile</CardTitle>
-                                <CardDescription>Used by AI to personalize outreach.</CardDescription>
+                                <CardTitle>Lead Engine Profile</CardTitle>
+                                <CardDescription>Used by AI to personalize lead outreach.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
@@ -264,7 +266,7 @@ export default function SettingsPage() {
                     <TabsContent value="integrations">
                         <Card className="bg-zinc-950 border-zinc-800">
                             <CardHeader>
-                                <CardTitle>API Configuration</CardTitle>
+                                <CardTitle>Outreach API Configuration</CardTitle>
                                 <CardDescription>Your keys are stored securely in Secret Manager.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-6">
@@ -323,6 +325,25 @@ export default function SettingsPage() {
                                             onChange={e => setApiKeys({ ...apiKeys, openaiKey: e.target.value })}
                                         />
                                     </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <Label className="flex justify-between">
+                                        Google Places API Key
+                                        {renderSecretBadge(secretStatus.googlePlacesKey)}
+                                    </Label>
+                                    <div className="relative">
+                                        <Key className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                                        <Input
+                                            type="password"
+                                            className="pl-9 bg-zinc-900 border-zinc-700"
+                                            placeholder="AIza..."
+                                            value={apiKeys.googlePlacesKey}
+                                            onChange={e => setApiKeys({ ...apiKeys, googlePlacesKey: e.target.value })}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-zinc-500">
+                                        Enables live lead sourcing from Google Places.
+                                    </p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">

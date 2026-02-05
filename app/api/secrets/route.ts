@@ -14,6 +14,7 @@ const bodySchema = z.object({
       twilioToken: z.string().trim().min(1).optional(),
       elevenLabsKey: z.string().trim().min(1).optional(),
       heyGenKey: z.string().trim().min(1).optional(),
+      googlePlacesKey: z.string().trim().min(1).optional(),
     })
     .optional(),
   idempotencyKey: z.string().optional(),

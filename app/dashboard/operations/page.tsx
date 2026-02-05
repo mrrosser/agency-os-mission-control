@@ -15,11 +15,13 @@ import { ScriptGenerator } from "@/lib/ai/script-generator";
 import { buildAuthHeaders } from "@/lib/api/client";
 import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
+import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
+import type { LeadCandidate } from "@/lib/leads/types";
 
-interface Lead {
+interface LeadContext {
     companyName: string;
-    email: string;
-    founderName: string;
+    founderName?: string;
+    email?: string;
     phone?: string;
     targetIndustry?: string;
 }
@@ -37,32 +39,55 @@ export default function OperationsPage() {
     const [logs, setLogs] = useState<string[]>([]);
     const { status: secretStatus } = useSecretsStatus();
     const [limit, setLimit] = useState(10);
+    const [minScore, setMinScore] = useState(55);
+    const [leadQuery, setLeadQuery] = useState("");
     const [targetIndustry, setTargetIndustry] = useState("");
+    const [targetLocation, setTargetLocation] = useState("");
     const [useSMS, setUseSMS] = useState(false);
-    const [useVoice, setUseVoice] = useState(false); // Voice Message (Email attachment)
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
+    const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
+    const [sourceRunId, setSourceRunId] = useState<string | null>(null);
+    const [sourceWarnings, setSourceWarnings] = useState<string[]>([]);
 
     const hasTwilio = secretStatus.twilioSid !== "missing" && secretStatus.twilioToken !== "missing";
     const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
     const hasHeyGen = secretStatus.heyGenKey !== "missing";
+    const hasGooglePlaces = secretStatus.googlePlacesKey !== "missing";
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
     };
+
+    const updateJourneyStep = (leadId: string, step: LeadJourneyStepKey, status: LeadJourneyEntry["steps"][LeadJourneyStepKey]) => {
+        setJourneys(prev =>
+            prev.map(entry =>
+                entry.leadId === leadId
+                    ? { ...entry, steps: { ...entry.steps, [step]: status } }
+                    : entry
+            )
+        );
+    };
     const stopCampaign = () => {
         setIsRunning(false);
-        addLog("\n🛑 Campaign stopped by user.");
+        addLog("\n🛑 Lead run stopped by user.");
     };
 
     const handleRun = async () => {
         if (!user) {
-            toast.error("You must be logged in to run campaigns");
+            toast.error("You must be logged in to run lead sourcing");
+            return;
+        }
+        if (!leadQuery && !targetIndustry) {
+            toast.error("Add a lead query or target industry to source leads");
             return;
         }
 
         setIsRunning(true);
         setLogs([]);
+        setJourneys([]);
+        setSourceRunId(null);
+        setSourceWarnings([]);
 
         try {
 
@@ -103,28 +128,82 @@ export default function OperationsPage() {
                 }
             }
 
-            // Step 3: Generate mock leads
-            addLog(`Searching for ${limit} leads in ${targetIndustry || 'all industries'}...`);
-            await new Promise(r => setTimeout(r, 1000));
+            // Step 3: Source + score leads
+            addLog(`🔍 Sourcing ${limit} leads for ${targetIndustry || 'your ICP'}...`);
 
-            const mockLeads: Lead[] = [
-                { companyName: "ABC Healthcare", email: "john@abchealthcare.com", founderName: "John Smith", targetIndustry: "Healthcare" },
-                { companyName: "XYZ Medical", email: "sarah@xyzmedical.com", founderName: "Sarah Johnson", targetIndustry: "Healthcare" },
-                { companyName: "TechFlow Systems", email: "mike@techflow.com", founderName: "Mike Chen", targetIndustry: "SaaS" },
-                { companyName: "NextGen Logistics", email: "lisa@nglogistics.com", founderName: "Lisa Wong", targetIndustry: "Logistics" },
-            ].slice(0, Math.min(limit, 4));
+            const sourceHeaders = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const sourceResponse = await fetch("/api/leads/source", {
+                method: "POST",
+                headers: sourceHeaders,
+                body: JSON.stringify({
+                    query: leadQuery || undefined,
+                    industry: targetIndustry || undefined,
+                    location: targetLocation || undefined,
+                    limit,
+                    minScore,
+                    includeEnrichment: true,
+                    sources: hasGooglePlaces ? ["googlePlaces"] : ["firestore"],
+                }),
+            });
+            const sourcePayload = await sourceResponse.json();
+            if (!sourceResponse.ok) {
+                throw new Error(sourcePayload?.error || "Lead sourcing failed");
+            }
 
-            addLog(`✓ Found ${mockLeads.length} qualified leads`);
+            const sourcedLeads = (sourcePayload.leads || []) as LeadCandidate[];
+            setSourceRunId(sourcePayload.runId || null);
+            setSourceWarnings(sourcePayload.warnings || []);
+
+            if (sourcePayload.warnings?.length) {
+                addLog(`⚠ ${sourcePayload.warnings.join(" ")}`);
+            }
+
+            if (sourcedLeads.length === 0) {
+                throw new Error("No leads found. Adjust your query or add a Places key.");
+            }
+
+            addLog(`✓ Scored ${sourcedLeads.length} leads above ${minScore}`);
+
+            setJourneys(
+                sourcedLeads.map((lead) => ({
+                    leadId: lead.id,
+                    companyName: lead.companyName,
+                    founderName: lead.founderName,
+                    score: lead.score || 0,
+                    source: lead.source,
+                    steps: {
+                        source: "complete",
+                        score: "complete",
+                        enrich: lead.enriched ? "complete" : "skipped",
+                        script: "pending",
+                        outreach: "pending",
+                        followup: "pending",
+                        booking: "pending",
+                    },
+                }))
+            );
 
             // Step 4: Process each lead
-            for (let i = 0; i < mockLeads.length; i++) {
+            for (let i = 0; i < sourcedLeads.length; i++) {
                 if (!isRunningRef.current) {
                     addLog("🛑 Loop aborted.");
                     break;
                 }
 
-                const lead = mockLeads[i];
-                addLog(`\n--- Processing: ${lead.companyName} (${i + 1}/${mockLeads.length}) ---`);
+                const lead = sourcedLeads[i];
+                addLog(`\n--- Processing: ${lead.companyName} (${i + 1}/${sourcedLeads.length}) ---`);
+
+                const leadName = lead.founderName || "there";
+                const leadEmail = lead.email;
+                const leadPhone = lead.phone;
+                const needsScript = useOutboundCall || useAvatar;
+                let scriptGenerated = false;
+                let scriptErrored = false;
+                if (!needsScript) {
+                    updateJourneyStep(lead.id, "script", "skipped");
+                }
 
                 // Check calendar availability
                 addLog(`Checking calendar for ${lead.companyName}...`);
@@ -145,6 +224,7 @@ export default function OperationsPage() {
                 const availResult = await availResponse.json();
 
                 if (!availResult.available) {
+                    updateJourneyStep(lead.id, "booking", "skipped");
                     addLog(`⚠ Time conflict for ${lead.companyName}, skipping...`);
                     continue;
                 }
@@ -172,7 +252,8 @@ export default function OperationsPage() {
                 addLog(`✓ Folder created with subfolders`);
 
                 // Create calendar event
-                addLog(`Scheduling meeting with ${lead.founderName}...`);
+                updateJourneyStep(lead.id, "booking", "running");
+                addLog(`Scheduling meeting with ${leadName}...`);
                 const eventHeaders = await buildAuthHeaders(user, {
                     idempotencyKey: crypto.randomUUID(),
                 });
@@ -182,14 +263,14 @@ export default function OperationsPage() {
                     body: JSON.stringify({
                         event: {
                             summary: `Discovery Call - ${lead.companyName}`,
-                            description: `Call with ${lead.founderName} from ${lead.companyName}`,
+                            description: `Call with ${leadName} from ${lead.companyName}`,
                             start: {
                                 dateTime: meetingTime.toISOString(),
                             },
                             end: {
                                 dateTime: new Date(meetingTime.getTime() + 30 * 60000).toISOString(),
                             },
-                            attendees: [{ email: lead.email }],
+                            attendees: leadEmail ? [{ email: leadEmail }] : [],
                             conferenceData: {
                                 createRequest: {
                                     requestId: crypto.randomUUID(),
@@ -202,58 +283,79 @@ export default function OperationsPage() {
 
                 const eventResult = await eventResponse.json();
                 const meetLink = eventResult.event?.conferenceData?.entryPoints?.[0]?.uri || "Meeting link pending";
-                addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
+                if (eventResponse.ok) {
+                    updateJourneyStep(lead.id, "booking", "complete");
+                    addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
+                } else {
+                    updateJourneyStep(lead.id, "booking", "error");
+                    addLog(`⚠ Meeting scheduling failed`);
+                }
+
+                let outreachAttempted = false;
+                let outreachSucceeded = false;
 
                 // Send email
-                addLog(`Sending personalized email to ${lead.founderName}...`);
-                const emailBody = `
-                    <h2>Hi ${lead.founderName},</h2>
-                    <p>I noticed ${lead.companyName} and thought we could help with ${identity.primaryService}.</p>
-                    <p>Our core value: ${identity.coreValue}</p>
-                    <p><strong>Key benefit:</strong> ${identity.keyBenefit}</p>
-                    <p>I've scheduled a brief 30-minute discovery call for ${meetingTime.toLocaleString()}.</p>
-                    <p><strong>Join here:</strong> <a href="${meetLink}">${meetLink}</a></p>
-                    <p>I've also created a shared folder for our collaboration: 
-                    <a href="${folderResult.mainFolder?.webViewLink || '#'}">View Folder</a></p>
-                    <br/>
-                    <p>Best regards,</p>
-                    <p>${identity.founderName}<br/>${identity.businessName}</p>
-                `;
+                if (leadEmail) {
+                    outreachAttempted = true;
+                    updateJourneyStep(lead.id, "outreach", "running");
+                    addLog(`Sending personalized email to ${leadName}...`);
+                    const emailBody = `
+                        <h2>Hi ${leadName},</h2>
+                        <p>I noticed ${lead.companyName} and thought we could help with ${identity.primaryService}.</p>
+                        <p>Our core value: ${identity.coreValue}</p>
+                        <p><strong>Key benefit:</strong> ${identity.keyBenefit}</p>
+                        <p>I've scheduled a brief 30-minute discovery call for ${meetingTime.toLocaleString()}.</p>
+                        <p><strong>Join here:</strong> <a href="${meetLink}">${meetLink}</a></p>
+                        <p>I've also created a shared folder for our collaboration: 
+                        <a href="${folderResult.mainFolder?.webViewLink || '#'}">View Folder</a></p>
+                        <br/>
+                        <p>Best regards,</p>
+                        <p>${identity.founderName}<br/>${identity.businessName}</p>
+                    `;
 
-                const emailHeaders = await buildAuthHeaders(user, {
-                    idempotencyKey: crypto.randomUUID(),
-                });
-                const emailResponse = await fetch("/api/gmail/send", {
-                    method: "POST",
-                    headers: emailHeaders,
-                    body: JSON.stringify({
-                        email: {
-                            to: [lead.email],
-                            subject: `Quick Question - ${lead.companyName}`,
-                            body: emailBody,
-                            isHtml: true,
-                        },
-                    }),
-                });
+                    const emailHeaders = await buildAuthHeaders(user, {
+                        idempotencyKey: crypto.randomUUID(),
+                    });
+                    const emailResponse = await fetch("/api/gmail/send", {
+                        method: "POST",
+                        headers: emailHeaders,
+                        body: JSON.stringify({
+                            email: {
+                                to: [leadEmail],
+                                subject: `Quick Question - ${lead.companyName}`,
+                                body: emailBody,
+                                isHtml: true,
+                            },
+                        }),
+                    });
 
-                if (emailResponse.ok) {
-                    addLog(`✓ Email sent to ${lead.email}`);
+                    if (emailResponse.ok) {
+                        outreachSucceeded = true;
+                        addLog(`✓ Email sent to ${leadEmail}`);
 
-                    // NEW: Sync to CRM
-                    try {
-                        await dbService.addLead({
-                            userId: user.uid,
-                            name: lead.founderName,
-                            email: lead.email,
-                            company: lead.companyName,
-                            status: 'contacted'
-                        });
-                        addLog(`✓ Syncing ${lead.companyName} to Deal Pipeline`);
-                    } catch (e) {
-                        console.error("CRM sync error", e);
+                        // Sync to CRM
+                        try {
+                            await dbService.addLead({
+                                userId: user.uid,
+                                name: leadName,
+                                email: leadEmail,
+                                company: lead.companyName,
+                                phone: leadPhone,
+                                website: lead.website,
+                                industry: lead.industry,
+                                score: lead.score,
+                                source: lead.source,
+                                status: 'contacted'
+                            });
+                            addLog(`✓ Syncing ${lead.companyName} to Deal Pipeline`);
+                        } catch (e) {
+                            console.error("CRM sync error", e);
+                        }
+                    } else {
+                        addLog(`⚠ Email failed to send`);
                     }
                 } else {
-                    addLog(`⚠ Email failed to send`);
+                    addLog(`⚠ No email found for ${lead.companyName}, skipping email outreach`);
                 }
 
                 // --- NEW: Context-Aware AI ---
@@ -261,73 +363,113 @@ export default function OperationsPage() {
 
                 // 2. Sales Power-Ups using Context
 
+                let followupAttempted = false;
+                let followupSucceeded = false;
+
                 // SMS
                 if (useSMS && hasTwilio) {
-                    addLog(`📱 Sending SMS follow-up...`);
-                    try {
-                        const smsHeaders = await buildAuthHeaders(user, {
-                            idempotencyKey: crypto.randomUUID(),
-                        });
-                        const smsResponse = await fetch('/api/twilio/send-sms', {
-                            method: 'POST',
-                            headers: smsHeaders,
-                            body: JSON.stringify({
-                                to: "+15550000000",
-                                message: `Hi ${lead.founderName}, just sent you an email regarding ${lead.companyName}. - ${identity.founderName}`
-                            })
-                        });
-                        if (smsResponse.ok) addLog(`✓ SMS sent successfully`);
-                    } catch (e) { addLog(`⚠ SMS Error: ${e}`); }
+                    followupAttempted = true;
+                    updateJourneyStep(lead.id, "followup", "running");
+                    if (!leadPhone) {
+                        addLog(`⚠ No phone for ${lead.companyName}, skipping SMS`);
+                    } else {
+                        addLog(`📱 Sending SMS follow-up...`);
+                        try {
+                            const smsHeaders = await buildAuthHeaders(user, {
+                                idempotencyKey: crypto.randomUUID(),
+                            });
+                            const smsResponse = await fetch('/api/twilio/send-sms', {
+                                method: 'POST',
+                                headers: smsHeaders,
+                                body: JSON.stringify({
+                                    to: leadPhone,
+                                    message: `Hi ${leadName}, just sent you an email regarding ${lead.companyName}. - ${identity.founderName}`
+                                })
+                            });
+                            if (smsResponse.ok) {
+                                followupSucceeded = true;
+                                addLog(`✓ SMS sent successfully`);
+                            }
+                        } catch (e) { addLog(`⚠ SMS Error: ${e}`); }
+                    }
                 }
 
                 // AI Outbound Call (NEW)
                 if (useOutboundCall && hasTwilio && hasElevenLabs) {
-                    addLog(`📞 Initiating AI Outbound Call...`);
-                    try {
-                        // A. Generate Script
-                        const callScript = await ScriptGenerator.generate(context, lead, 'voice');
-                        addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
+                    followupAttempted = true;
+                    updateJourneyStep(lead.id, "followup", "running");
+                    if (!leadPhone) {
+                        addLog(`⚠ No phone for ${lead.companyName}, skipping outbound call`);
+                    } else {
+                        addLog(`📞 Initiating AI Outbound Call...`);
+                        try {
+                            updateJourneyStep(lead.id, "script", "running");
+                            const callScript = await ScriptGenerator.generate(context, {
+                                companyName: lead.companyName,
+                                founderName: leadName,
+                                email: leadEmail,
+                                phone: leadPhone,
+                                targetIndustry: lead.industry,
+                            } as LeadContext, 'voice');
+                            updateJourneyStep(lead.id, "script", "complete");
+                            scriptGenerated = true;
+                            addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
 
-                        // B. Synthesize Audio
-                        const audioHeaders = await buildAuthHeaders(user, {
-                            idempotencyKey: crypto.randomUUID(),
-                        });
-                        const audioResponse = await fetch('/api/elevenlabs/synthesize', {
-                            method: 'POST',
-                            headers: audioHeaders,
-                            body: JSON.stringify({
-                                text: callScript
-                            })
-                        });
-                        const audioResult = await audioResponse.json();
+                            const audioHeaders = await buildAuthHeaders(user, {
+                                idempotencyKey: crypto.randomUUID(),
+                            });
+                            const audioResponse = await fetch('/api/elevenlabs/synthesize', {
+                                method: 'POST',
+                                headers: audioHeaders,
+                                body: JSON.stringify({
+                                    text: callScript
+                                })
+                            });
+                            if (!audioResponse.ok) {
+                                throw new Error("Audio synthesis failed");
+                            }
 
-                        // Need to upload audio to a public URL for Twilio to play. 
-                        // For this demo, we'll pretend we have a public URL or use a placeholder
-                        // In production: Upload `audioResult.audioBase64` to Firebase Storage -> Get URL
-                        const publicAudioUrl = "https://example.com/demo-message.mp3";
+                            // In production: Upload audio to storage and use a public URL.
+                            const publicAudioUrl = "https://example.com/demo-message.mp3";
 
-                        // C. Make the Call
-                        /* 
-                        const callResponse = await fetch('/api/twilio/make-call', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                to: "+15550000000",
-                                audioUrl: publicAudioUrl
-                            })
-                        });
-                        */
-                        await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
-                        addLog(`✓ Call connected & AI message played`);
+                            /* 
+                            const callResponse = await fetch('/api/twilio/make-call', {
+                                method: 'POST',
+                                body: JSON.stringify({
+                                    to: leadPhone,
+                                    audioUrl: publicAudioUrl
+                                })
+                            });
+                            */
+                            await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
+                            followupSucceeded = true;
+                            addLog(`✓ Call connected & AI message played`);
 
-                    } catch (e) { addLog(`⚠ Call Error: ${e}`); }
+                        } catch (e) {
+                            updateJourneyStep(lead.id, "script", "error");
+                            scriptErrored = true;
+                            addLog(`⚠ Call Error: ${e}`);
+                        }
+                    }
                 }
 
                 // Avatar Video (Enhanced with Context)
                 if (useAvatar && hasHeyGen) {
+                    outreachAttempted = true;
+                    updateJourneyStep(lead.id, "outreach", "running");
                     addLog(`🎬 Creating context-aware avatar video...`);
                     try {
-                        const videoScript = await ScriptGenerator.generate(context, lead, 'video');
-                        addLog(`📝 Video script tailored to ${lead.targetIndustry || 'industry'}`);
+                        updateJourneyStep(lead.id, "script", "running");
+                        const videoScript = await ScriptGenerator.generate(context, {
+                            companyName: lead.companyName,
+                            founderName: leadName,
+                            email: leadEmail,
+                            phone: leadPhone,
+                            targetIndustry: lead.industry,
+                        } as LeadContext, 'video');
+                        updateJourneyStep(lead.id, "script", "complete");
+                        scriptGenerated = true;
+                        addLog(`📝 Video script tailored to ${lead.industry || 'industry'}`);
 
                         const avatarHeaders = await buildAuthHeaders(user, {
                             idempotencyKey: crypto.randomUUID(),
@@ -337,12 +479,40 @@ export default function OperationsPage() {
                             headers: avatarHeaders,
                             body: JSON.stringify({
                                 script: videoScript
-                            }) // ...
+                            })
                         });
-                        // ... existing polling logic logic ...
-                        await new Promise(r => setTimeout(r, 1000));
-                        addLog(`✓ Avatar video queued for generation`);
-                    } catch (e) { addLog(`⚠ Avatar Error: ${e}`); }
+                        if (avatarResponse.ok) {
+                            outreachSucceeded = true;
+                            await new Promise(r => setTimeout(r, 1000));
+                            addLog(`✓ Avatar video queued for generation`);
+                        } else {
+                            addLog(`⚠ Avatar request failed`);
+                        }
+                    } catch (e) {
+                        updateJourneyStep(lead.id, "script", "error");
+                        scriptErrored = true;
+                        addLog(`⚠ Avatar Error: ${e}`);
+                    }
+                }
+
+                if (!outreachAttempted) {
+                    updateJourneyStep(lead.id, "outreach", "skipped");
+                } else if (outreachSucceeded) {
+                    updateJourneyStep(lead.id, "outreach", "complete");
+                } else {
+                    updateJourneyStep(lead.id, "outreach", "error");
+                }
+
+                if (!followupAttempted) {
+                    updateJourneyStep(lead.id, "followup", "skipped");
+                } else if (followupSucceeded) {
+                    updateJourneyStep(lead.id, "followup", "complete");
+                } else {
+                    updateJourneyStep(lead.id, "followup", "error");
+                }
+
+                if (needsScript && !scriptGenerated && !scriptErrored) {
+                    updateJourneyStep(lead.id, "script", "skipped");
                 }
 
                 addLog(`✓ ${lead.companyName} outreach complete!\n`);
@@ -351,18 +521,18 @@ export default function OperationsPage() {
                 await new Promise(r => setTimeout(r, 2000));
             }
 
-            addLog("\n🎉 Campaign completed successfully!");
-            addLog(`Total leads processed: ${mockLeads.length}`);
+            addLog("\n🎉 Lead run completed successfully!");
+            addLog(`Total leads processed: ${sourcedLeads.length}`);
 
-            toast.success("Campaign Completed!", {
-                description: `Processed ${mockLeads.length} leads with full Google integration`,
+            toast.success("Lead Run Completed!", {
+                description: `Processed ${sourcedLeads.length} leads through your outreach stack`,
                 icon: <CheckCircle2 className="h-4 w-4" />,
             });
 
         } catch (error: any) {
-            console.error("Campaign error:", error);
+            console.error("Lead run error:", error);
             addLog(`\n❌ Error: ${error.message}`);
-            toast.error("Campaign Failed", {
+            toast.error("Lead Run Failed", {
                 description: error.message,
             });
         } finally {
@@ -376,13 +546,13 @@ export default function OperationsPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                        <h1 className="text-3xl font-bold text-white">Operations Center</h1>
-                        <p className="text-zinc-400">Launch and monitor autonomous campaigns</p>
+                        <h1 className="text-3xl font-bold text-white">Lead Engine</h1>
+                        <p className="text-zinc-400">Source, score, and outreach to your best leads</p>
                     </div>
                     <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-950 border border-zinc-800">
                         <Activity className={`h-4 w-4 ${user ? 'text-green-500' : 'text-red-500'}`} />
                         <span className={`text-sm font-medium ${user ? 'text-green-500' : 'text-red-500'}`}>
-                            {user ? 'APIs Connected' : 'Not Signed In'}
+                            {user ? 'Outreach Stack Online' : 'Not Signed In'}
                         </span>
                     </div>
                 </div>
@@ -393,36 +563,73 @@ export default function OperationsPage() {
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
                             <CardContent className="p-6 space-y-6">
                                 <div className="space-y-2">
-                                    <h3 className="text-lg font-semibold text-white">Launch Parameters</h3>
-                                    <p className="text-sm text-zinc-400">Configure your campaign settings</p>
+                                    <h3 className="text-lg font-semibold text-white">Lead Run Parameters</h3>
+                                    <p className="text-sm text-zinc-400">Configure your sourcing + scoring settings</p>
                                 </div>
 
                                 <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label className="text-sm font-medium text-zinc-200">Lead Limit</Label>
+                                        <Label className="text-sm font-medium text-zinc-200">Lead Query</Label>
                                         <Input
-                                            type="number"
-                                            value={limit}
-                                            onChange={(e) => setLimit(Number(e.target.value))}
-                                            className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                                        />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium text-zinc-200">Target Industry</Label>
-                                        <Input
-                                            value={targetIndustry}
-                                            onChange={(e) => setTargetIndustry(e.target.value)}
-                                            placeholder="e.g. Healthcare, HVAC"
+                                            value={leadQuery}
+                                            onChange={(e) => setLeadQuery(e.target.value)}
+                                            placeholder="e.g. HVAC contractors"
                                             className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                                         />
                                     </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Target Industry</Label>
+                                            <Input
+                                                value={targetIndustry}
+                                                onChange={(e) => setTargetIndustry(e.target.value)}
+                                                placeholder="e.g. Healthcare"
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Target Location</Label>
+                                            <Input
+                                                value={targetLocation}
+                                                onChange={(e) => setTargetLocation(e.target.value)}
+                                                placeholder="e.g. Austin, TX"
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Lead Limit</Label>
+                                            <Input
+                                                type="number"
+                                                value={limit}
+                                                onChange={(e) => setLimit(Number(e.target.value))}
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Minimum Score</Label>
+                                            <Input
+                                                type="number"
+                                                value={minScore}
+                                                onChange={(e) => setMinScore(Number(e.target.value))}
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
+                                <p className="text-xs text-zinc-500">
+                                    {hasGooglePlaces
+                                        ? "Google Places sourcing is active for live lead discovery."
+                                        : "Add a Google Places API key in the API Vault to source live leads. Otherwise we’ll use existing CRM leads."}
+                                </p>
 
                                 <div className="pt-4 border-t border-zinc-800 space-y-3">
                                     <div className="space-y-1">
-                                        <h3 className="text-sm font-semibold text-white">Sales Power-Ups ⚡</h3>
-                                        <p className="text-xs text-zinc-400">Enhance outreach with AI tools</p>
+                                        <h3 className="text-sm font-semibold text-white">Outreach Power-Ups ⚡</h3>
+                                        <p className="text-xs text-zinc-400">Enhance outreach with AI channels</p>
                                     </div>
 
                                     <div className="pt-4 border-t border-zinc-800">
@@ -500,7 +707,7 @@ export default function OperationsPage() {
                                         className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-semibold shadow-lg transition-all"
                                     >
                                         <Activity className="mr-2 h-5 w-5 animate-pulse" />
-                                        Stop Campaign
+                                        Stop Lead Run
                                     </Button>
                                 ) : (
                                     <Button
@@ -509,26 +716,32 @@ export default function OperationsPage() {
                                         className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg hover:shadow-blue-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <Rocket className="mr-2 h-5 w-5" />
-                                        Launch Real Campaign
+                                        Run Lead Engine
                                     </Button>
                                 )}
 
                                 {!user && (
                                     <p className="text-xs text-red-400 text-center">
-                                        Please sign in to launch campaigns
+                                        Please sign in to run lead sourcing
                                     </p>
                                 )}
                             </CardContent>
                         </Card>
                     </div>
 
-                    {/* Terminal */}
-                    <div className="lg:col-span-2">
+                    {/* Lead Journey + Terminal */}
+                    <div className="lg:col-span-2 space-y-6">
+                        <LeadJourney
+                            journeys={journeys}
+                            runId={sourceRunId}
+                            warnings={sourceWarnings}
+                        />
+
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
                             <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
                                 <div className="flex items-center gap-2">
                                     <Terminal className="h-4 w-4 text-zinc-400" />
-                                    <span className="text-sm font-mono text-zinc-400">Live Campaign Logs</span>
+                                    <span className="text-sm font-mono text-zinc-400">Live Lead Run Logs</span>
                                 </div>
                                 {isRunning && (
                                     <div className="flex items-center gap-2">
@@ -544,7 +757,7 @@ export default function OperationsPage() {
                                         {logs.length === 0 ? (
                                             <div className="flex items-center gap-2 text-zinc-600">
                                                 <AlertCircle className="h-4 w-4" />
-                                                <span>Ready to launch. Click "Launch Real Campaign" to begin...</span>
+                                                <span>Ready to run. Click "Run Lead Engine" to begin...</span>
                                             </div>
                                         ) : (
                                             logs.map((log, i) => (

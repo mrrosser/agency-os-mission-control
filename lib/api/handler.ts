@@ -25,7 +25,7 @@ export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
   options?: { route: string }
 ) {
-  return async function (request: NextRequest, context: RouteContext) {
+  return async function (request: NextRequest, context?: RouteContext) {
     const correlationId = getCorrelationId(request);
     const log = createLogger({ correlationId, route: options?.route });
     const path = request.nextUrl?.pathname || "unknown";
@@ -33,7 +33,7 @@ export function withApiHandler(
     log.info("request.received", { method: request.method, path });
 
     try {
-      const params = await context.params;
+      const params = context?.params ? await context.params : {};
       const response = await handler({
         request,
         correlationId,

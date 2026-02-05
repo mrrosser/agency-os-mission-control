@@ -12,9 +12,9 @@ export default function IntegrationsPage() {
             <div className="max-w-6xl mx-auto space-y-8">
                 {/* Header */}
                 <div className="space-y-2">
-                    <h1 className="text-3xl font-bold text-white">🧪 Integration Testing</h1>
+                    <h1 className="text-3xl font-bold text-white">🧪 Outreach Integrations</h1>
                     <p className="text-zinc-400">
-                        Test your Twilio, ElevenLabs, and HeyGen integrations
+                        Verify the channels your lead engine uses for outreach
                     </p>
                 </div>
 
@@ -30,7 +30,7 @@ export default function IntegrationsPage() {
                             <h3 className="text-lg font-semibold text-white">SMS</h3>
                         </div>
                         <p className="text-sm text-zinc-400">
-                            Send text messages to leads via Twilio
+                            Send SMS follow-ups to qualified leads
                         </p>
                     </div>
 
@@ -42,7 +42,7 @@ export default function IntegrationsPage() {
                             <h3 className="text-lg font-semibold text-white">Voice</h3>
                         </div>
                         <p className="text-sm text-zinc-400">
-                            Generate AI voice audio with ElevenLabs
+                            Generate AI voice for outbound calls
                         </p>
                     </div>
 
@@ -54,7 +54,7 @@ export default function IntegrationsPage() {
                             <h3 className="text-lg font-semibold text-white">Avatar</h3>
                         </div>
                         <p className="text-sm text-zinc-400">
-                            Create personalized videos with HeyGen
+                            Create personalized avatar videos for outreach
                         </p>
                     </div>
                 </div>
@@ -76,7 +76,7 @@ export default function IntegrationsPage() {
                         <li>Configure your API keys in the <strong className="text-white">API Vault</strong></li>
                         <li>Test each integration using the components above</li>
                         <li>Check the browser console (F12) for detailed logs</li>
-                        <li>Use these integrations in your Operations campaigns</li>
+                        <li>Use these integrations in your Lead Engine runs</li>
                     </ol>
                 </div>
             </div>

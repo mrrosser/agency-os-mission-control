@@ -11,6 +11,7 @@ import { Mic, Loader2, Download, Play, Pause } from "lucide-react";
 import { useRef } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders } from "@/lib/api/client";
+import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 const VOICES = [
     { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel - Professional Female" },
@@ -21,6 +22,7 @@ const VOICES = [
 
 export function VoiceGenerator() {
     const { user } = useAuth();
+    const { status: secretStatus } = useSecretsStatus();
     const [text, setText] = useState("");
     const [voiceId, setVoiceId] = useState(VOICES[0].id);
     const [generating, setGenerating] = useState(false);
@@ -34,9 +36,9 @@ export function VoiceGenerator() {
             return;
         }
 
-        const config = JSON.parse(localStorage.getItem("mission_control_secrets") || "{}");
+        const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
 
-        if (!config.elevenLabsKey) {
+        if (!hasElevenLabs) {
             toast.error("ElevenLabs API key not configured", {
                 description: "Go to API Vault to add your ElevenLabs key"
             });
@@ -58,7 +60,6 @@ export function VoiceGenerator() {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                    elevenLabsKey: config.elevenLabsKey,
                     text: text,
                     voiceId: voiceId
                 })

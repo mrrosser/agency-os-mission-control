@@ -10,11 +10,13 @@ import { toast } from "sonner";
 import { Video, Loader2, ExternalLink, Download } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders } from "@/lib/api/client";
+import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 type VideoStatus = 'idle' | 'creating' | 'processing' | 'completed' | 'failed';
 
 export function AvatarCreator() {
     const { user } = useAuth();
+    const { status: secretStatus } = useSecretsStatus();
     const [script, setScript] = useState("");
     const [status, setStatus] = useState<VideoStatus>('idle');
     const [videoId, setVideoId] = useState<string | null>(null);
@@ -27,9 +29,9 @@ export function AvatarCreator() {
             return;
         }
 
-        const config = JSON.parse(localStorage.getItem("mission_control_secrets") || "{}");
+        const hasHeyGen = secretStatus.heyGenKey !== "missing";
 
-        if (!config.heyGenKey) {
+        if (!hasHeyGen) {
             toast.error("HeyGen API key not configured", {
                 description: "Go to API Vault to add your HeyGen key"
             });
@@ -52,7 +54,6 @@ export function AvatarCreator() {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                    heyGenKey: config.heyGenKey,
                     script: script
                 })
             });
@@ -69,7 +70,7 @@ export function AvatarCreator() {
                 });
 
                 // Start polling for status
-                pollVideoStatus(result.videoId, config.heyGenKey);
+                pollVideoStatus(result.videoId);
             } else {
                 setStatus('failed');
                 toast.error("Failed to create avatar", {
@@ -85,7 +86,7 @@ export function AvatarCreator() {
         }
     };
 
-    const pollVideoStatus = async (vId: string, apiKey: string) => {
+    const pollVideoStatus = async (vId: string) => {
         const maxAttempts = 60; // 10 minutes max (10s intervals)
         let attempts = 0;
 
@@ -99,7 +100,6 @@ export function AvatarCreator() {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
-                        heyGenKey: apiKey,
                         videoId: vId
                     })
                 });

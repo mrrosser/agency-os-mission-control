@@ -9,7 +9,8 @@ export type SecretKey =
   | "twilioSid"
   | "twilioToken"
   | "elevenLabsKey"
-  | "heyGenKey";
+  | "heyGenKey"
+  | "googlePlacesKey";
 
 export type SecretStatus = Record<SecretKey, "secret" | "env" | "missing">;
 
@@ -19,6 +20,7 @@ const EMPTY_STATUS: SecretStatus = {
   twilioToken: "missing",
   elevenLabsKey: "missing",
   heyGenKey: "missing",
+  googlePlacesKey: "missing",
 };
 
 export function useSecretsStatus() {

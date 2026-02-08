@@ -8,6 +8,7 @@ import { Loader2, CheckCircle2, HardDrive } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
+import { useRouter } from "next/navigation";
 
 interface DriveFile {
     id: string;
@@ -18,9 +19,11 @@ interface DriveFile {
 
 export function KnowledgeBase() {
     const { user } = useAuth();
+    const router = useRouter();
     const [files, setFiles] = useState<DriveFile[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [notConnected, setNotConnected] = useState(false);
 
     useEffect(() => {
         // Load selected IDs from local storage
@@ -30,9 +33,16 @@ export function KnowledgeBase() {
         }
     }, []);
 
+    useEffect(() => {
+        if (!user) return;
+        fetchFiles();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user]);
+
     const fetchFiles = async () => {
         if (!user) return;
         setLoading(true);
+        setNotConnected(false);
         try {
             const headers = await buildAuthHeaders(user);
             const response = await fetch("/api/drive/list", {
@@ -40,6 +50,13 @@ export function KnowledgeBase() {
                 headers,
                 body: JSON.stringify({ pageSize: 100 }),
             });
+
+            if (response.status === 401 || response.status === 403) {
+                setNotConnected(true);
+                setFiles([]);
+                return;
+            }
+
             const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
             if (!response.ok) {
                 const cid = getResponseCorrelationId(response);
@@ -110,14 +127,29 @@ export function KnowledgeBase() {
                 <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
                     {files.length === 0 && !loading && (
                         <div className="text-center py-8 text-zinc-500 text-sm">
-                            <p>No documents found.</p>
-                            <Button
-                                variant="link"
-                                onClick={fetchFiles}
-                                className="text-blue-500"
-                            >
-                                Connect Google Drive
-                            </Button>
+                            {notConnected ? (
+                                <>
+                                    <p>Google Drive is not connected.</p>
+                                    <Button
+                                        variant="link"
+                                        onClick={() => router.push("/dashboard/integrations")}
+                                        className="text-blue-500"
+                                    >
+                                        Go to Integrations
+                                    </Button>
+                                </>
+                            ) : (
+                                <>
+                                    <p>No documents found.</p>
+                                    <Button
+                                        variant="link"
+                                        onClick={fetchFiles}
+                                        className="text-blue-500"
+                                    >
+                                        Refresh Drive
+                                    </Button>
+                                </>
+                            )}
                         </div>
                     )}
 

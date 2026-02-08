@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, readApiJson } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -19,8 +19,11 @@ export function GoogleWorkspaceConnect() {
     try {
       const headers = await buildAuthHeaders(user);
       const response = await fetch("/api/google/status", { headers });
-      const result = await response.json();
-      setConnected(Boolean(result.connected));
+      const result = await readApiJson<{ connected?: boolean; error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to check Google connection");
+      }
+      setConnected(Boolean(result?.connected));
     } catch (error: any) {
       toast.error("Failed to check Google connection", {
         description: error.message,
@@ -47,7 +50,7 @@ export function GoogleWorkspaceConnect() {
         body: JSON.stringify({ returnTo: "/dashboard/integrations" }),
       });
 
-      const result = await response.json();
+      const result = await readApiJson<{ authUrl?: string; error?: string }>(response);
       if (!response.ok) {
         throw new Error(result.error || "Failed to start Google OAuth");
       }
@@ -76,8 +79,8 @@ export function GoogleWorkspaceConnect() {
         headers,
       });
       if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.error || "Failed to disconnect");
+        const result = await readApiJson<{ error?: string }>(response);
+        throw new Error(result?.error || "Failed to disconnect");
       }
       setConnected(false);
       toast.success("Google Workspace disconnected");

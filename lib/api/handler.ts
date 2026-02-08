@@ -59,11 +59,14 @@ export function withApiHandler(
         { status }
       );
       response.headers.set("x-correlation-id", correlationId);
-      log.error("request.failed", {
-        status,
-        path,
-        error: sanitizeError(error),
-      });
+
+      // 4xx responses are expected (validation/auth), so log at warn to avoid noisy error logs.
+      const meta = { status, path, error: sanitizeError(error) };
+      if (status >= 500) {
+        log.error("request.failed", meta);
+      } else {
+        log.warn("request.failed", meta);
+      }
       return response;
     }
   };

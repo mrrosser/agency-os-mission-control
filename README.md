@@ -52,6 +52,13 @@ gcloud run services add-iam-policy-binding ssrleadflowreview \
   --member="allUsers" \
   --role="roles/run.invoker"
 ```
+- If `/api/*` intermittently returns HTML 502/503 and Cloud Run logs show memory OOM, bump the SSR service memory:
+```bash
+gcloud run services update ssrleadflowreview \
+  --project leadflow-review \
+  --region us-central1 \
+  --memory 512Mi
+```
 
 ## Tests
 ```bash

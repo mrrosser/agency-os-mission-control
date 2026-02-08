@@ -9,7 +9,7 @@ import { AnimatedList } from "@/components/ui/animated-list";
 import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, where, onSnapshot, getDocs, doc, limit, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface AnalyticsData {
     totalLeads: number;
@@ -53,10 +53,14 @@ export default function DashboardPage() {
                 method: "GET",
                 headers,
             });
+            const payload = await readApiJson<{ spaces?: Record<string, AgentSpaceStatus>; error?: string }>(response);
             if (!response.ok) {
-                throw new Error("Failed to load agent routing status");
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    payload?.error ||
+                    `Failed to load agent routing status (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-            const payload = await response.json();
             setAgentStatus(payload?.spaces || {});
         } catch (error: any) {
             setAgentStatusError(error?.message || "Unable to load agent status");

@@ -12,7 +12,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Save, Key, Building2, User, Loader2, CheckCircle2, Mail, Power } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 export default function SettingsPage() {
@@ -55,8 +55,11 @@ export default function SettingsPage() {
                 // Check Google Status
                 const headers = await buildAuthHeaders(user);
                 const res = await fetch("/api/google/status", { headers });
-                const status = await res.json();
-                setGoogleStatus({ connected: status.connected, loading: false });
+                const status = await readApiJson<{ connected?: boolean; error?: string }>(res);
+                if (!res.ok) {
+                    throw new Error(status?.error || "Failed to check Google connection");
+                }
+                setGoogleStatus({ connected: Boolean(status?.connected), loading: false });
             } catch (e) {
                 console.error("Error loading settings", e);
                 setGoogleStatus(prev => ({ ...prev, loading: false }));
@@ -76,12 +79,20 @@ export default function SettingsPage() {
                 headers,
                 body: JSON.stringify({ returnTo: window.location.pathname })
             });
-            const { authUrl } = await res.json();
+            const payload = await readApiJson<{ authUrl?: string; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(payload?.error || `Failed to start Google connection${cid ? ` cid=${cid}` : ""}`);
+            }
+            const { authUrl } = payload;
             if (authUrl) window.location.href = authUrl;
         } catch (e) {
-            toast.error("Failed to start Google connection");
-            setLoading(false);
+            toast.error("Failed to start Google connection", {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                description: (e as any)?.message || String(e),
+            });
         }
+        setLoading(false);
     };
 
     const handleDisconnectGoogle = async () => {
@@ -89,11 +100,18 @@ export default function SettingsPage() {
         setLoading(true);
         try {
             const headers = await buildAuthHeaders(user);
-            await fetch("/api/google/disconnect", { method: "POST", headers });
+            const res = await fetch("/api/google/disconnect", { method: "POST", headers });
+            if (!res.ok) {
+                const payload = await readApiJson<{ error?: string }>(res);
+                throw new Error(payload?.error || "Failed to disconnect");
+            }
             setGoogleStatus({ connected: false, loading: false });
             toast.success("Google account disconnected");
         } catch (e) {
-            toast.error("Failed to disconnect");
+            toast.error("Failed to disconnect", {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                description: (e as any)?.message || String(e),
+            });
         } finally {
             setLoading(false);
         }
@@ -136,9 +154,10 @@ export default function SettingsPage() {
                 headers,
                 body: JSON.stringify({ apiKeys: payload }),
             });
-            const result = await response.json();
+            const result = await readApiJson<{ error?: string }>(response);
             if (!response.ok) {
-                throw new Error(result?.error || "Failed to save API keys");
+                const cid = getResponseCorrelationId(response);
+                throw new Error(result?.error || `Failed to save API keys${cid ? ` cid=${cid}` : ""}`);
             }
 
             setApiKeys({

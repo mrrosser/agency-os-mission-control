@@ -37,6 +37,7 @@ firebase-debug.log
 /playwright-report/
 .playwright-profile/
 /please-review/from-root/playwright-artifacts/
+/artifacts/
 
 # review staging (generated artifacts)
 please-review/out/

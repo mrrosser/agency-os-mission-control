@@ -28,19 +28,30 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
           NEXT_TELEMETRY_DISABLED: "1"
       - name: Check Firebase service account secret
+        env:
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
         run: |
-          if [ -n "${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 }}" ]; then
+          if [ -n "$FIREBASE_SA" ]; then
             echo "FIREBASE_SA_SET=1" >> $GITHUB_ENV
           else
             echo "FIREBASE_SA_SET=0" >> $GITHUB_ENV
           fi
       - name: Firebase preview deploy (skips if service account secret missing)
         if: ${{ env.FIREBASE_SA_SET == '1' }}
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969 }}
-          projectId: vibecheck-ik969
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+        run: |
+          set -euo pipefail
+          SA_PATH="$RUNNER_TEMP/firebase-sa.json"
+          printf '%s' "$FIREBASE_SA" > "$SA_PATH"
+          export GOOGLE_APPLICATION_CREDENTIALS="$SA_PATH"
+
+          CHANNEL_ID="pr-${{ github.event.number }}"
+          npx -y firebase-tools@15.5.1 hosting:channel:deploy "$CHANNEL_ID" \
+            --project leadflow-review \
+            --expires 7d \
+            --non-interactive
       - name: Firebase preview deploy skipped (missing secret)
         if: ${{ env.FIREBASE_SA_SET != '1' }}
-        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_VIBECHECK_IK969; preview deploy skipped."
+        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; preview deploy skipped."

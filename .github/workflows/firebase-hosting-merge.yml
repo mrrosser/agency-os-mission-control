@@ -36,15 +36,20 @@ jobs:
           fi
       - name: Firebase deploy (skips if service account secret missing)
         if: ${{ env.FIREBASE_SA_SET == '1' }}
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
-          channelId: live
-          projectId: leadflow-review
-          force: true
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
+          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+        run: |
+          set -euo pipefail
+          SA_PATH="$RUNNER_TEMP/firebase-sa.json"
+          printf '%s' "$FIREBASE_SA" > "$SA_PATH"
+          export GOOGLE_APPLICATION_CREDENTIALS="$SA_PATH"
+
+          npx -y firebase-tools@15.5.1 deploy \
+            --only hosting \
+            --project leadflow-review \
+            --force \
+            --non-interactive
       - name: Firebase deploy skipped (missing secret)
         if: ${{ env.FIREBASE_SA_SET != '1' }}
         run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; deploy skipped."

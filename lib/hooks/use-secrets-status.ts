@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 export type SecretKey =
   | "openaiKey"
@@ -41,9 +41,10 @@ export function useSecretsStatus() {
     try {
       const headers = await buildAuthHeaders(user);
       const response = await fetch("/api/secrets", { headers });
-      const payload = await response.json();
+      const payload = await readApiJson<{ status?: SecretStatus; error?: string }>(response);
       if (!response.ok) {
-        throw new Error(payload?.error || "Failed to load secrets status");
+        const cid = getResponseCorrelationId(response);
+        throw new Error(payload?.error || `Failed to load secrets status${cid ? ` cid=${cid}` : ""}`);
       }
       setStatus(payload.status || EMPTY_STATUS);
     } catch (err: any) {

@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { MessageSquare, Send, Loader2, CheckCircle2 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 interface SentMessage {
@@ -73,37 +73,44 @@ export function SmsSender() {
                 })
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{
+                success?: boolean;
+                messageSid?: string;
+                status?: string;
+                error?: string;
+            }>(response);
 
-            if (result.success) {
+            if (response.ok && result.success) {
                 toast.success("SMS Sent Successfully", {
                     description: `Message ID: ${result.messageSid}`,
                     icon: <CheckCircle2 className="h-4 w-4" />
                 });
 
                 // Add to history
-                setHistory([
+                setHistory((prev) => [
                     {
                         to,
                         message,
                         timestamp: new Date(),
-                        status: result.status
+                        status: result.status || "sent",
                     },
-                    ...history.slice(0, 4) // Keep last 5
+                    ...prev.slice(0, 4), // Keep last 5
                 ]);
 
                 // Clear form
                 setTo("");
                 setMessage("");
             } else {
-                toast.error("Failed to send SMS", {
-                    description: result.error
-                });
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to send SMS (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("SMS error:", error);
-            toast.error("Network error", {
-                description: "Could not connect to SMS service"
+            toast.error("Failed to send SMS", {
+                description: error?.message || "Could not send message"
             });
         } finally {
             setSending(false);

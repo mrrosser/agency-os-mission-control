@@ -9,7 +9,7 @@ import { GmailMessage } from "@/lib/google/gmail";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface EmailDetailProps {
     message: GmailMessage;
@@ -47,8 +47,12 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
             });
 
             if (!res.ok) {
-                const err = await res.json();
-                throw new Error(err.error || "Failed to send");
+                const err = await readApiJson<{ error?: string }>(res);
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    err?.error ||
+                    `Failed to send reply (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
 
             toast.success("Reply sent!");

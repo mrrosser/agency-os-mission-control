@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Calendar, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface MeetingSchedulerProps {
     defaultAttendee?: string;
@@ -55,11 +55,12 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 }),
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ available?: boolean; error?: string }>(response);
 
             if (response.ok) {
-                setIsAvailable(result.available);
-                if (result.available) {
+                const available = Boolean(result?.available);
+                setIsAvailable(available);
+                if (available) {
                     toast.success("Time slot is available!");
                 } else {
                     toast.warning("Time conflict detected", {
@@ -67,7 +68,11 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                     });
                 }
             } else {
-                throw new Error(result.error);
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to check availability (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
         } catch (error: any) {
             console.error("Availability check error:", error);
@@ -129,7 +134,7 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 }),
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ event?: any; error?: string }>(response);
 
             if (response.ok) {
                 toast.success("Meeting scheduled!", {
@@ -148,7 +153,11 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 setDescription("");
                 setIsAvailable(null);
             } else {
-                throw new Error(result.error || "Failed to create meeting");
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to create meeting (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
         } catch (error: any) {
             console.error("Create meeting error:", error);

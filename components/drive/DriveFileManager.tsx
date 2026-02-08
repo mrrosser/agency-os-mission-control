@@ -14,7 +14,7 @@ import {
     ExternalLink,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface DriveFile {
     id?: string;
@@ -47,13 +47,17 @@ export function DriveFileManager() {
                 }),
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
 
-            if (response.ok) {
-                setFiles(result.files || []);
-            } else {
-                throw new Error(result.error);
+            if (!response.ok) {
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to load files (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
+
+            setFiles(result.files || []);
         } catch (error: any) {
             console.error("Load files error:", error);
             toast.error("Failed to load files", {
@@ -91,9 +95,9 @@ export function DriveFileManager() {
                 }),
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ success?: boolean; error?: string }>(response);
 
-            if (response.ok) {
+            if (response.ok && result?.success) {
                 toast.success("Folder created!", {
                     description: `${newFolderName} with sub-folders`,
                 });
@@ -101,7 +105,11 @@ export function DriveFileManager() {
                 setShowCreateFolder(false);
                 loadFiles();
             } else {
-                throw new Error(result.error);
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to create folder (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
         } catch (error: any) {
             console.error("Create folder error:", error);
@@ -124,39 +132,49 @@ export function DriveFileManager() {
                 idempotencyKey: crypto.randomUUID(),
             });
 
-            // Read file as base64
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                const base64Content = event.target?.result as string;
-                const base64Data = base64Content.split(",")[1]; // Remove data:... prefix
+            const base64Data = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64Content = reader.result;
+                    if (typeof base64Content !== "string") {
+                        reject(new Error("Failed to read file (unexpected result type)"));
+                        return;
+                    }
+                    const parts = base64Content.split(",");
+                    if (parts.length < 2) {
+                        reject(new Error("Failed to parse file content"));
+                        return;
+                    }
+                    resolve(parts[1]);
+                };
+                reader.onerror = () => reject(new Error("Failed to read file"));
+                reader.readAsDataURL(file);
+            });
 
-                const response = await fetch("/api/drive/upload", {
-                    method: "POST",
-                    headers,
-                    body: JSON.stringify({
-                        fileName: file.name,
-                        mimeType: file.type || "application/octet-stream",
-                        fileContent: base64Data,
-                    }),
-                });
+            const response = await fetch("/api/drive/upload", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    fileName: file.name,
+                    mimeType: file.type || "application/octet-stream",
+                    fileContent: base64Data,
+                }),
+            });
 
-                const result = await response.json();
+            const result = await readApiJson<{ success?: boolean; error?: string }>(response);
 
-                if (response.ok) {
-                    toast.success("File uploaded!", {
-                        description: file.name,
-                    });
-                    loadFiles();
-                } else {
-                    throw new Error(result.error);
-                }
-            };
+            if (!response.ok || !result?.success) {
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to upload file (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
 
-            reader.onerror = () => {
-                toast.error("Failed to read file");
-            };
-
-            reader.readAsDataURL(file);
+            toast.success("File uploaded!", {
+                description: file.name,
+            });
+            loadFiles();
         } catch (error: any) {
             console.error("Upload error:", error);
             toast.error("Failed to upload file", {
@@ -164,6 +182,7 @@ export function DriveFileManager() {
             });
         } finally {
             setUploading(false);
+            e.target.value = "";
         }
     };
 

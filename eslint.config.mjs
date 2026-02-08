@@ -12,5 +12,13 @@ const compat = new FlatCompat({ baseDirectory: __dirname });
 export default defineConfig([
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   // Keep build artifacts out of lint scope (and preserve Next's defaults).
-  globalIgnores([".next/**", ".firebase/**", "out/**", "build/**", "next-env.d.ts"]),
+  globalIgnores([
+    ".next/**",
+    ".firebase/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    // Staging/archival area; not part of the active app.
+    "please-review/**",
+  ]),
 ]);

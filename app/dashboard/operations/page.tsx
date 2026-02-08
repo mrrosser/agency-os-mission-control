@@ -12,7 +12,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { KnowledgeBase } from "@/components/operations/KnowledgeBase";
 import { ScriptGenerator } from "@/lib/ai/script-generator";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
@@ -113,20 +113,26 @@ export default function OperationsPage() {
                     // For demo, just read first file to save tokens/time
                     // In production, we would merge all selected files or use a vector search
                     const readHeaders = await buildAuthHeaders(user);
-                    const readResponse = await fetch('/api/drive/read', {
-                        method: 'POST',
-                        headers: readHeaders,
-                        body: JSON.stringify({ fileId: kbFiles[0] })
-                    });
-                    const readResult = await readResponse.json();
-                    if (readResult.success) {
-                        context = readResult.content;
-                        addLog(`✓ Context loaded from "${readResult.name}"`);
+                     const readResponse = await fetch('/api/drive/read', {
+                         method: 'POST',
+                         headers: readHeaders,
+                         body: JSON.stringify({ fileId: kbFiles[0] })
+                     });
+                    const readResult = await readApiJson<{ success?: boolean; content?: string; name?: string; error?: string }>(readResponse);
+                    if (readResponse.ok && readResult.success) {
+                        context = readResult.content || "";
+                        addLog(`✓ Context loaded from "${readResult.name || "Knowledge Base"}"`);
+                    } else if (!readResponse.ok) {
+                        const cid = getResponseCorrelationId(readResponse);
+                        throw new Error(
+                            readResult?.error ||
+                            `Failed to read knowledge base (status ${readResponse.status}${cid ? ` cid=${cid}` : ""})`
+                        );
                     }
-                } catch (e) {
-                    console.error("Context load error", e);
-                    addLog("⚠ Failed to load context, proceeding with generic scripts...");
-                }
+                 } catch (e) {
+                     console.error("Context load error", e);
+                     addLog("⚠ Failed to load context, proceeding with generic scripts...");
+                 }
             }
 
             // Step 3: Source + score leads
@@ -135,22 +141,31 @@ export default function OperationsPage() {
             const sourceHeaders = await buildAuthHeaders(user, {
                 idempotencyKey: crypto.randomUUID(),
             });
-            const sourceResponse = await fetch("/api/leads/source", {
-                method: "POST",
-                headers: sourceHeaders,
-                body: JSON.stringify({
-                    query: leadQuery || undefined,
+             const sourceResponse = await fetch("/api/leads/source", {
+                 method: "POST",
+                 headers: sourceHeaders,
+                 body: JSON.stringify({
+                     query: leadQuery || undefined,
                     industry: targetIndustry || undefined,
                     location: targetLocation || undefined,
                     limit,
                     minScore,
                     includeEnrichment: true,
-                    sources: hasGooglePlaces ? ["googlePlaces"] : ["firestore"],
-                }),
-            });
-            const sourcePayload = await sourceResponse.json();
+                     sources: hasGooglePlaces ? ["googlePlaces"] : ["firestore"],
+                 }),
+             });
+            const sourcePayload = await readApiJson<{
+                leads?: LeadCandidate[];
+                runId?: string;
+                warnings?: string[];
+                error?: string;
+            }>(sourceResponse);
             if (!sourceResponse.ok) {
-                throw new Error(sourcePayload?.error || "Lead sourcing failed");
+                const cid = getResponseCorrelationId(sourceResponse);
+                throw new Error(
+                    sourcePayload?.error ||
+                    `Lead sourcing failed (status ${sourceResponse.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
 
             const sourcedLeads = (sourcePayload.leads || []) as LeadCandidate[];
@@ -213,22 +228,28 @@ export default function OperationsPage() {
                 meetingTime.setHours(14, 0, 0, 0);
 
                 const availabilityHeaders = await buildAuthHeaders(user);
-                const availResponse = await fetch("/api/calendar/availability", {
-                    method: "POST",
-                    headers: availabilityHeaders,
-                    body: JSON.stringify({
-                        startTime: meetingTime.toISOString(),
-                        endTime: new Date(meetingTime.getTime() + 30 * 60000).toISOString(),
-                    }),
-                });
-
-                const availResult = await availResponse.json();
-
-                if (!availResult.available) {
+                 const availResponse = await fetch("/api/calendar/availability", {
+                     method: "POST",
+                     headers: availabilityHeaders,
+                     body: JSON.stringify({
+                         startTime: meetingTime.toISOString(),
+                         endTime: new Date(meetingTime.getTime() + 30 * 60000).toISOString(),
+                     }),
+                 });
+ 
+                const availResult = await readApiJson<{ available?: boolean; error?: string }>(availResponse);
+                if (!availResponse.ok) {
+                    const cid = getResponseCorrelationId(availResponse);
                     updateJourneyStep(lead.id, "booking", "skipped");
-                    addLog(`⚠ Time conflict for ${lead.companyName}, skipping...`);
+                    addLog(`⚠ Availability check failed (status ${availResponse.status}${cid ? ` cid=${cid}` : ""}), skipping...`);
                     continue;
                 }
+ 
+                if (!availResult.available) {
+                     updateJourneyStep(lead.id, "booking", "skipped");
+                     addLog(`⚠ Time conflict for ${lead.companyName}, skipping...`);
+                     continue;
+                 }
 
                 addLog(`✓ Time slot available`);
 
@@ -237,20 +258,27 @@ export default function OperationsPage() {
                 const folderHeaders = await buildAuthHeaders(user, {
                     idempotencyKey: crypto.randomUUID(),
                 });
-                const folderResponse = await fetch("/api/drive/create-folder", {
-                    method: "POST",
-                    headers: folderHeaders,
-                    body: JSON.stringify({
-                        clientName: lead.companyName,
-                    }),
-                });
-
-                if (!folderResponse.ok) {
+                 const folderResponse = await fetch("/api/drive/create-folder", {
+                     method: "POST",
+                     headers: folderHeaders,
+                     body: JSON.stringify({
+                         clientName: lead.companyName,
+                     }),
+                 });
+ 
+                let folderResult: any = null;
+                try {
+                    folderResult = await readApiJson<any>(folderResponse);
+                    if (!folderResponse.ok) {
+                        const cid = getResponseCorrelationId(folderResponse);
+                        addLog(`⚠ Failed to create folder (status ${folderResponse.status}${cid ? ` cid=${cid}` : ""}), continuing...`);
+                    } else {
+                        addLog(`✓ Folder created with subfolders`);
+                    }
+                } catch (e) {
+                    console.error("Folder create error", e);
                     addLog(`⚠ Failed to create folder, continuing...`);
                 }
-
-                const folderResult = await folderResponse.json();
-                addLog(`✓ Folder created with subfolders`);
 
                 // Create calendar event
                 updateJourneyStep(lead.id, "booking", "running");
@@ -258,11 +286,11 @@ export default function OperationsPage() {
                 const eventHeaders = await buildAuthHeaders(user, {
                     idempotencyKey: crypto.randomUUID(),
                 });
-                const eventResponse = await fetch("/api/calendar/create-event", {
-                    method: "POST",
-                    headers: eventHeaders,
-                    body: JSON.stringify({
-                        event: {
+                 const eventResponse = await fetch("/api/calendar/create-event", {
+                     method: "POST",
+                     headers: eventHeaders,
+                     body: JSON.stringify({
+                         event: {
                             summary: `Discovery Call - ${lead.companyName}`,
                             description: `Call with ${leadName} from ${lead.companyName}`,
                             start: {
@@ -278,19 +306,19 @@ export default function OperationsPage() {
                                     conferenceSolutionKey: { type: "hangoutsMeet" },
                                 },
                             },
-                        },
-                    }),
-                });
-
-                const eventResult = await eventResponse.json();
-                const meetLink = eventResult.event?.conferenceData?.entryPoints?.[0]?.uri || "Meeting link pending";
-                if (eventResponse.ok) {
-                    updateJourneyStep(lead.id, "booking", "complete");
-                    addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
-                } else {
-                    updateJourneyStep(lead.id, "booking", "error");
-                    addLog(`⚠ Meeting scheduling failed`);
-                }
+                         },
+                     }),
+                 });
+ 
+                const eventResult = await readApiJson<any>(eventResponse);
+                const meetLink = eventResult?.event?.conferenceData?.entryPoints?.[0]?.uri || "Meeting link pending";
+                 if (eventResponse.ok) {
+                     updateJourneyStep(lead.id, "booking", "complete");
+                     addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
+                 } else {
+                     updateJourneyStep(lead.id, "booking", "error");
+                     addLog(`⚠ Meeting scheduling failed`);
+                 }
 
                 let outreachAttempted = false;
                 let outreachSucceeded = false;
@@ -307,12 +335,12 @@ export default function OperationsPage() {
                         <p><strong>Key benefit:</strong> ${identity.keyBenefit}</p>
                         <p>I've scheduled a brief 30-minute discovery call for ${meetingTime.toLocaleString()}.</p>
                         <p><strong>Join here:</strong> <a href="${meetLink}">${meetLink}</a></p>
-                        <p>I've also created a shared folder for our collaboration: 
-                        <a href="${folderResult.mainFolder?.webViewLink || '#'}">View Folder</a></p>
-                        <br/>
-                        <p>Best regards,</p>
-                        <p>${identity.founderName}<br/>${identity.businessName}</p>
-                    `;
+                         <p>I've also created a shared folder for our collaboration: 
+                        <a href="${folderResult?.mainFolder?.webViewLink || '#'}">View Folder</a></p>
+                         <br/>
+                         <p>Best regards,</p>
+                         <p>${identity.founderName}<br/>${identity.businessName}</p>
+                     `;
 
                     const emailHeaders = await buildAuthHeaders(user, {
                         idempotencyKey: crypto.randomUUID(),

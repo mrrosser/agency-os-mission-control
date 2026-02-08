@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { CalendarEvent } from "@/lib/google/calendar";
 import { Calendar, Plus, RefreshCw, AlertCircle, Clock, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,12 +35,14 @@ export default function CalendarPage() {
                 return;
             }
 
+            const data = await readApiJson<{ events?: CalendarEvent[]; error?: string }>(res);
             if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
-                throw new Error(errorData.error || "Failed to load events");
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load events (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-
-            const data = await res.json();
             setEvents(data.events || []);
         } catch (error: any) {
             console.error(error);

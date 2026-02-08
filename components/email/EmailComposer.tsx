@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Send, X, Loader2, Eye } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface EmailComposerProps {
     onClose?: () => void;
@@ -59,7 +59,7 @@ export function EmailComposer({ onClose, defaultTo = "", defaultSubject = "" }: 
                 }),
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ messageId?: string; error?: string }>(response);
 
             if (response.ok) {
                 toast.success("Email sent successfully!", {
@@ -74,7 +74,11 @@ export function EmailComposer({ onClose, defaultTo = "", defaultSubject = "" }: 
 
                 if (onClose) onClose();
             } else {
-                throw new Error(result.error || "Failed to send email");
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to send email (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
         } catch (error: any) {
             console.error("Send error:", error);

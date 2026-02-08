@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { InboxList } from "@/components/gmail/InboxList";
 import { EmailDetail } from "@/components/gmail/EmailDetail";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { GmailMessage } from "@/lib/google/gmail";
 import { RefreshCw, Inbox as InboxIcon, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,12 +37,14 @@ export default function InboxPage() {
                 return;
             }
 
+            const data = await readApiJson<{ messages?: GmailMessage[]; error?: string }>(res);
             if (!res.ok) {
-                const errorData = await res.json().catch(() => ({}));
-                throw new Error(errorData.error || "Failed to load inbox");
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load inbox (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-
-            const data = await res.json();
             setMessages(data.messages || []);
         } catch (error: any) {
             console.error(error);

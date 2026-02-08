@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, FileText, CheckCircle2, HardDrive } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
 interface DriveFile {
     id: string;
@@ -40,7 +40,14 @@ export function KnowledgeBase() {
                 headers,
                 body: JSON.stringify({}),
             });
-            const result = await response.json();
+            const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
+            if (!response.ok) {
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to load Drive files (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
             if (result.files) {
                 // Filter for documents
                 const docs = result.files.filter((f: any) =>

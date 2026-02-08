@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Mic, Loader2, Download, Play, Pause } from "lucide-react";
 import { useRef } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 const VOICES = [
@@ -65,9 +65,13 @@ export function VoiceGenerator() {
                 })
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{
+                success?: boolean;
+                audioBase64?: string;
+                error?: string;
+            }>(response);
 
-            if (result.success) {
+            if (response.ok && result.success && result.audioBase64) {
                 // Convert base64 to blob
                 const audioBlob = new Blob(
                     [Uint8Array.from(atob(result.audioBase64), c => c.charCodeAt(0))],
@@ -81,14 +85,16 @@ export function VoiceGenerator() {
                     description: "Audio is ready to play"
                 });
             } else {
-                toast.error("Failed to generate voice", {
-                    description: result.error
-                });
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to generate voice (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Voice generation error:", error);
-            toast.error("Network error", {
-                description: "Could not connect to ElevenLabs service"
+            toast.error("Voice generation failed", {
+                description: error?.message || "Could not generate audio"
             });
         } finally {
             setGenerating(false);

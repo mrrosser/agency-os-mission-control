@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { Video, Loader2, ExternalLink, Download } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { buildAuthHeaders } from "@/lib/api/client";
+import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
 type VideoStatus = 'idle' | 'creating' | 'processing' | 'completed' | 'failed';
@@ -58,9 +58,9 @@ export function AvatarCreator() {
                 })
             });
 
-            const result = await response.json();
+            const result = await readApiJson<{ success?: boolean; videoId?: string; error?: string }>(response);
 
-            if (result.success) {
+            if (response.ok && result.success && result.videoId) {
                 setVideoId(result.videoId);
                 setStatus('processing');
                 setProgress(30);
@@ -73,15 +73,17 @@ export function AvatarCreator() {
                 pollVideoStatus(result.videoId);
             } else {
                 setStatus('failed');
-                toast.error("Failed to create avatar", {
-                    description: result.error
-                });
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    result?.error ||
+                    `Failed to create avatar (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Avatar creation error:", error);
             setStatus('failed');
-            toast.error("Network error", {
-                description: "Could not connect to HeyGen service"
+            toast.error("Avatar creation failed", {
+                description: error?.message || "Could not create avatar video"
             });
         }
     };
@@ -104,12 +106,17 @@ export function AvatarCreator() {
                     })
                 });
 
-                const result = await response.json();
+                const result = await readApiJson<{
+                    success?: boolean;
+                    status?: string;
+                    videoUrl?: string;
+                    error?: string;
+                }>(response);
 
-                if (result.success) {
+                if (response.ok && result.success) {
                     if (result.status === 'completed') {
                         setStatus('completed');
-                        setVideoUrl(result.videoUrl);
+                        setVideoUrl(result.videoUrl || null);
                         setProgress(100);
                         toast.success("Avatar video ready!", {
                             description: "Your video has been generated successfully"

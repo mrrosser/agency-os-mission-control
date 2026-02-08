@@ -33,6 +33,7 @@ yarn-error.log*
 dev-server.log
 firebase-debug.log
 .tmp_*
+.tmp/
 
 # playwright
 /playwright-report/

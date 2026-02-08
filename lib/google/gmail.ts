@@ -3,6 +3,43 @@ import type { Logger } from "@/lib/logging";
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
 
+async function mapWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T) => Promise<R>
+): Promise<R[]> {
+    if (items.length === 0) return [];
+
+    const results: R[] = new Array(items.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const index = nextIndex++;
+            if (index >= items.length) return;
+            results[index] = await fn(items[index]);
+        }
+    });
+
+    await Promise.all(workers);
+    return results;
+}
+
+function buildInboxMessageMetadataQuery(): string {
+    const params = new URLSearchParams({
+        format: "metadata",
+        // Keep response small (avoid full bodies/attachments in the inbox list).
+        fields: "id,threadId,labelIds,snippet,internalDate,payload(headers)",
+    });
+
+    for (const header of ["From", "To", "Subject", "Date"]) {
+        params.append("metadataHeaders", header);
+    }
+
+    return params.toString();
+}
+
 export interface EmailMessage {
     to: string[];
     cc?: string[];
@@ -95,6 +132,7 @@ export async function getInboxMessages(
     const queryParams = new URLSearchParams({
         maxResults: maxResults.toString(),
         labelIds: 'INBOX',
+        fields: "messages(id,threadId),nextPageToken",
     });
 
     if (pageToken) {
@@ -115,15 +153,15 @@ export async function getInboxMessages(
         return { messages: [] };
     }
 
-    // Get full message details for each
-    const messages = await Promise.all(
-        response.messages.map(msg =>
-            callGoogleAPI<GmailMessage>(
-                `${GMAIL_API_BASE}/users/me/messages/${msg.id}`,
-                accessToken,
-                {},
-                log
-            )
+    const metadataQuery = buildInboxMessageMetadataQuery();
+
+    // Fetch message metadata with bounded concurrency to avoid memory spikes on small instances.
+    const messages = await mapWithConcurrency(response.messages, 5, (msg) =>
+        callGoogleAPI<GmailMessage>(
+            `${GMAIL_API_BASE}/users/me/messages/${msg.id}?${metadataQuery}`,
+            accessToken,
+            {},
+            log
         )
     );
 

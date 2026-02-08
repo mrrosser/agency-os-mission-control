@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { Reply, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,15 +19,63 @@ interface EmailDetailProps {
 
 export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
     const { user } = useAuth();
+    const [fullMessage, setFullMessage] = useState<GmailMessage>(message);
+    const [loadingFull, setLoadingFull] = useState(false);
     const [replying, setReplying] = useState(false);
     const [sending, setSending] = useState(false);
     const [replyBody, setReplyBody] = useState("");
 
-    const headers = message.payload?.headers || [];
+    useEffect(() => {
+        setFullMessage(message);
+        setReplyBody("");
+        setReplying(false);
+    }, [message.id]);
+
+    useEffect(() => {
+        if (!user) return;
+
+        const hasBody = Boolean(fullMessage.payload?.body?.data) || Boolean(fullMessage.payload?.parts?.length);
+        if (hasBody) return;
+
+        let cancelled = false;
+
+        (async () => {
+            setLoadingFull(true);
+            try {
+                const headers = await buildAuthHeaders(user);
+                const res = await fetch(`/api/gmail/message/${encodeURIComponent(message.id)}`, {
+                    method: "GET",
+                    headers,
+                });
+
+                if (!res.ok) {
+                    const err = await readApiJson<{ error?: string }>(res);
+                    const cid = getResponseCorrelationId(res);
+                    const baseMessage = err?.error || `Failed to load message (status ${res.status})`;
+                    throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
+                }
+
+                const data = await readApiJson<GmailMessage>(res);
+                if (!cancelled) setFullMessage(data);
+            } catch (error: any) {
+                toast.error("Could not load email details", {
+                    description: error.message,
+                });
+            } finally {
+                if (!cancelled) setLoadingFull(false);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [user, message.id, fullMessage.payload?.body?.data, fullMessage.payload?.parts?.length]);
+
+    const headers = fullMessage.payload?.headers || [];
     const subject = headers.find((h) => h.name === "Subject")?.value || "(No Subject)";
     const from = headers.find((h) => h.name === "From")?.value || "Unknown";
     const to = headers.find((h) => h.name === "To")?.value || "Unknown";
-    const dateStr = message.internalDate ? parseInt(message.internalDate) : Date.now();
+    const dateStr = fullMessage.internalDate ? parseInt(fullMessage.internalDate) : Date.now();
 
     const handleSendReply = async () => {
         if (!replyBody.trim() || !user) return;
@@ -39,8 +87,8 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
                 method: "POST",
                 headers,
                 body: JSON.stringify({
-                    messageId: message.id,
-                    threadId: message.threadId,
+                    messageId: fullMessage.id,
+                    threadId: fullMessage.threadId,
                     replyBody: replyBody,
                     isHtml: false, // Simple text reply
                 }),
@@ -64,30 +112,46 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
         }
     };
 
-    // Helper to safely decode base64 email body
-    const getBody = () => {
-        let bodyData = message.payload?.body?.data;
+    const findPartData = (parts: any[] | undefined, mimeType: string): string | null => {
+        if (!parts || parts.length === 0) return null;
 
-        // If not in main body, check parts
-        if (!bodyData && message.payload?.parts) {
-            const textPart = message.payload.parts.find(p => p.mimeType === "text/plain");
-            const htmlPart = message.payload.parts.find(p => p.mimeType === "text/html");
-            bodyData = (htmlPart || textPart)?.body?.data;
+        for (const part of parts) {
+            if (part?.mimeType === mimeType && part?.body?.data) {
+                return part.body.data as string;
+            }
+
+            const nested = findPartData(part?.parts, mimeType);
+            if (nested) return nested;
         }
 
-        if (!bodyData) return message.snippet || "";
+        return null;
+    };
+
+    // Helper to safely decode base64 email body
+    const getBody = () => {
+        const htmlBody = fullMessage.payload?.body?.data
+            ? null
+            : findPartData(fullMessage.payload?.parts, "text/html");
+        const plainBody = fullMessage.payload?.body?.data
+            ? null
+            : findPartData(fullMessage.payload?.parts, "text/plain");
+
+        let bodyData = htmlBody || plainBody || fullMessage.payload?.body?.data;
+
+        if (!bodyData) return fullMessage.snippet || "";
 
         try {
             // Replace URL-safe base64 chars
             const base64 = bodyData.replace(/-/g, '+').replace(/_/g, '/');
-            return decodeURIComponent(escape(atob(base64)));
+            const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+            return decodeURIComponent(escape(atob(padded)));
         } catch (e) {
-            return message.snippet || "Error decoding message body.";
+            return fullMessage.snippet || "Error decoding message body.";
         }
     };
 
     const bodyContent = getBody();
-    const isHtml = message.payload?.body?.data ? false : message.payload?.parts?.some(p => p.mimeType === 'text/html');
+    const isHtml = Boolean(findPartData(fullMessage.payload?.parts, "text/html"));
 
     return (
         <div className="flex flex-col h-full bg-zinc-950">
@@ -114,6 +178,12 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
 
             {/* Body */}
             <div className="flex-1 overflow-auto p-6">
+                {loadingFull && (
+                    <div className="flex items-center gap-2 text-zinc-500 text-sm mb-4">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading full email...
+                    </div>
+                )}
                 {isHtml ? (
                     <div
                         className="prose prose-invert prose-sm max-w-none text-zinc-300"

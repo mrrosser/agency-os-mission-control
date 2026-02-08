@@ -15,6 +15,7 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".firebase/**",
+    ".tmp/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

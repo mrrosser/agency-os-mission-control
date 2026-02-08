@@ -58,7 +58,8 @@ gcloud run services add-iam-policy-binding ssrleadflowreview \
   --member="allUsers" \
   --role="roles/run.invoker"
 ```
-- If `/api/*` intermittently returns HTML 502/503 and Cloud Run logs show memory OOM, bump the SSR service memory:
+- The Frameworks backend memory is configured in `firebase.json` via `hosting.frameworksBackend.memory`.
+- If `/api/*` intermittently returns HTML 502/503 and Cloud Run logs show memory OOM, you can bump the SSR service memory:
 ```bash
 gcloud run services update ssrleadflowreview \
   --project leadflow-review \

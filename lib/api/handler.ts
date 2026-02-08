@@ -25,7 +25,10 @@ export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
   options?: { route: string }
 ) {
-  return async function (request: NextRequest, context?: RouteContext) {
+  // Next.js route handlers are typed to always receive a 2nd "context" argument.
+  // Keep runtime defensive (optional chaining), but type the param as required
+  // to satisfy Next's generated type checks.
+  return async function (request: NextRequest, context: RouteContext) {
     const correlationId = getCorrelationId(request);
     const log = createLogger({ correlationId, route: options?.route });
     const path = request.nextUrl?.pathname || "unknown";

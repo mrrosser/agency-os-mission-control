@@ -54,6 +54,7 @@ export default function OperationsPage() {
     const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
     const hasHeyGen = secretStatus.heyGenKey !== "missing";
     const hasGooglePlaces = secretStatus.googlePlacesKey !== "missing";
+    const hasFirecrawl = secretStatus.firecrawlKey !== "missing";
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
@@ -624,6 +625,9 @@ export default function OperationsPage() {
                                     {hasGooglePlaces
                                         ? "Google Places sourcing is active for live lead discovery."
                                         : "Add a Google Places API key in the API Vault to source live leads. Otherwise we’ll use existing CRM leads."}
+                                    {hasFirecrawl
+                                        ? " Firecrawl enrichment is enabled for website signals (emails, metadata)."
+                                        : " Add a Firecrawl key to enrich lead websites and improve scoring."}
                                 </p>
 
                                 <div className="pt-4 border-t border-zinc-800 space-y-3">

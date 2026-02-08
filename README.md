@@ -16,6 +16,7 @@ copy .env.local.example .env.local
 - `FIREBASE_PROJECT_ID`
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
 - Optional: `GOOGLE_PLACES_API_KEY` (for live lead sourcing)
+- Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 
 4) Start dev server:
@@ -26,11 +27,16 @@ npm run dev
 ## Lead Sourcing + Scoring
 - The Lead Engine lives in `app/dashboard/operations`.
 - If `GOOGLE_PLACES_API_KEY` (or a user-scoped secret `googlePlacesKey`) is set, live lead sourcing is enabled.
+- If `FIRECRAWL_API_KEY` (or a user-scoped secret `firecrawlKey`) is set, website enrichment can extract emails/signals to improve scoring.
 - Without a Places key, the Lead Engine pulls from existing CRM leads.
 
 ## Google OAuth Redirect URIs (recommended)
 - Local: `http://localhost:3000/api/google/callback`
 - Production: `https://leadflow-review.web.app/api/google/callback`
+
+Notes:
+- Do not use `0.0.0.0` in OAuth redirect URIs; browsers treat it as an invalid address.
+- If you run the dev server on a different port (e.g. 8080), add `http://localhost:8080/api/google/callback` to the Google OAuth client and set `GOOGLE_OAUTH_REDIRECT_URI` accordingly.
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.

@@ -3,10 +3,12 @@ import type { LeadCandidate, LeadScoringCriteria, LeadSource, LeadSourceRequest 
 import { scoreLead } from "@/lib/leads/scoring";
 import { fetchGooglePlacesLeads } from "@/lib/leads/providers/google-places";
 import { fetchFirestoreLeads } from "@/lib/leads/providers/firestore";
+import { enrichLeadsWithFirecrawl } from "@/lib/leads/providers/firecrawl";
 
 interface SourceContext {
     uid: string;
     googlePlacesKey?: string;
+    firecrawlKey?: string;
     log?: Logger;
 }
 
@@ -20,7 +22,7 @@ export async function sourceLeads(
     request: LeadSourceRequest,
     context: SourceContext
 ): Promise<SourceResult> {
-    const { uid, googlePlacesKey, log } = context;
+    const { uid, googlePlacesKey, firecrawlKey, log } = context;
     const warnings: string[] = [];
     const sourcesRequested = request.sources ?? [];
     const includeGooglePlaces = sourcesRequested.includes("googlePlaces") || sourcesRequested.length === 0;
@@ -59,6 +61,20 @@ export async function sourceLeads(
         }
     }
 
+    let enrichedLeads = leads;
+    if (request.includeEnrichment) {
+        if (!firecrawlKey) {
+            warnings.push("Firecrawl key missing; skipping website enrichment.");
+        } else {
+            enrichedLeads = await enrichLeadsWithFirecrawl(
+                leads,
+                firecrawlKey,
+                { maxLeads: Math.min(request.limit || 10, 5), concurrency: 2 },
+                log
+            );
+        }
+    }
+
     if (sourcesUsed.length === 0) {
         warnings.push("No lead sources were available for this run.");
     }
@@ -69,7 +85,7 @@ export async function sourceLeads(
         location: request.location,
     };
 
-    const scored = leads.map((lead) => {
+    const scored = enrichedLeads.map((lead) => {
         const result = scoreLead(lead, criteria);
         return {
             ...lead,

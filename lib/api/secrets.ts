@@ -11,6 +11,7 @@ export interface ApiKeys {
   elevenLabsKey?: string;
   heyGenKey?: string;
   googlePlacesKey?: string;
+  firecrawlKey?: string;
 }
 
 export type SecretKey = keyof ApiKeys;
@@ -23,6 +24,7 @@ const SECRET_KEYS: SecretKey[] = [
   "elevenLabsKey",
   "heyGenKey",
   "googlePlacesKey",
+  "firecrawlKey",
 ];
 
 const SECRET_ENV_MAP: Record<SecretKey, string> = {
@@ -32,6 +34,7 @@ const SECRET_ENV_MAP: Record<SecretKey, string> = {
   elevenLabsKey: "ELEVENLABS_API_KEY",
   heyGenKey: "HEYGEN_API_KEY",
   googlePlacesKey: "GOOGLE_PLACES_API_KEY",
+  firecrawlKey: "FIRECRAWL_API_KEY",
 };
 
 async function migrateLegacyKeys(uid: string): Promise<void> {

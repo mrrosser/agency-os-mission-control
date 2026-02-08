@@ -18,6 +18,10 @@ export interface LeadCandidate {
     email?: string;
     phone?: string;
     website?: string;
+    websiteTitle?: string;
+    websiteDescription?: string;
+    websiteKeywords?: string;
+    websiteEmails?: string[];
     location?: string;
     industry?: string;
     rating?: number;

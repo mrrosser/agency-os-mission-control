@@ -70,9 +70,16 @@ export const POST = withApiHandler(
       "GOOGLE_PLACES_API_KEY"
     );
 
+    const firecrawlKey = await resolveSecret(
+      user.uid,
+      "firecrawlKey",
+      "FIRECRAWL_API_KEY"
+    );
+
     const { leads, sourcesUsed, warnings } = await sourceLeads(requestPayload, {
       uid: user.uid,
       googlePlacesKey,
+      firecrawlKey,
       log,
     });
 

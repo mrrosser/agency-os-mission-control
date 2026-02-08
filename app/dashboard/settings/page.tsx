@@ -38,7 +38,8 @@ export default function SettingsPage() {
         twilioToken: "",
         elevenLabsKey: "",
         heyGenKey: "",
-        googlePlacesKey: ""
+        googlePlacesKey: "",
+        firecrawlKey: "",
     });
 
     useEffect(() => {
@@ -167,6 +168,7 @@ export default function SettingsPage() {
                 elevenLabsKey: "",
                 heyGenKey: "",
                 googlePlacesKey: "",
+                firecrawlKey: "",
             });
             await refreshSecrets();
             toast.success("API keys saved securely in Secret Manager");
@@ -362,6 +364,25 @@ export default function SettingsPage() {
                                     </div>
                                     <p className="text-xs text-zinc-500">
                                         Enables live lead sourcing from Google Places.
+                                    </p>
+                                </div>
+                                <div className="space-y-4">
+                                    <Label className="flex justify-between">
+                                        Firecrawl API Key
+                                        {renderSecretBadge(secretStatus.firecrawlKey)}
+                                    </Label>
+                                    <div className="relative">
+                                        <Key className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                                        <Input
+                                            type="password"
+                                            className="pl-9 bg-zinc-900 border-zinc-700"
+                                            placeholder="fc-..."
+                                            value={apiKeys.firecrawlKey}
+                                            onChange={e => setApiKeys({ ...apiKeys, firecrawlKey: e.target.value })}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-zinc-500">
+                                        Enables website enrichment (emails/signals) during lead sourcing.
                                     </p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">

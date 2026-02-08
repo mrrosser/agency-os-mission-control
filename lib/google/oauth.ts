@@ -29,7 +29,30 @@ function getOAuthConfig() {
     throw new ApiError(500, "Missing Google OAuth configuration");
   }
 
-  return { clientId, clientSecret, redirectUri };
+  let redirectUrl: URL;
+  try {
+    redirectUrl = new URL(redirectUri);
+  } catch {
+    throw new ApiError(500, "Invalid GOOGLE_OAUTH_REDIRECT_URI");
+  }
+
+  if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
+    throw new ApiError(500, "GOOGLE_OAUTH_REDIRECT_URI must use http or https");
+  }
+
+  // 0.0.0.0 / :: are bind-all addresses, not valid browser origins for OAuth redirects.
+  if (redirectUrl.hostname === "0.0.0.0" || redirectUrl.hostname === "::") {
+    throw new ApiError(
+      500,
+      "Invalid GOOGLE_OAUTH_REDIRECT_URI (do not use 0.0.0.0/::). Use localhost or your public domain."
+    );
+  }
+
+  if (!redirectUrl.pathname.endsWith("/api/google/callback")) {
+    throw new ApiError(500, "GOOGLE_OAUTH_REDIRECT_URI must end with /api/google/callback");
+  }
+
+  return { clientId, clientSecret, redirectUri: redirectUrl.toString() };
 }
 
 export function getOAuthClient() {

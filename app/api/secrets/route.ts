@@ -15,6 +15,7 @@ const bodySchema = z.object({
       elevenLabsKey: z.string().trim().min(1).optional(),
       heyGenKey: z.string().trim().min(1).optional(),
       googlePlacesKey: z.string().trim().min(1).optional(),
+      firecrawlKey: z.string().trim().min(1).optional(),
     })
     .optional(),
   idempotencyKey: z.string().optional(),

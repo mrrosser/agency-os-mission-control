@@ -17,10 +17,12 @@ export const POST = withApiHandler(async ({ request, log }) => {
   const user = await requireFirebaseAuth(request, log);
   const state = randomUUID();
   const returnTo = body.returnTo || "/dashboard/integrations";
+  const origin = request.nextUrl.origin;
 
   await getAdminDb().collection("google_oauth_state").doc(state).set({
     uid: user.uid,
     returnTo,
+    origin,
     createdAt: FieldValue.serverTimestamp(),
   });
 

@@ -75,10 +75,8 @@ export function EmailComposer({ onClose, defaultTo = "", defaultSubject = "" }: 
                 if (onClose) onClose();
             } else {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to send email (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to send email (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Send error:", error);

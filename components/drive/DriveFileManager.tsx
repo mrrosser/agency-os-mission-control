@@ -51,10 +51,8 @@ export function DriveFileManager() {
 
             if (!response.ok) {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to load files (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to load files (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
 
             setFiles(result.files || []);
@@ -106,10 +104,8 @@ export function DriveFileManager() {
                 loadFiles();
             } else {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to create folder (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to create folder (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Create folder error:", error);
@@ -165,10 +161,8 @@ export function DriveFileManager() {
 
             if (!response.ok || !result?.success) {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to upload file (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to upload file (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
 
             toast.success("File uploaded!", {

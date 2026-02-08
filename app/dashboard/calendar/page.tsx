@@ -38,10 +38,8 @@ export default function CalendarPage() {
             const data = await readApiJson<{ events?: CalendarEvent[]; error?: string }>(res);
             if (!res.ok) {
                 const cid = getResponseCorrelationId(res);
-                throw new Error(
-                    data?.error ||
-                    `Failed to load events (status ${res.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = data?.error || `Failed to load events (status ${res.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             setEvents(data.events || []);
         } catch (error: any) {

@@ -86,10 +86,8 @@ export function VoiceGenerator() {
                 });
             } else {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to generate voice (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to generate voice (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Voice generation error:", error);

@@ -40,10 +40,8 @@ export default function InboxPage() {
             const data = await readApiJson<{ messages?: GmailMessage[]; error?: string }>(res);
             if (!res.ok) {
                 const cid = getResponseCorrelationId(res);
-                throw new Error(
-                    data?.error ||
-                    `Failed to load inbox (status ${res.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = data?.error || `Failed to load inbox (status ${res.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             setMessages(data.messages || []);
         } catch (error: any) {

@@ -69,10 +69,8 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 }
             } else {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to check availability (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to check availability (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Availability check error:", error);
@@ -154,10 +152,8 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 setIsAvailable(null);
             } else {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to create meeting (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to create meeting (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Create meeting error:", error);

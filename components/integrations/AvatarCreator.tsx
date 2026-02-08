@@ -74,10 +74,8 @@ export function AvatarCreator() {
             } else {
                 setStatus('failed');
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to create avatar (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to create avatar (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
         } catch (error: any) {
             console.error("Avatar creation error:", error);

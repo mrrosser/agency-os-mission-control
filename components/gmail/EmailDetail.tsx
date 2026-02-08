@@ -49,10 +49,8 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
             if (!res.ok) {
                 const err = await readApiJson<{ error?: string }>(res);
                 const cid = getResponseCorrelationId(res);
-                throw new Error(
-                    err?.error ||
-                    `Failed to send reply (status ${res.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = err?.error || `Failed to send reply (status ${res.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
 
             toast.success("Reply sent!");

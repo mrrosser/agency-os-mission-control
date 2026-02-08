@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, FileText, CheckCircle2, HardDrive } from "lucide-react";
+import { Loader2, CheckCircle2, HardDrive } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
@@ -38,15 +38,13 @@ export function KnowledgeBase() {
             const response = await fetch("/api/drive/list", {
                 method: "POST",
                 headers,
-                body: JSON.stringify({}),
+                body: JSON.stringify({ pageSize: 100 }),
             });
             const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
             if (!response.ok) {
                 const cid = getResponseCorrelationId(response);
-                throw new Error(
-                    result?.error ||
-                    `Failed to load Drive files (status ${response.status}${cid ? ` cid=${cid}` : ""})`
-                );
+                const baseMessage = result?.error || `Failed to load Drive files (status ${response.status})`;
+                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             if (result.files) {
                 // Filter for documents
@@ -59,7 +57,10 @@ export function KnowledgeBase() {
             }
         } catch (error) {
             console.error("Failed to fetch drive files", error);
-            toast.error("Could not load Google Drive files");
+            toast.error("Could not load Google Drive files", {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                description: (error as any)?.message || String(error),
+            });
         } finally {
             setLoading(false);
         }

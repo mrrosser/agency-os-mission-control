@@ -42,6 +42,17 @@ Required GitHub Actions secrets:
 Expected live URL (Firebase Hosting default):
 - `https://leadflow-review.web.app/`
 
+## Troubleshooting
+- If `/api/*` requests return HTML (e.g. `Unexpected token '<'`) or 403s, the Firebase frameworks SSR service may not be invokable.
+- Ensure the Cloud Run service is public-invoker (the APIs still enforce Firebase ID tokens per-route):
+```bash
+gcloud run services add-iam-policy-binding ssrleadflowreview \
+  --project leadflow-review \
+  --region us-central1 \
+  --member="allUsers" \
+  --role="roles/run.invoker"
+```
+
 ## Tests
 ```bash
 npm test

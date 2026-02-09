@@ -5,9 +5,14 @@ function createRequest() {
   return new Request("http://localhost/api/health", { method: "GET" });
 }
 
+function createContext() {
+  // Next route handlers always receive a 2nd arg with `params`.
+  return { params: Promise.resolve({}) };
+}
+
 describe("health endpoint", () => {
   it("returns ok status", async () => {
-    const response = await GET(createRequest() as any);
+    const response = await GET(createRequest() as any, createContext() as any);
     const payload = await response.json();
 
     expect(response.status).toBe(200);

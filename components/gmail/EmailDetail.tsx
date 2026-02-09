@@ -136,7 +136,7 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
             ? null
             : findPartData(fullMessage.payload?.parts, "text/plain");
 
-        let bodyData = htmlBody || plainBody || fullMessage.payload?.body?.data;
+        const bodyData = htmlBody || plainBody || fullMessage.payload?.body?.data;
 
         if (!bodyData) return fullMessage.snippet || "";
 
@@ -145,7 +145,7 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
             const base64 = bodyData.replace(/-/g, '+').replace(/_/g, '/');
             const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
             return decodeURIComponent(escape(atob(padded)));
-        } catch (e) {
+        } catch (_e) {
             return fullMessage.snippet || "Error decoding message body.";
         }
     };

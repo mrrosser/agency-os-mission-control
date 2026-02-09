@@ -106,7 +106,7 @@ export default function IdentityPage() {
             <div>
                 <h2 className="text-2xl font-bold tracking-tight text-white">Identity & Offer</h2>
                 <p className="text-zinc-400">
-                    This is the "Brain" of your Sales Robot. It reads this to know what to sell.
+                    This is the &quot;Brain&quot; of your Sales Robot. It reads this to know what to sell.
                 </p>
             </div>
 

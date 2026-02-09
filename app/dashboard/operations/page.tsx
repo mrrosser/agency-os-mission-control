@@ -789,7 +789,7 @@ export default function OperationsPage() {
                                         {logs.length === 0 ? (
                                             <div className="flex items-center gap-2 text-zinc-600">
                                                 <AlertCircle className="h-4 w-4" />
-                                                <span>Ready to run. Click "Run Lead Engine" to begin...</span>
+                                                <span>Ready to run. Click &quot;Run Lead Engine&quot; to begin...</span>
                                             </div>
                                         ) : (
                                             logs.map((log, i) => (

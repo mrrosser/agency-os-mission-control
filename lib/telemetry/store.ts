@@ -25,6 +25,26 @@ function hashIp(ip: string): string {
   return createHash("sha256").update(ip).digest("hex");
 }
 
+function stripUndefined(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripUndefined(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      const cleaned = stripUndefined(val);
+      if (cleaned === undefined) continue;
+      out[key] = cleaned;
+    }
+    return out;
+  }
+  return value;
+}
+
 export async function storeTelemetryErrorEvent(
   args: {
     fingerprint: string;
@@ -49,15 +69,17 @@ export async function storeTelemetryErrorEvent(
       return { replayed: true };
     }
 
+    const eventDoc = stripUndefined({
+      fingerprint,
+      ...event,
+      uid: uid || null,
+      ipHash,
+      createdAt: FieldValue.serverTimestamp(),
+    }) as Record<string, unknown>;
+
     tx.set(
       events,
-      {
-        fingerprint,
-        ...event,
-        uid: uid || null,
-        ipHash,
-        createdAt: FieldValue.serverTimestamp(),
-      },
+      eventDoc,
       { merge: false }
     );
 
@@ -117,4 +139,3 @@ export async function storeTelemetryErrorEvent(
     return { replayed: false };
   });
 }
-

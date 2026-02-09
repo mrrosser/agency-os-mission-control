@@ -2,7 +2,7 @@
 
 Purpose
 - Provide a consistent routing/label strategy across the three inboxes.
-- Keep outbound messages in draft-only mode until explicit approval.
+- Keep outbound messages in draft-only mode until explicit human approval.
 
 Accounts
 - mrosser@rossernftgallery.com (Rosser NFT Gallery + RT Solutions)
@@ -52,8 +52,8 @@ Label Rules (recommended)
 
 Draft-First Workflow (target behavior)
 1) New email hits label Lead or Needs-Reply.
-2) Agent drafts response (no send) and posts draft to Google Chat Outreach space.
-3) User approves (or edits) -> then send.
+2) Agent drafts response (no send). Optional: post a short digest to Chat ("Drafts ready") without sending.
+3) User reviews drafts in Gmail and hits Send (this click is the approval gate).
 
 Notes
 - 404 on GET to webhook path is OK. Pub/Sub uses POST. 502 means the listener is down.

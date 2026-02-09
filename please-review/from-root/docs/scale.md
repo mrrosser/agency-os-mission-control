@@ -41,3 +41,5 @@ If the bot doesn't respond:
 - IAP SSH is for **admin**, not heavy traffic.
 - Funnel paths should point to **127.0.0.1** native ports.
 - Docker gateway must remain stopped during native mode.
+- GitHub updates are applied by `openclaw-autosync.timer`. If it reports `dirty repo; skip auto-apply`, inspect changes as `marcu` (do not force reset blindly).
+- Email triage runs on a schedule via `openclaw-email-triage.timer` and only creates drafts (never sends).

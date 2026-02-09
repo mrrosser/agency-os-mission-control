@@ -69,6 +69,8 @@ export async function storeTelemetryErrorEvent(
       return { replayed: true };
     }
 
+    const groupSnap = await tx.get(groups);
+
     const eventDoc = stripUndefined({
       fingerprint,
       ...event,
@@ -83,7 +85,6 @@ export async function storeTelemetryErrorEvent(
       { merge: false }
     );
 
-    const groupSnap = await tx.get(groups);
     const now = FieldValue.serverTimestamp();
 
     if (!groupSnap.exists) {

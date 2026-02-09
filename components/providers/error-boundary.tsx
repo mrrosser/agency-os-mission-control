@@ -24,6 +24,25 @@ class ErrorBoundary extends Component<Props, State> {
 
     public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error("Uncaught error:", error, errorInfo);
+
+        // Best-effort telemetry capture; never throw from error handling.
+        try {
+            const reporter = (window as unknown as { __mcReportTelemetryError?: (input: any) => void })
+                .__mcReportTelemetryError;
+            reporter?.({
+                kind: "react",
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+                route: window.location.pathname,
+                meta: {
+                    source: "react.errorboundary",
+                    componentStack: errorInfo?.componentStack || null,
+                },
+            });
+        } catch {
+            // ignore
+        }
     }
 
     public render() {

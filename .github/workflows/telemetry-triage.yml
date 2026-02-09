@@ -1,0 +1,44 @@
+name: Telemetry Triage
+
+on:
+  schedule:
+    # Hourly (GitHub schedules are best-effort).
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Write Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: |
+          node -e "require('fs').writeFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, process.env.FIREBASE_SERVICE_ACCOUNT_JSON)"
+
+      - name: Run triage
+        env:
+          GCLOUD_PROJECT: leadflow-review
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TELEMETRY_TRIAGE_MIN_COUNT: "3"
+          TELEMETRY_TRIAGE_LIMIT: "10"
+        run: node scripts/telemetry-triage.js
+

@@ -48,6 +48,37 @@ Required GitHub Actions secrets:
 Expected live URL (Firebase Hosting default):
 - `https://leadflow-review.web.app/`
 
+## Telemetry + Triage (Phase 1/2)
+Phase 1: runtime error capture
+- Client + React errors are captured by `components/providers/telemetry-reporter.tsx` and the global `ErrorBoundary`.
+- Server 5xx can also be captured (optional) via `lib/api/handler.ts`.
+- Errors ingest into Firestore:
+  - `telemetry_error_groups/{fingerprint}` (deduped aggregates)
+  - `telemetry_error_events/{eventId}` (individual events)
+
+Phase 2: automated triage
+- `.github/workflows/telemetry-triage.yml` runs hourly and creates GitHub issues for high-signal groups.
+- It is idempotent: once a group is linked to an issue, it will not create duplicates.
+- It does not auto-merge or auto-deploy.
+
+Config (SSR runtime):
+- `TELEMETRY_ENABLED=true` (set to `false` to disable ingest)
+- `TELEMETRY_SERVER_ERRORS=true` (optional: capture 5xx responses)
+- Optional: `TELEMETRY_ALLOWED_ORIGINS` (comma-separated allowlist for browser telemetry)
+
+Config (GitHub Action triage):
+- Uses `FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW` to read/write Firestore groups.
+- Uses `${{ github.token }}` to create issues in this repo.
+
+Run triage locally:
+```powershell
+$env:GCLOUD_PROJECT="leadflow-review"
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\\path\\to\\firebase-adminsdk.json"
+$env:GITHUB_TOKEN="<your token>" # optional if you want to create issues locally
+$env:GITHUB_REPOSITORY="mrrosser/agency-os-mission-control"
+node scripts/telemetry-triage.js
+```
+
 ## Troubleshooting
 - If `/api/*` requests return HTML (e.g. `Unexpected token '<'`) or 403s, the Firebase frameworks SSR service may not be invokable.
 - Ensure the Cloud Run service is public-invoker (the APIs still enforce Firebase ID tokens per-route):

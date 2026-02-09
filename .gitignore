@@ -76,6 +76,7 @@ please-review/_keep/
 /data/openclaw/
 /data/openclaw/workspace/
 /data/gogcli/
+/data/autosync-backups/
 **/.config/gogcli/
 **/.openclaw/credentials
 **/.openclaw/sessions

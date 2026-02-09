@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import ErrorBoundary from "@/components/providers/error-boundary";
+import { TelemetryReporter } from "@/components/providers/telemetry-reporter";
 import { Toaster } from "sonner";
 
 const geistSans = Geist({
@@ -33,6 +34,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-foreground bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]`}
       >
         <AuthProvider>
+          <TelemetryReporter />
           <ErrorBoundary>
             {children}
             <Toaster position="top-right" theme="dark" />

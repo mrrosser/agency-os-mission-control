@@ -13,6 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
       - uses: actions/cache@v4
         with:
           path: |
@@ -23,6 +27,7 @@ jobs:
             ${{ runner.os }}-nextjs-
       - run: npm ci
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
+      - run: npm test
       - run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=4096

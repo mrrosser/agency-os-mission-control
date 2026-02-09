@@ -14,7 +14,7 @@ describe("getInboxMessages", () => {
   });
 
   it("fetches message metadata (not full bodies) for the inbox list", async () => {
-    const fetchMock = vi.fn(async (url: any) => {
+    const fetchMock = vi.fn(async (url: unknown) => {
       const u = String(url);
 
       if (u.includes("/users/me/messages?")) {
@@ -52,7 +52,7 @@ describe("getInboxMessages", () => {
       return new Response("not found", { status: 404, headers: { "Content-Type": "text/plain" } });
     });
 
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const result = await getInboxMessages("token", 20, undefined, log);
 
@@ -86,10 +86,9 @@ describe("getInboxMessages", () => {
       });
     });
 
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const result = await getInboxMessages("token", 10, undefined, log);
     expect(result.messages).toEqual([]);
   });
 });
-

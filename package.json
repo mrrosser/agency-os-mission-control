@@ -41,7 +41,7 @@
     "googleapis": "^170.1.0",
     "lucide-react": "^0.563.0",
     "mammoth": "^1.11.0",
-    "next": "15.0.8",
+    "next": "15.5.12",
     "next-auth": "^4.24.13",
     "next-themes": "^0.4.6",
     "pdf-parse": "^2.4.5",
@@ -61,7 +61,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.0.8",
+    "eslint-config-next": "15.5.12",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.4"

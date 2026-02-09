@@ -12,7 +12,10 @@ function createContext() {
 
 describe("health endpoint", () => {
   it("returns ok status", async () => {
-    const response = await GET(createRequest() as any, createContext() as any);
+    const response = await GET(
+      createRequest() as unknown as Parameters<typeof GET>[0],
+      createContext() as unknown as Parameters<typeof GET>[1]
+    );
     const payload = await response.json();
 
     expect(response.status).toBe(200);

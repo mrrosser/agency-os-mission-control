@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, readApiJson } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ export function GoogleWorkspaceConnect() {
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -24,18 +24,18 @@ export function GoogleWorkspaceConnect() {
         throw new Error(result?.error || "Failed to check Google connection");
       }
       setConnected(Boolean(result?.connected));
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error("Failed to check Google connection", {
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
     loadStatus();
-  }, [user]);
+  }, [loadStatus]);
 
   const handleConnect = async () => {
     if (!user) return;
@@ -58,9 +58,9 @@ export function GoogleWorkspaceConnect() {
       if (result.authUrl) {
         window.location.href = result.authUrl;
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error("Google connection failed", {
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setLoading(false);
@@ -84,9 +84,9 @@ export function GoogleWorkspaceConnect() {
       }
       setConnected(false);
       toast.success("Google Workspace disconnected");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast.error("Failed to disconnect", {
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
       });
     } finally {
       setLoading(false);

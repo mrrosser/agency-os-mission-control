@@ -2,10 +2,9 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { MessageSquarePlus, X, Send, Loader2, Bug, Lightbulb } from "lucide-react";
+import { MessageSquarePlus, Send, Loader2, Bug, Lightbulb } from "lucide-react";
 import { toast } from "sonner";
 import { addDoc, collection } from "firebase/firestore";
 import { db } from "@/lib/firebase";

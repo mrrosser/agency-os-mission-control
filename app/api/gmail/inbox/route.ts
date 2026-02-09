@@ -5,6 +5,7 @@ import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { getInboxMessages } from "@/lib/google/gmail";
+import { sanitizeError } from "@/lib/logging";
 
 const bodySchema = z.object({
   maxResults: z.number().int().min(1).max(100).optional(),
@@ -23,11 +24,10 @@ export const POST = withApiHandler(
     try {
       accessToken = await getAccessTokenForUser(user.uid, log);
       log.info("inbox.token_retrieved", { uid: user.uid });
-    } catch (error: any) {
+    } catch (error: unknown) {
       log.warn("inbox.token_failed", {
         uid: user.uid,
-        error: error.message,
-        status: error.status
+        error: sanitizeError(error),
       });
       throw error;
     }

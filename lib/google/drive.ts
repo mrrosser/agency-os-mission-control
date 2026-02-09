@@ -31,7 +31,7 @@ export async function createFolder(
     description?: string,
     log?: Logger
 ): Promise<DriveFolder> {
-    const metadata: any = {
+    const metadata: Record<string, unknown> = {
         name: folderName,
         mimeType: 'application/vnd.google-apps.folder',
     };
@@ -68,7 +68,7 @@ export async function uploadFile(
     folderId?: string,
     log?: Logger
 ): Promise<DriveFile> {
-    const metadata: any = {
+    const metadata: Record<string, unknown> = {
         name: fileName,
         mimeType: mimeType,
     };

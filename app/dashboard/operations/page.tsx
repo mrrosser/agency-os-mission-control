@@ -26,6 +26,29 @@ interface LeadContext {
     targetIndustry?: string;
 }
 
+interface DriveCreateFolderResponse {
+    success?: boolean;
+    replayed?: boolean;
+    mainFolder?: {
+        id?: string;
+        name?: string;
+        webViewLink?: string;
+    };
+    subfolders?: Record<string, { id?: string; name?: string }>;
+    error?: string;
+}
+
+interface CalendarCreateEventResponse {
+    success?: boolean;
+    event?: {
+        conferenceData?: {
+            entryPoints?: Array<{ uri?: string }>;
+        };
+    };
+    replayed?: boolean;
+    error?: string;
+}
+
 export default function OperationsPage() {
     const { user } = useAuth();
     const [isRunning, setIsRunning] = useState(false);
@@ -266,9 +289,9 @@ export default function OperationsPage() {
                      }),
                  });
  
-                let folderResult: any = null;
+                let folderResult: DriveCreateFolderResponse | null = null;
                 try {
-                    folderResult = await readApiJson<any>(folderResponse);
+                    folderResult = await readApiJson<DriveCreateFolderResponse>(folderResponse);
                     if (!folderResponse.ok) {
                         const cid = getResponseCorrelationId(folderResponse);
                         addLog(`⚠ Failed to create folder (status ${folderResponse.status}${cid ? ` cid=${cid}` : ""}), continuing...`);
@@ -310,7 +333,7 @@ export default function OperationsPage() {
                      }),
                  });
  
-                const eventResult = await readApiJson<any>(eventResponse);
+                const eventResult = await readApiJson<CalendarCreateEventResponse>(eventResponse);
                 const meetLink = eventResult?.event?.conferenceData?.entryPoints?.[0]?.uri || "Meeting link pending";
                  if (eventResponse.ok) {
                      updateJourneyStep(lead.id, "booking", "complete");
@@ -458,18 +481,7 @@ export default function OperationsPage() {
                                 throw new Error("Audio synthesis failed");
                             }
 
-                            // In production: Upload audio to storage and use a public URL.
-                            const publicAudioUrl = "https://example.com/demo-message.mp3";
-
-                            /* 
-                            const callResponse = await fetch('/api/twilio/make-call', {
-                                method: 'POST',
-                                body: JSON.stringify({
-                                    to: leadPhone,
-                                    audioUrl: publicAudioUrl
-                                })
-                            });
-                            */
+                            // In production: upload the synthesized audio to storage and call Twilio with a public URL.
                             await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
                             followupSucceeded = true;
                             addLog(`✓ Call connected & AI message played`);
@@ -558,11 +570,12 @@ export default function OperationsPage() {
                 icon: <CheckCircle2 className="h-4 w-4" />,
             });
 
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error("Lead run error:", error);
-            addLog(`\n❌ Error: ${error.message}`);
+            addLog(`\n❌ Error: ${message}`);
             toast.error("Lead Run Failed", {
-                description: error.message,
+                description: message,
             });
         } finally {
             setIsRunning(false);

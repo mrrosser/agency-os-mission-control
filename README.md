@@ -72,6 +72,12 @@ gcloud run services update ssrleadflowreview \
 npm test
 ```
 
+Playwright (live smoke, optional):
+```powershell
+$env:PLAYWRIGHT_BASE_URL="https://leadflow-review.web.app"
+npm run test:pw
+```
+
 ## Repo Notes
 - Core app code: `app/`, `components/`, `lib/`, `tests/`
 - Unrelated or archived materials are staged under `please-review/`

@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AnimatedList } from "@/components/ui/animated-list";
 import { useAuth } from "@/components/providers/auth-provider";
-import { collection, query, where, onSnapshot, getDocs, doc, limit, orderBy } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, limit, orderBy, type Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 
@@ -26,6 +26,14 @@ interface AgentSpaceStatus {
     messageId?: string | null;
 }
 
+interface ActivityLog {
+    id: string;
+    action?: string;
+    details?: string | null;
+    type?: string | null;
+    timestamp?: Timestamp | null;
+}
+
 export default function DashboardPage() {
     const { user } = useAuth();
     const router = useRouter();
@@ -38,7 +46,7 @@ export default function DashboardPage() {
         meetingsScheduled: 0,
     });
 
-    const [activities, setActivities] = useState<any[]>([]);
+    const [activities, setActivities] = useState<ActivityLog[]>([]);
     const [agentStatus, setAgentStatus] = useState<Record<string, AgentSpaceStatus>>({});
     const [agentStatusLoading, setAgentStatusLoading] = useState(false);
     const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
@@ -62,8 +70,8 @@ export default function DashboardPage() {
                 );
             }
             setAgentStatus(payload?.spaces || {});
-        } catch (error: any) {
-            setAgentStatusError(error?.message || "Unable to load agent status");
+        } catch (error: unknown) {
+            setAgentStatusError(error instanceof Error ? error.message : "Unable to load agent status");
         } finally {
             setAgentStatusLoading(false);
         }
@@ -117,17 +125,17 @@ export default function DashboardPage() {
                 limit(10)
             ),
             (snapshot) => {
-                const logs = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
+                const logs: ActivityLog[] = snapshot.docs.map((docSnap) => ({
+                    id: docSnap.id,
+                    ...(docSnap.data() as Omit<ActivityLog, "id">),
                 }));
                 setActivities(logs);
 
                 // Update email count from logs
-                const emailCount = logs.filter((log: any) => log.type === 'email').length;
+                const emailCount = logs.filter((log) => log.type === 'email').length;
                 setAnalytics(prev => ({
                     ...prev,
-                    emailsSent: prev.emailsSent + emailCount // Simple increment for demo
+                    emailsSent: emailCount
                 }));
 
                 setLoading(false);

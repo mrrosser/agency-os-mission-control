@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail, ArrowRight } from "lucide-react";
+import { Mail } from "lucide-react";
 import { GmailMessage } from "@/lib/google/gmail";
 
 interface InboxListProps {

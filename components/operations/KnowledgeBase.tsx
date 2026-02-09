@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,21 +25,7 @@ export function KnowledgeBase() {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [notConnected, setNotConnected] = useState(false);
 
-    useEffect(() => {
-        // Load selected IDs from local storage
-        const saved = localStorage.getItem("mission_control_knowledge_base");
-        if (saved) {
-            setSelectedIds(JSON.parse(saved));
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!user) return;
-        fetchFiles();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user]);
-
-    const fetchFiles = async () => {
+    const fetchFiles = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
@@ -60,28 +46,43 @@ export function KnowledgeBase() {
             const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
             if (!response.ok) {
                 const cid = getResponseCorrelationId(response);
-                const baseMessage = result?.error || `Failed to load Drive files (status ${response.status})`;
+                const baseMessage =
+                    result?.error || `Failed to load Drive files (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             if (result.files) {
                 // Filter for documents
-                const docs = result.files.filter((f: any) =>
-                    f.mimeType.includes("document") ||
-                    f.mimeType.includes("text") ||
-                    f.mimeType.includes("pdf")
-                );
+                const docs = result.files.filter((f) => {
+                    const mimeType = f.mimeType || "";
+                    return (
+                        mimeType.includes("document") ||
+                        mimeType.includes("text") ||
+                        mimeType.includes("pdf")
+                    );
+                });
                 setFiles(docs);
             }
-        } catch (error) {
+        } catch (error: unknown) {
             console.error("Failed to fetch drive files", error);
             toast.error("Could not load Google Drive files", {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                description: (error as any)?.message || String(error),
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
+
+    useEffect(() => {
+        // Load selected IDs from local storage
+        const saved = localStorage.getItem("mission_control_knowledge_base");
+        if (saved) {
+            setSelectedIds(JSON.parse(saved));
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchFiles();
+    }, [fetchFiles]);
 
     const toggleFile = (file: DriveFile) => {
         setSelectedIds(prev => {

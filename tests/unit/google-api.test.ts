@@ -23,7 +23,7 @@ describe("callGoogleAPI", () => {
         headers: { "Content-Type": "application/json" },
       })
     );
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const result = await callGoogleAPI<{ ok: boolean }>(
       "https://example.com/test",
@@ -45,7 +45,7 @@ describe("callGoogleAPI", () => {
         headers: { "Content-Type": "application/json" },
       })
     );
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     await expect(
       callGoogleAPI("https://example.com/test", "token", {}, log)

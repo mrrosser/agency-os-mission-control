@@ -9,10 +9,11 @@ import { toast } from "sonner";
 import { Calendar, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
+import type { CalendarEvent, CreateEventInput } from "@/lib/google/calendar";
 
 interface MeetingSchedulerProps {
     defaultAttendee?: string;
-    onScheduled?: (event: any) => void;
+    onScheduled?: (event: CalendarEvent) => void;
 }
 
 export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingSchedulerProps) {
@@ -72,10 +73,10 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 const baseMessage = result?.error || `Failed to check availability (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Availability check error:", error);
             toast.error("Failed to check availability", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setChecking(false);
@@ -102,7 +103,7 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
             const startDateTime = new Date(`${startDate}T${startTime}`);
             const endDateTime = new Date(startDateTime.getTime() + duration * 60000);
 
-            const event = {
+            const event: CreateEventInput = {
                 summary: title,
                 description: description || undefined,
                 start: {
@@ -132,7 +133,7 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 }),
             });
 
-            const result = await readApiJson<{ event?: any; error?: string }>(response);
+            const result = await readApiJson<{ event?: CalendarEvent; error?: string }>(response);
 
             if (response.ok) {
                 toast.success("Meeting scheduled!", {
@@ -140,7 +141,7 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 });
 
                 if (onScheduled) {
-                    onScheduled(result.event);
+                    if (result.event) onScheduled(result.event);
                 }
 
                 // Reset form
@@ -155,10 +156,10 @@ export function MeetingScheduler({ defaultAttendee = "", onScheduled }: MeetingS
                 const baseMessage = result?.error || `Failed to create meeting (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Create meeting error:", error);
             toast.error("Failed to schedule meeting", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setCreating(false);

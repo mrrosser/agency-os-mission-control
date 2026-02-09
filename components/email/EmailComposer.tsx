@@ -78,10 +78,10 @@ export function EmailComposer({ onClose, defaultTo = "", defaultSubject = "" }: 
                 const baseMessage = result?.error || `Failed to send email (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Send error:", error);
             toast.error("Failed to send email", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setSending(false);

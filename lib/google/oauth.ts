@@ -171,12 +171,18 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
 
     log?.info("google.oauth.access_token", { uid });
     return accessToken;
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const meta = (typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {}) as Record<
+      string,
+      unknown
+    >;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
     log?.error("oauth.refresh_failed", {
       uid,
-      errorMessage: error.message,
-      errorCode: error.code,
-      errorStatus: error.status
+      errorMessage,
+      errorCode: meta.code,
+      errorStatus: meta.status,
     });
 
     // If it's already an ApiError, rethrow it
@@ -185,7 +191,7 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
     }
 
     // Otherwise wrap it
-    throw new ApiError(500, `Failed to refresh access token: ${error.message}`);
+    throw new ApiError(500, `Failed to refresh access token: ${errorMessage}`);
   }
 }
 
@@ -203,7 +209,7 @@ export async function revokeGoogleTokens(uid: string, log?: Logger) {
 
   try {
     await client.revokeCredentials();
-  } catch (error) {
+  } catch (_error) {
     log?.warn("google.oauth.revoke_failed");
   }
 

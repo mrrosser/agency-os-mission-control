@@ -49,8 +49,8 @@ export function useSecretsStatus() {
         throw new Error(payload?.error || `Failed to load secrets status${cid ? ` cid=${cid}` : ""}`);
       }
       setStatus(payload.status || EMPTY_STATUS);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load secrets status");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load secrets status");
       setStatus(EMPTY_STATUS);
     } finally {
       setLoading(false);

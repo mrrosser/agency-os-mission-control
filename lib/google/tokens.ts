@@ -38,9 +38,17 @@ export async function callGoogleAPI<T>(
     if (!response.ok) {
         const errorText = await response.text().catch(() => "");
         const parsed = errorText ? tryParseJson(errorText) : null;
-        const errorObj = parsed && typeof parsed === "object" ? (parsed as any) : null;
+        const errorObj =
+            parsed && typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+        const upstreamJsonMessage = (() => {
+            if (!errorObj) return null;
+            const errorField = errorObj["error"];
+            if (!errorField || typeof errorField !== "object") return null;
+            const message = (errorField as Record<string, unknown>)["message"];
+            return typeof message === "string" ? message : null;
+        })();
         const upstreamMessage =
-            errorObj?.error?.message ||
+            upstreamJsonMessage ||
             (errorText ? oneLineSnippet(errorText, 220) : "") ||
             response.statusText ||
             "Google API request failed";

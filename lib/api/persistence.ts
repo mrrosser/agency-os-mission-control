@@ -5,7 +5,7 @@ export interface UserPreferences {
     theme: "light" | "dark";
     notifications: boolean;
     autoPilotEnabled: boolean;
-    lastIntegrationSync: any;
+    lastIntegrationSync: unknown;
 }
 
 const DEFAULT_PREFS: UserPreferences = {
@@ -38,7 +38,7 @@ export async function updateUserPreferences(uid: string, updates: Partial<UserPr
 /**
  * Enterprise Audit Logging: Every sensitive action is persisted with a timestamp.
  */
-export async function logSecurityEvent(uid: string, event: string, metadata: any) {
+export async function logSecurityEvent(uid: string, event: string, metadata: Record<string, unknown> | null) {
     const logRef = collection(db, "security_audit_logs");
     await addDoc(logRef, {
         uid,

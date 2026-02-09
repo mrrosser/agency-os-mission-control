@@ -18,7 +18,7 @@ export async function requireFirebaseAuth(request: NextRequest, log?: Logger) {
     const decoded = await getAdminAuth().verifyIdToken(idToken);
     log?.info("auth.verified", { uid: decoded.uid });
     return decoded;
-  } catch (error) {
+  } catch (_error) {
     log?.warn("auth.failed", { reason: "invalid_id_token" });
     throw new ApiError(401, "Invalid ID token");
   }

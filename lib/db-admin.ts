@@ -6,7 +6,7 @@ export interface ActivityLog {
     action: string;
     details?: string;
     type: 'email' | 'meeting' | 'lead' | 'system' | 'calendar';
-    timestamp: any;
+    timestamp: unknown;
 }
 
 export const dbAdmin = {

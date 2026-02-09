@@ -33,7 +33,7 @@ describe("firecrawl enrichment", () => {
         }
       )
     );
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const lead: LeadCandidate = {
       id: "lead-1",
@@ -55,7 +55,7 @@ describe("firecrawl enrichment", () => {
 
   it("skips scraping when lead already has email", async () => {
     const fetchMock = vi.fn();
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const lead: LeadCandidate = {
       id: "lead-2",
@@ -86,7 +86,7 @@ describe("firecrawl enrichment", () => {
         }
       )
     );
-    (globalThis as any).fetch = fetchMock;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
 
     const leads: LeadCandidate[] = [
       { id: "a", companyName: "A", website: "https://a.com", source: "googlePlaces" },
@@ -102,4 +102,3 @@ describe("firecrawl enrichment", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
-

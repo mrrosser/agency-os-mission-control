@@ -11,19 +11,32 @@ export interface AgentSpaceStatus {
 
 interface StoredSpaceStatus {
   agentId?: string;
-  updatedAt?: any;
+  updatedAt?: unknown;
   source?: string | null;
   messageId?: string | null;
 }
 
 const COLLECTION = "agent_status";
 
-function serializeTimestamp(value: any): string | null {
+function serializeTimestamp(value: unknown): string | null {
   if (!value) return null;
   if (typeof value === "string") return value;
   if (typeof value === "number") return new Date(value).toISOString();
-  if (value.toDate) return value.toDate().toISOString();
-  if (value.seconds) return new Date(value.seconds * 1000).toISOString();
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const toDate = obj.toDate;
+    if (typeof toDate === "function") {
+      const date = toDate.call(value) as Date;
+      return date.toISOString();
+    }
+
+    const seconds = obj.seconds;
+    if (typeof seconds === "number") {
+      return new Date(seconds * 1000).toISOString();
+    }
+  }
+
   return null;
 }
 

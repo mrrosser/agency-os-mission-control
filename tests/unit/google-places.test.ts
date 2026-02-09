@@ -6,7 +6,7 @@ const mockFetch = vi.fn();
 describe("fetchGooglePlacesLeads", () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    (globalThis as any).fetch = mockFetch;
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = mockFetch as unknown as typeof fetch;
   });
 
   afterEach(() => {

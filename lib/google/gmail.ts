@@ -14,10 +14,7 @@ async function mapWithConcurrency<T, R>(
     let nextIndex = 0;
 
     const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const index = nextIndex++;
-            if (index >= items.length) return;
+        for (let index = nextIndex++; index < items.length; index = nextIndex++) {
             results[index] = await fn(items[index]);
         }
     });
@@ -62,9 +59,21 @@ export interface GmailMessage {
     payload?: {
         headers: Array<{ name: string; value: string }>;
         body?: { data?: string };
-        parts?: any[];
+        parts?: GmailMessagePart[];
     };
     internalDate?: string;
+}
+
+export interface GmailMessagePart {
+    mimeType?: string;
+    filename?: string;
+    headers?: Array<{ name: string; value: string }>;
+    body?: {
+        size?: number;
+        data?: string;
+        attachmentId?: string;
+    };
+    parts?: GmailMessagePart[];
 }
 
 /**

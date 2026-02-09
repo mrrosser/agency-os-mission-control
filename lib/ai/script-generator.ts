@@ -1,3 +1,9 @@
+export interface LeadProfile {
+    companyName?: string;
+    founderName?: string;
+    targetIndustry?: string;
+}
+
 export class ScriptGenerator {
     /**
      * Generates a context-aware script for outreach
@@ -5,9 +11,13 @@ export class ScriptGenerator {
      * @param lead Lead information
      * @param type 'voice' or 'video'
      */
-    static async generate(context: string, lead: any, type: 'voice' | 'video' = 'voice'): Promise<string> {
+    static async generate(
+        context: string,
+        lead: LeadProfile,
+        type: 'voice' | 'video' = 'voice'
+    ): Promise<string> {
         // In a real production app, this would call OpenAI/Anthropic API
-        // For this demo, we use a sophisticated template engine that simulates "AI" understanding
+        // For this demo, we use a template engine that simulates "AI" understanding
 
         let script = "";
 
@@ -16,10 +26,10 @@ export class ScriptGenerator {
         const hasCaseStudy = context.toLowerCase().includes("result") || context.toLowerCase().includes("case study");
         const hasTechnical = context.toLowerCase().includes("api") || context.toLowerCase().includes("integration");
 
-        const intro = `Hi ${lead.founderName}, this is Marcus from AgencyOS.`;
+        const intro = `Hi ${lead.founderName || "there"}, this is Marcus from AgencyOS.`;
 
         if (type === 'video') {
-            script += `${intro} I made this video specifically for ${lead.companyName}. `;
+            script += `${intro} I made this video specifically for ${lead.companyName || "your company"}. `;
 
             if (hasCaseStudy) {
                 script += `I was looking at your ${lead.targetIndustry || 'industry'} peers, and based on the case studies I attached, we've helped similar companies scale by 300%. `;
@@ -32,10 +42,9 @@ export class ScriptGenerator {
             }
 
             script += `I'd love to walk you through our personalized strategy. Check the link below to book time.`;
-
         } else {
             // Voice message (shorter, punchier)
-            script += `${intro} I'm reaching out because I saw what you're doing at ${lead.companyName}. `;
+            script += `${intro} I'm reaching out because I saw what you're doing at ${lead.companyName || "your company"}. `;
 
             if (hasPricing) {
                 script += `We've just updated our pricing model to be performance-based, which I think aligns perfectly with your growth stage. `;

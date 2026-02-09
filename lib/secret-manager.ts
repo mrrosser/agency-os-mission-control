@@ -28,12 +28,18 @@ function getSecretId(uid: string, key: string): string {
   return `${prefix}-${safeUid}-${safeKey}`;
 }
 
+function getErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const code = (error as Record<string, unknown>)["code"];
+  return typeof code === "number" ? code : null;
+}
+
 async function ensureSecret(projectId: string, secretId: string): Promise<void> {
   const name = `projects/${projectId}/secrets/${secretId}`;
   try {
     await client.getSecret({ name });
-  } catch (error: any) {
-    if (error?.code === 5) {
+  } catch (error: unknown) {
+    if (getErrorCode(error) === 5) {
       await client.createSecret({
         parent: `projects/${projectId}`,
         secretId,
@@ -55,8 +61,8 @@ export async function accessUserSecret(uid: string, key: string): Promise<string
     const [version] = await client.accessSecretVersion({ name });
     const data = version.payload?.data?.toString("utf-8");
     return data && data.length > 0 ? data : undefined;
-  } catch (error: any) {
-    if (error?.code === 5) {
+  } catch (error: unknown) {
+    if (getErrorCode(error) === 5) {
       return undefined;
     }
     throw error;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { CalendarEvent } from "@/lib/google/calendar";
@@ -17,7 +17,7 @@ export default function CalendarPage() {
     const [loading, setLoading] = useState(true);
     const [notConnected, setNotConnected] = useState(false);
 
-    const loadEvents = async () => {
+    const loadEvents = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
@@ -42,19 +42,19 @@ export default function CalendarPage() {
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             setEvents(data.events || []);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error(error);
             toast.error("Could not load calendar", {
-                description: error.message
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     useEffect(() => {
         loadEvents();
-    }, [user]);
+    }, [loadEvents]);
 
     // Show "Connect Google" prompt if not connected
     if (notConnected) {

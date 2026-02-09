@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +32,7 @@ export function DriveFileManager() {
     const [newFolderName, setNewFolderName] = useState("");
     const [showCreateFolder, setShowCreateFolder] = useState(false);
 
-    const loadFiles = async () => {
+    const loadFiles = useCallback(async () => {
         if (!user) return;
 
         setLoading(true);
@@ -56,19 +56,19 @@ export function DriveFileManager() {
             }
 
             setFiles(result.files || []);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Load files error:", error);
             toast.error("Failed to load files", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     useEffect(() => {
         loadFiles();
-    }, [user]);
+    }, [loadFiles]);
 
     const handleCreateFolder = async () => {
         if (!newFolderName.trim()) {
@@ -107,10 +107,10 @@ export function DriveFileManager() {
                 const baseMessage = result?.error || `Failed to create folder (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Create folder error:", error);
             toast.error("Failed to create folder", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setCreatingFolder(false);
@@ -169,10 +169,10 @@ export function DriveFileManager() {
                 description: file.name,
             });
             loadFiles();
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Upload error:", error);
             toast.error("Failed to upload file", {
-                description: error.message,
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setUploading(false);

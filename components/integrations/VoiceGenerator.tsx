@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Mic, Loader2, Download, Play, Pause } from "lucide-react";
-import { useRef } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
@@ -89,10 +88,10 @@ export function VoiceGenerator() {
                 const baseMessage = result?.error || `Failed to generate voice (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Voice generation error:", error);
             toast.error("Voice generation failed", {
-                description: error?.message || "Could not generate audio"
+                description: error instanceof Error ? error.message : "Could not generate audio",
             });
         } finally {
             setGenerating(false);

@@ -40,12 +40,17 @@ firebase-debug.log
 .playwright-profile/
 /please-review/from-root/playwright-artifacts/
 /artifacts/
+/test-results/
+
+# security scan reports
+/.security/
 
 # review staging (generated artifacts)
 please-review/out/
 please-review/dist/
 please-review/playwright-report/
 please-review/memory/
+please-review/unrelated/
 
 # env files (can opt-in for committing if needed)
 .env*

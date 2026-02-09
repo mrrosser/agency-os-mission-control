@@ -5,7 +5,7 @@ import { format } from "date-fns";
 import { Reply, Loader2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { GmailMessage } from "@/lib/google/gmail";
+import type { GmailMessage, GmailMessagePart } from "@/lib/google/gmail";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -29,7 +29,7 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
         setFullMessage(message);
         setReplyBody("");
         setReplying(false);
-    }, [message.id]);
+    }, [message]);
 
     useEffect(() => {
         if (!user) return;
@@ -57,9 +57,9 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
 
                 const data = await readApiJson<GmailMessage>(res);
                 if (!cancelled) setFullMessage(data);
-            } catch (error: any) {
+            } catch (error: unknown) {
                 toast.error("Could not load email details", {
-                    description: error.message,
+                    description: error instanceof Error ? error.message : String(error),
                 });
             } finally {
                 if (!cancelled) setLoadingFull(false);
@@ -105,14 +105,16 @@ export function EmailDetail({ message, onReplySent }: EmailDetailProps) {
             setReplyBody("");
             setReplying(false);
             onReplySent?.();
-        } catch (error: any) {
-            toast.error("Failed to send reply", { description: error.message });
+        } catch (error: unknown) {
+            toast.error("Failed to send reply", {
+                description: error instanceof Error ? error.message : String(error),
+            });
         } finally {
             setSending(false);
         }
     };
 
-    const findPartData = (parts: any[] | undefined, mimeType: string): string | null => {
+    const findPartData = (parts: GmailMessagePart[] | undefined, mimeType: string): string | null => {
         if (!parts || parts.length === 0) return null;
 
         for (const part of parts) {

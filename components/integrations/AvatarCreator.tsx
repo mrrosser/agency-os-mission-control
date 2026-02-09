@@ -19,7 +19,6 @@ export function AvatarCreator() {
     const { status: secretStatus } = useSecretsStatus();
     const [script, setScript] = useState("");
     const [status, setStatus] = useState<VideoStatus>('idle');
-    const [videoId, setVideoId] = useState<string | null>(null);
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [progress, setProgress] = useState(0);
 
@@ -61,7 +60,6 @@ export function AvatarCreator() {
             const result = await readApiJson<{ success?: boolean; videoId?: string; error?: string }>(response);
 
             if (response.ok && result.success && result.videoId) {
-                setVideoId(result.videoId);
                 setStatus('processing');
                 setProgress(30);
 
@@ -77,11 +75,11 @@ export function AvatarCreator() {
                 const baseMessage = result?.error || `Failed to create avatar (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Avatar creation error:", error);
             setStatus('failed');
             toast.error("Avatar creation failed", {
-                description: error?.message || "Could not create avatar video"
+                description: error instanceof Error ? error.message : "Could not create avatar video",
             });
         }
     };
@@ -154,7 +152,6 @@ export function AvatarCreator() {
 
     const handleReset = () => {
         setStatus('idle');
-        setVideoId(null);
         setVideoUrl(null);
         setProgress(0);
         setScript("");

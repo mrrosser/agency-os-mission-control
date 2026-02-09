@@ -29,7 +29,7 @@ describe("agent status", () => {
           }),
         }),
       }),
-    } as any);
+    } as unknown as ReturnType<typeof getAdminDb>);
 
     const result = await getAgentSpaceStatus("user-1");
     expect(result["spaces/AAA"]?.agentId).toBe("coding");
@@ -45,7 +45,7 @@ describe("agent status", () => {
           }),
         }),
       }),
-    } as any);
+    } as unknown as ReturnType<typeof getAdminDb>);
 
     const result = await getAgentSpaceStatus("user-1");
     expect(result).toEqual({});

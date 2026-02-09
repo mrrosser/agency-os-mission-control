@@ -15,6 +15,19 @@ import { Badge } from "@/components/ui/badge";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 
+interface IdentityProfile {
+    businessName: string;
+    founderName: string;
+    website: string;
+    primaryService: string;
+    coreValue: string;
+    keyBenefit: string;
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
 export default function SettingsPage() {
     const { user } = useAuth();
     const [loading, setLoading] = useState(false);
@@ -22,7 +35,7 @@ export default function SettingsPage() {
     const { status: secretStatus, loading: secretsLoading, refresh: refreshSecrets } = useSecretsStatus();
 
     // Identity State
-    const [identity, setIdentity] = useState({
+    const [identity, setIdentity] = useState<IdentityProfile>({
         businessName: "",
         founderName: "",
         website: "",
@@ -50,7 +63,8 @@ export default function SettingsPage() {
                 // Load Identity
                 const identityDoc = await getDoc(doc(db, "identities", user.uid));
                 if (identityDoc.exists()) {
-                    setIdentity(identityDoc.data() as any);
+                    const data = identityDoc.data() as Partial<IdentityProfile>;
+                    setIdentity((prev) => ({ ...prev, ...data }));
                 }
 
                 // Check Google Status
@@ -87,10 +101,9 @@ export default function SettingsPage() {
             }
             const { authUrl } = payload;
             if (authUrl) window.location.href = authUrl;
-        } catch (e) {
+        } catch (e: unknown) {
             toast.error("Failed to start Google connection", {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                description: (e as any)?.message || String(e),
+                description: getErrorMessage(e),
             });
         }
         setLoading(false);
@@ -108,10 +121,9 @@ export default function SettingsPage() {
             }
             setGoogleStatus({ connected: false, loading: false });
             toast.success("Google account disconnected");
-        } catch (e) {
+        } catch (e: unknown) {
             toast.error("Failed to disconnect", {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                description: (e as any)?.message || String(e),
+                description: getErrorMessage(e),
             });
         } finally {
             setLoading(false);
@@ -124,8 +136,11 @@ export default function SettingsPage() {
         try {
             await setDoc(doc(db, "identities", user.uid), identity, { merge: true });
             toast.success("Identity updated successfully");
-        } catch (e) {
-            toast.error("Failed to update identity");
+        } catch (e: unknown) {
+            console.error("Failed to update identity", e);
+            toast.error("Failed to update identity", {
+                description: getErrorMessage(e),
+            });
         } finally {
             setLoading(false);
         }
@@ -172,8 +187,11 @@ export default function SettingsPage() {
             });
             await refreshSecrets();
             toast.success("API keys saved securely in Secret Manager");
-        } catch (e) {
-            toast.error("Failed to save API keys");
+        } catch (e: unknown) {
+            console.error("Failed to save API keys", e);
+            toast.error("Failed to save API keys", {
+                description: getErrorMessage(e),
+            });
         } finally {
             setLoading(false);
         }

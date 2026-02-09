@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ConfirmationResult } from "firebase/auth";
 import {
     signInWithPopup,
     OAuthProvider,
@@ -9,7 +10,7 @@ import {
     signInWithPhoneNumber,
     RecaptchaVerifier
 } from "@/lib/firebase";
-import { auth, googleProvider, db } from "@/lib/firebase";
+import { auth, googleProvider } from "@/lib/firebase";
 import { dbService } from "@/lib/db-service";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,22 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GridPattern } from "@/components/magicui/grid-pattern";
 import ShineBorder from "@/components/magicui/shine-border";
-import { Loader2, Rocket, AlertCircle, Mail, Phone, Apple, Github } from "lucide-react";
+import { Loader2, Rocket, AlertCircle, Apple } from "lucide-react";
+
+function isErrorWithMessage(error: unknown): error is { message: string } {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as Record<string, unknown>).message === "string"
+    );
+}
+
+declare global {
+    interface Window {
+        recaptchaVerifier?: RecaptchaVerifier;
+    }
+}
 
 export default function LoginPage() {
     const router = useRouter();
@@ -35,7 +51,7 @@ export default function LoginPage() {
     const [phoneNumber, setPhoneNumber] = useState("");
     const [otp, setOtp] = useState("");
     const [showOtp, setShowOtp] = useState(false);
-    const [confirmationResult, setConfirmationResult] = useState<any>(null);
+    const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
     const handleSocialLogin = async (providerName: 'google' | 'apple') => {
         setLoading(true);
@@ -51,9 +67,9 @@ export default function LoginPage() {
             const result = await signInWithPopup(auth, provider);
             await dbService.syncUser(result.user);
             router.push("/dashboard");
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Login failed:", error);
-            setError(error.message || "Failed to sign in. Please try again.");
+            setError(isErrorWithMessage(error) ? error.message : "Failed to sign in. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -74,16 +90,16 @@ export default function LoginPage() {
             }
             await dbService.syncUser(user);
             router.push("/dashboard");
-        } catch (error: any) {
-            setError(error.message);
+        } catch (error: unknown) {
+            setError(isErrorWithMessage(error) ? error.message : "Failed to sign in. Please try again.");
         } finally {
             setLoading(false);
         }
     };
 
     const setupRecaptcha = () => {
-        if (!(window as any).recaptchaVerifier) {
-            (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        if (!window.recaptchaVerifier) {
+            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
                 'size': 'invisible'
             });
         }
@@ -95,12 +111,15 @@ export default function LoginPage() {
         setError(null);
         try {
             setupRecaptcha();
-            const appVerifier = (window as any).recaptchaVerifier;
+            const appVerifier = window.recaptchaVerifier;
+            if (!appVerifier) {
+                throw new Error("Recaptcha verifier was not initialized.");
+            }
             const confirmation = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
             setConfirmationResult(confirmation);
             setShowOtp(true);
-        } catch (error: any) {
-            setError(error.message);
+        } catch (error: unknown) {
+            setError(isErrorWithMessage(error) ? error.message : "Failed to start phone sign-in. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -111,11 +130,14 @@ export default function LoginPage() {
         setLoading(true);
         setError(null);
         try {
+            if (!confirmationResult) {
+                throw new Error("No confirmation result available. Please request a new verification code.");
+            }
             const result = await confirmationResult.confirm(otp);
             await dbService.syncUser(result.user);
             router.push("/dashboard");
-        } catch (error: any) {
-            setError(error.message);
+        } catch (error: unknown) {
+            setError(isErrorWithMessage(error) ? error.message : "Failed to verify code. Please try again.");
         } finally {
             setLoading(false);
         }

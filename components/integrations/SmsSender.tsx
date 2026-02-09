@@ -105,10 +105,10 @@ export function SmsSender() {
                 const baseMessage = result?.error || `Failed to send SMS (status ${response.status})`;
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("SMS error:", error);
             toast.error("Failed to send SMS", {
-                description: error?.message || "Could not send message"
+                description: error instanceof Error ? error.message : "Could not send message",
             });
         } finally {
             setSending(false);

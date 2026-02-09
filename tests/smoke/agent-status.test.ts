@@ -18,7 +18,7 @@ describe("agent status smoke", () => {
           }),
         }),
       }),
-    } as any);
+    } as unknown as ReturnType<typeof getAdminDb>);
 
     const result = await getAgentSpaceStatus("user-1");
     expect(result).toEqual({});

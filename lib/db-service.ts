@@ -10,8 +10,7 @@ import {
     orderBy,
     limit,
     addDoc,
-    serverTimestamp,
-    type DocumentData
+    serverTimestamp
 } from "firebase/firestore";
 
 export interface Lead {
@@ -26,7 +25,7 @@ export interface Lead {
     score?: number;
     source?: string;
     status: 'new' | 'contacted' | 'meeting' | 'closed' | 'lost';
-    createdAt: any;
+    createdAt: unknown;
 }
 
 export interface ActivityLog {
@@ -34,7 +33,15 @@ export interface ActivityLog {
     action: string;
     details?: string;
     type: 'email' | 'meeting' | 'lead' | 'system';
-    timestamp: any;
+    timestamp: unknown;
+}
+
+interface AuthUserLike {
+    uid: string;
+    email?: string | null;
+    displayName?: string | null;
+    photoURL?: string | null;
+    providerData?: Array<{ providerId?: string | null }> | null;
 }
 
 export const dbService = {
@@ -79,7 +86,7 @@ export const dbService = {
     },
 
     // Users
-    async syncUser(user: any) {
+    async syncUser(user: AuthUserLike | null) {
         if (!user || !user.uid) return;
 
         const userRef = doc(db, "users", user.uid);
@@ -95,7 +102,7 @@ export const dbService = {
 
         try {
             await setDoc(userRef, userData, { merge: true });
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.warn("SyncUser failed initially, retrying...", error);
             // Retry once after a small delay to allow Auth to propagate
             await new Promise(resolve => setTimeout(resolve, 1000));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { InboxList } from "@/components/gmail/InboxList";
 import { EmailDetail } from "@/components/gmail/EmailDetail";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -19,7 +19,7 @@ export default function InboxPage() {
     const [loading, setLoading] = useState(true);
     const [notConnected, setNotConnected] = useState(false);
 
-    const loadInbox = async () => {
+    const loadInbox = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
@@ -44,19 +44,19 @@ export default function InboxPage() {
                 throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
             }
             setMessages(data.messages || []);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error(error);
             toast.error("Could not load inbox", {
-                description: error.message
+                description: error instanceof Error ? error.message : String(error),
             });
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     useEffect(() => {
         loadInbox();
-    }, [user]);
+    }, [loadInbox]);
 
     // Show "Connect Google" prompt if not connected
     if (notConnected) {

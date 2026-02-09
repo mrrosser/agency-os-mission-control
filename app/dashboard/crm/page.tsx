@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Plus, User, Calendar, Phone } from "lucide-react";
+import { Plus, Calendar } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -24,7 +24,7 @@ interface Lead {
     score?: number;
     source?: string;
     value?: number;
-    lastContact?: any;
+    lastContact?: unknown;
 }
 
 const COLUMNS = {
@@ -102,7 +102,7 @@ export default function CRMPage() {
             setNewLeadOpen(false);
             setNewLeadData({ companyName: "", founderName: "", email: "" });
             toast.success("Lead created");
-        } catch (e) {
+        } catch (_e) {
             toast.error("Error creating lead");
         }
     };

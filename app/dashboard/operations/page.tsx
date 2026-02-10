@@ -5,8 +5,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Rocket, Activity, AlertCircle, Terminal, CheckCircle2 } from "lucide-react";
+import { Rocket, Activity, AlertCircle, Terminal, CheckCircle2, Bookmark, Save, Trash2, RefreshCcw } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -16,7 +31,7 @@ import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/a
 import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
-import type { LeadCandidate } from "@/lib/leads/types";
+import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
 
 interface LeadContext {
     companyName: string;
@@ -49,6 +64,18 @@ interface CalendarCreateEventResponse {
     error?: string;
 }
 
+interface LeadRunTemplate {
+    templateId: string;
+    name: string;
+    clientName?: string | null;
+    params: LeadSourceRequest;
+    outreach?: {
+        useSMS?: boolean;
+        useAvatar?: boolean;
+        useOutboundCall?: boolean;
+    };
+}
+
 export default function OperationsPage() {
     const { user } = useAuth();
     const [isRunning, setIsRunning] = useState(false);
@@ -72,6 +99,14 @@ export default function OperationsPage() {
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
     const [sourceRunId, setSourceRunId] = useState<string | null>(null);
     const [sourceWarnings, setSourceWarnings] = useState<string[]>([]);
+    const [templates, setTemplates] = useState<LeadRunTemplate[]>([]);
+    const [templatesLoading, setTemplatesLoading] = useState(false);
+    const [templateSaving, setTemplateSaving] = useState(false);
+    const [templateDeleting, setTemplateDeleting] = useState(false);
+    const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+    const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+    const [templateName, setTemplateName] = useState("");
+    const [templateClientName, setTemplateClientName] = useState("");
 
     const hasTwilio = secretStatus.twilioSid !== "missing" && secretStatus.twilioToken !== "missing";
     const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
@@ -81,6 +116,180 @@ export default function OperationsPage() {
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
+    };
+
+    const loadTemplates = async () => {
+        if (!user) return;
+        setTemplatesLoading(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/leads/templates", { method: "GET", headers });
+            const data = await readApiJson<{ templates?: LeadRunTemplate[]; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load templates (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setTemplates(Array.isArray(data.templates) ? data.templates : []);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Could not load saved lead templates", { description: message });
+        } finally {
+            setTemplatesLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!user) {
+            setTemplates([]);
+            setSelectedTemplateId("");
+            return;
+        }
+        void loadTemplates();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.uid]);
+
+    const applyTemplate = (template: LeadRunTemplate) => {
+        const p = template.params || {};
+        setLeadQuery(p.query || "");
+        setTargetIndustry(p.industry || "");
+        setTargetLocation(p.location || "");
+        if (typeof p.limit === "number" && Number.isFinite(p.limit)) setLimit(p.limit);
+        if (typeof p.minScore === "number" && Number.isFinite(p.minScore)) setMinScore(p.minScore);
+
+        const outreach = template.outreach || {};
+        const wantsSMS = Boolean(outreach.useSMS);
+        const wantsCall = Boolean(outreach.useOutboundCall);
+        const wantsAvatar = Boolean(outreach.useAvatar);
+
+        if (wantsSMS && !hasTwilio) {
+            toast.warning("Template requested SMS, but Twilio keys are missing.", {
+                description: "SMS has been disabled for this run.",
+            });
+        }
+        if (wantsCall && !(hasTwilio && hasElevenLabs)) {
+            toast.warning("Template requested outbound calls, but required keys are missing.", {
+                description: "Outbound calls have been disabled for this run.",
+            });
+        }
+        if (wantsAvatar && !hasHeyGen) {
+            toast.warning("Template requested avatar video, but HeyGen key is missing.", {
+                description: "Avatar video has been disabled for this run.",
+            });
+        }
+
+        setUseSMS(wantsSMS && hasTwilio);
+        setUseOutboundCall(wantsCall && hasTwilio && hasElevenLabs);
+        setUseAvatar(wantsAvatar && hasHeyGen);
+    };
+
+    const onSelectTemplate = (templateId: string) => {
+        setSelectedTemplateId(templateId);
+        const template = templates.find((t) => t.templateId === templateId);
+        if (!template) return;
+        setTemplateName(template.name);
+        setTemplateClientName(template.clientName || "");
+        applyTemplate(template);
+        toast.success(`Loaded template: ${template.name}`);
+    };
+
+    const clearTemplateSelection = () => {
+        setSelectedTemplateId("");
+    };
+
+    const openTemplateDialog = () => {
+        const selected = templates.find((t) => t.templateId === selectedTemplateId);
+        const suggestedName = (selected?.name || templateName || leadQuery || targetIndustry || "Lead Run").trim();
+        setTemplateName(suggestedName);
+        setTemplateClientName((selected?.clientName || templateClientName || "").trim());
+        setTemplateDialogOpen(true);
+    };
+
+    const saveTemplate = async () => {
+        if (!user) return;
+        const name = templateName.trim();
+        if (!name) {
+            toast.error("Template name is required");
+            return;
+        }
+
+        setTemplateSaving(true);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+
+            const res = await fetch("/api/leads/templates", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    templateId: selectedTemplateId || undefined,
+                    name,
+                    clientName: templateClientName.trim() || undefined,
+                    params: {
+                        query: leadQuery.trim() || undefined,
+                        industry: targetIndustry.trim() || undefined,
+                        location: targetLocation.trim() || undefined,
+                        limit,
+                        minScore,
+                    },
+                    outreach: {
+                        useSMS,
+                        useAvatar,
+                        useOutboundCall,
+                    },
+                }),
+            });
+
+            const data = await readApiJson<{ template?: LeadRunTemplate; error?: string }>(res);
+            if (!res.ok || !data.template) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to save template (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+
+            setSelectedTemplateId(data.template.templateId);
+            setTemplateDialogOpen(false);
+            toast.success("Template saved");
+            await loadTemplates();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Could not save template", { description: message });
+        } finally {
+            setTemplateSaving(false);
+        }
+    };
+
+    const deleteSelectedTemplate = async () => {
+        if (!user || !selectedTemplateId) return;
+        setTemplateDeleting(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch(`/api/leads/templates/${selectedTemplateId}`, {
+                method: "DELETE",
+                headers,
+            });
+            const data = await readApiJson<{ ok?: boolean; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to delete template (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setTemplates((prev) => prev.filter((t) => t.templateId !== selectedTemplateId));
+            setSelectedTemplateId("");
+            toast.success("Template deleted");
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Could not delete template", { description: message });
+        } finally {
+            setTemplateDeleting(false);
+        }
     };
 
     const updateJourneyStep = (leadId: string, step: LeadJourneyStepKey, status: LeadJourneyEntry["steps"][LeadJourneyStepKey]) => {
@@ -610,6 +819,134 @@ export default function OperationsPage() {
                                 </div>
 
                                 <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium text-zinc-200">Saved Run Templates</Label>
+                                        <div className="flex items-center gap-2">
+                                            <Select
+                                                value={selectedTemplateId || undefined}
+                                                onValueChange={onSelectTemplate}
+                                                disabled={!user || templatesLoading}
+                                            >
+                                                <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                                                    <SelectValue
+                                                        placeholder={templatesLoading ? "Loading templates..." : "Select a template..."}
+                                                    />
+                                                </SelectTrigger>
+                                                <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                                                    {templates.length === 0 ? (
+                                                        <SelectItem value="__empty__" disabled>
+                                                            No saved templates
+                                                        </SelectItem>
+                                                    ) : (
+                                                        templates.map((t) => (
+                                                            <SelectItem key={t.templateId} value={t.templateId}>
+                                                                {t.clientName ? `${t.clientName} - ${t.name}` : t.name}
+                                                            </SelectItem>
+                                                        ))
+                                                    )}
+                                                </SelectContent>
+                                            </Select>
+
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                onClick={loadTemplates}
+                                                disabled={!user || templatesLoading}
+                                                className="h-11 w-11 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                aria-label="Refresh templates"
+                                            >
+                                                <RefreshCcw className={templatesLoading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                                            </Button>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                type="button"
+                                                onClick={openTemplateDialog}
+                                                disabled={!user}
+                                                className="h-9 bg-zinc-900 border border-zinc-700 text-white hover:bg-zinc-800"
+                                            >
+                                                <Save className="h-4 w-4" />
+                                                {selectedTemplateId ? "Update Template" : "Save Template"}
+                                            </Button>
+
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={clearTemplateSelection}
+                                                disabled={!selectedTemplateId}
+                                                className="h-9 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            >
+                                                <Bookmark className="h-4 w-4" />
+                                                Clear
+                                            </Button>
+
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={deleteSelectedTemplate}
+                                                disabled={!selectedTemplateId || templateDeleting}
+                                                className="h-9 border-red-900 bg-zinc-900 text-red-400 hover:bg-red-950/40 hover:text-red-200"
+                                            >
+                                                <Trash2 className={templateDeleting ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
+                                                Delete
+                                            </Button>
+                                        </div>
+
+                                        <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
+                                            <DialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                                                <DialogHeader>
+                                                    <DialogTitle className="text-white">Save Lead Run Template</DialogTitle>
+                                                    <DialogDescription className="text-zinc-400">
+                                                        Store your run settings so you can re-run them in one click.
+                                                    </DialogDescription>
+                                                </DialogHeader>
+
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <Label className="text-sm font-medium text-zinc-200">Template Name</Label>
+                                                        <Input
+                                                            value={templateName}
+                                                            onChange={(e) => setTemplateName(e.target.value)}
+                                                            placeholder="e.g. Austin HVAC High Intent"
+                                                            className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label className="text-sm font-medium text-zinc-200">Client / Org (optional)</Label>
+                                                        <Input
+                                                            value={templateClientName}
+                                                            onChange={(e) => setTemplateClientName(e.target.value)}
+                                                            placeholder="e.g. McCullough, Inc."
+                                                            className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <DialogFooter>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        onClick={() => setTemplateDialogOpen(false)}
+                                                        className="border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={saveTemplate}
+                                                        disabled={templateSaving}
+                                                        className="bg-blue-600 hover:bg-blue-500 text-white"
+                                                    >
+                                                        {templateSaving ? "Saving..." : "Save"}
+                                                    </Button>
+                                                </DialogFooter>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </div>
+
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium text-zinc-200">Lead Query</Label>
                                         <Input

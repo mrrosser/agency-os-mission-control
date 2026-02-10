@@ -18,11 +18,13 @@ export default function InboxPage() {
     const [selectedMessage, setSelectedMessage] = useState<GmailMessage | null>(null);
     const [loading, setLoading] = useState(true);
     const [notConnected, setNotConnected] = useState(false);
+    const [lastError, setLastError] = useState<string | null>(null);
 
     const loadInbox = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
+        setLastError(null);
         try {
             const headers = await buildAuthHeaders(user);
             const res = await fetch("/api/gmail/inbox", {
@@ -31,23 +33,41 @@ export default function InboxPage() {
                 body: JSON.stringify({ maxResults: 20 }),
             });
 
-            if (res.status === 403 || res.status === 401) {
-                setNotConnected(true);
-                setLoading(false);
-                return;
-            }
-
             const data = await readApiJson<{ messages?: GmailMessage[]; error?: string }>(res);
             if (!res.ok) {
                 const cid = getResponseCorrelationId(res);
                 const baseMessage = data?.error || `Failed to load inbox (status ${res.status})`;
-                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
+                const message = `${baseMessage}${cid ? ` cid=${cid}` : ""}`;
+                setLastError(message);
+
+                if (res.status === 401 || res.status === 403) {
+                    const normalized = baseMessage.toLowerCase();
+                    if (normalized.includes("not connected")) {
+                        setNotConnected(true);
+                    }
+                }
+
+                throw new Error(message);
             }
             setMessages(data.messages || []);
         } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error(error);
+            setLastError(message);
+
+            // Best-effort client telemetry for caught UI errors.
+            try {
+                window.__mcReportTelemetryError?.({
+                    kind: "client",
+                    message,
+                    route: window.location.pathname,
+                    meta: { source: "inbox.load_inbox" },
+                });
+            } catch {
+                // ignore
+            }
             toast.error("Could not load inbox", {
-                description: error instanceof Error ? error.message : String(error),
+                description: message,
             });
         } finally {
             setLoading(false);
@@ -68,6 +88,9 @@ export default function InboxPage() {
                     <p className="text-zinc-400 mb-6">
                         To view your inbox, you need to connect your Google Workspace account first.
                     </p>
+                    {lastError ? (
+                        <p className="text-xs text-zinc-600 mb-4">{lastError}</p>
+                    ) : null}
                     <Button
                         onClick={() => router.push("/dashboard/integrations")}
                         className="bg-blue-600 hover:bg-blue-500 text-white"
@@ -98,6 +121,11 @@ export default function InboxPage() {
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
                 </div>
+                {lastError && !loading ? (
+                    <div className="px-4 py-2 text-xs text-red-300 bg-red-950/30 border-b border-red-900/40">
+                        {lastError}
+                    </div>
+                ) : null}
                 <div className="flex-1 overflow-y-auto">
                     <InboxList
                         messages={messages}

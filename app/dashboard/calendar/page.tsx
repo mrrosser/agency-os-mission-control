@@ -16,11 +16,13 @@ export default function CalendarPage() {
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [loading, setLoading] = useState(true);
     const [notConnected, setNotConnected] = useState(false);
+    const [lastError, setLastError] = useState<string | null>(null);
 
     const loadEvents = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
+        setLastError(null);
         try {
             const headers = await buildAuthHeaders(user);
             const res = await fetch("/api/calendar/events?action=list", {
@@ -29,23 +31,41 @@ export default function CalendarPage() {
                 body: JSON.stringify({ maxResults: 20 }),
             });
 
-            if (res.status === 403 || res.status === 401) {
-                setNotConnected(true);
-                setLoading(false);
-                return;
-            }
-
             const data = await readApiJson<{ events?: CalendarEvent[]; error?: string }>(res);
             if (!res.ok) {
                 const cid = getResponseCorrelationId(res);
                 const baseMessage = data?.error || `Failed to load events (status ${res.status})`;
-                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
+                const message = `${baseMessage}${cid ? ` cid=${cid}` : ""}`;
+                setLastError(message);
+
+                if (res.status === 401 || res.status === 403) {
+                    const normalized = baseMessage.toLowerCase();
+                    if (normalized.includes("not connected")) {
+                        setNotConnected(true);
+                    }
+                }
+
+                throw new Error(message);
             }
             setEvents(data.events || []);
         } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error(error);
+            setLastError(message);
+
+            // Best-effort client telemetry for caught UI errors.
+            try {
+                window.__mcReportTelemetryError?.({
+                    kind: "client",
+                    message,
+                    route: window.location.pathname,
+                    meta: { source: "calendar.load_events" },
+                });
+            } catch {
+                // ignore
+            }
             toast.error("Could not load calendar", {
-                description: error instanceof Error ? error.message : String(error),
+                description: message,
             });
         } finally {
             setLoading(false);
@@ -66,6 +86,9 @@ export default function CalendarPage() {
                     <p className="text-zinc-400 mb-6">
                         To view your calendar, you need to connect your Google Workspace account first.
                     </p>
+                    {lastError ? (
+                        <p className="text-xs text-zinc-600 mb-4">{lastError}</p>
+                    ) : null}
                     <Button
                         onClick={() => router.push("/dashboard/integrations")}
                         className="bg-blue-600 hover:bg-blue-500 text-white"
@@ -105,6 +128,12 @@ export default function CalendarPage() {
                         </Button>
                     </div>
                 </div>
+
+                {lastError && !loading ? (
+                    <div className="p-3 text-sm text-red-300 bg-red-950/30 border border-red-900/40 rounded-lg">
+                        {lastError}
+                    </div>
+                ) : null}
 
                 {/* Events List */}
                 {loading ? (

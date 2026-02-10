@@ -24,11 +24,13 @@ export function KnowledgeBase() {
     const [loading, setLoading] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [notConnected, setNotConnected] = useState(false);
+    const [lastError, setLastError] = useState<string | null>(null);
 
     const fetchFiles = useCallback(async () => {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
+        setLastError(null);
         try {
             const headers = await buildAuthHeaders(user);
             const response = await fetch("/api/drive/list", {
@@ -37,18 +39,24 @@ export function KnowledgeBase() {
                 body: JSON.stringify({ pageSize: 100 }),
             });
 
-            if (response.status === 401 || response.status === 403) {
-                setNotConnected(true);
-                setFiles([]);
-                return;
-            }
-
             const result = await readApiJson<{ files?: DriveFile[]; error?: string }>(response);
             if (!response.ok) {
                 const cid = getResponseCorrelationId(response);
                 const baseMessage =
                     result?.error || `Failed to load Drive files (status ${response.status})`;
-                throw new Error(`${baseMessage}${cid ? ` cid=${cid}` : ""}`);
+                const message = `${baseMessage}${cid ? ` cid=${cid}` : ""}`;
+                setLastError(message);
+
+                // 403 can be "not connected" OR "insufficient scopes" OR "API disabled". Only treat explicit
+                // "not connected" cases as disconnected so we don't mislead users.
+                if (response.status === 401 || response.status === 403) {
+                    const normalized = baseMessage.toLowerCase();
+                    if (normalized.includes("not connected")) {
+                        setNotConnected(true);
+                    }
+                }
+
+                throw new Error(message);
             }
             if (result.files) {
                 // Filter for documents
@@ -63,9 +71,23 @@ export function KnowledgeBase() {
                 setFiles(docs);
             }
         } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
             console.error("Failed to fetch drive files", error);
+            setLastError(message);
+
+            // Best-effort client telemetry for caught UI errors.
+            try {
+                window.__mcReportTelemetryError?.({
+                    kind: "client",
+                    message,
+                    route: window.location.pathname,
+                    meta: { source: "knowledge_base.fetch_files" },
+                });
+            } catch {
+                // ignore
+            }
             toast.error("Could not load Google Drive files", {
-                description: error instanceof Error ? error.message : String(error),
+                description: message,
             });
         } finally {
             setLoading(false);
@@ -131,12 +153,27 @@ export function KnowledgeBase() {
                             {notConnected ? (
                                 <>
                                     <p>Google Drive is not connected.</p>
+                                    {lastError ? (
+                                        <p className="mt-2 text-xs text-zinc-600">{lastError}</p>
+                                    ) : null}
                                     <Button
                                         variant="link"
                                         onClick={() => router.push("/dashboard/integrations")}
                                         className="text-blue-500"
                                     >
                                         Go to Integrations
+                                    </Button>
+                                </>
+                            ) : lastError ? (
+                                <>
+                                    <p>Could not load Drive files.</p>
+                                    <p className="mt-2 text-xs text-zinc-600">{lastError}</p>
+                                    <Button
+                                        variant="link"
+                                        onClick={() => router.push("/dashboard/integrations")}
+                                        className="text-blue-500"
+                                    >
+                                        Check Integrations
                                     </Button>
                                 </>
                             ) : (

@@ -25,9 +25,22 @@ export function GoogleWorkspaceConnect() {
       }
       setConnected(Boolean(result?.connected));
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       toast.error("Failed to check Google connection", {
-        description: error instanceof Error ? error.message : String(error),
+        description: message,
       });
+
+      // Best-effort client telemetry for caught UI errors.
+      try {
+        window.__mcReportTelemetryError?.({
+          kind: "client",
+          message,
+          route: window.location.pathname,
+          meta: { source: "google_workspace.load_status" },
+        });
+      } catch {
+        // ignore
+      }
     } finally {
       setLoading(false);
     }
@@ -59,9 +72,22 @@ export function GoogleWorkspaceConnect() {
         window.location.href = result.authUrl;
       }
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       toast.error("Google connection failed", {
-        description: error instanceof Error ? error.message : String(error),
+        description: message,
       });
+
+      // Best-effort client telemetry for caught UI errors.
+      try {
+        window.__mcReportTelemetryError?.({
+          kind: "client",
+          message,
+          route: window.location.pathname,
+          meta: { source: "google_workspace.connect" },
+        });
+      } catch {
+        // ignore
+      }
     } finally {
       setLoading(false);
     }
@@ -85,9 +111,22 @@ export function GoogleWorkspaceConnect() {
       setConnected(false);
       toast.success("Google Workspace disconnected");
     } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       toast.error("Failed to disconnect", {
-        description: error instanceof Error ? error.message : String(error),
+        description: message,
       });
+
+      // Best-effort client telemetry for caught UI errors.
+      try {
+        window.__mcReportTelemetryError?.({
+          kind: "client",
+          message,
+          route: window.location.pathname,
+          meta: { source: "google_workspace.disconnect" },
+        });
+      } catch {
+        // ignore
+      }
     } finally {
       setLoading(false);
     }

@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+/* eslint-disable @typescript-eslint/no-require-imports */
 
 // Phase 2: scheduled triage that turns high-signal telemetry groups into GitHub issues.
 // Guardrails:
@@ -20,7 +20,7 @@ function requiredEnv(name) {
 
 function clip(text, max) {
   if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 function safeJson(value) {
@@ -218,4 +218,3 @@ main().catch((err) => {
   );
   process.exitCode = 1;
 });
-

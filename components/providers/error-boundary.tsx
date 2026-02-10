@@ -27,7 +27,7 @@ class ErrorBoundary extends Component<Props, State> {
 
         // Best-effort telemetry capture; never throw from error handling.
         try {
-            const reporter = (window as unknown as { __mcReportTelemetryError?: (input: any) => void })
+            const reporter = (window as unknown as { __mcReportTelemetryError?: (input: unknown) => void })
                 .__mcReportTelemetryError;
             reporter?.({
                 kind: "react",

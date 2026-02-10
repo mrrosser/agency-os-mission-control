@@ -29,6 +29,36 @@ declare global {
     }
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+interface GooglePickerDocsViewLike {
+    setIncludeFolders: (include: boolean) => void;
+}
+
+interface GooglePickerBuilderLike {
+    setOAuthToken: (token: string) => GooglePickerBuilderLike;
+    setDeveloperKey: (key: string) => GooglePickerBuilderLike;
+    setOrigin: (origin: string) => GooglePickerBuilderLike;
+    addView: (view: unknown) => GooglePickerBuilderLike;
+    enableFeature: (feature: unknown) => GooglePickerBuilderLike;
+    setCallback: (cb: (data: unknown) => void) => GooglePickerBuilderLike;
+    setAppId: (appId: string) => GooglePickerBuilderLike;
+    build: () => { setVisible: (visible: boolean) => void };
+}
+
+interface GooglePickerLike {
+    DocsView: new (viewId: unknown) => GooglePickerDocsViewLike;
+    PickerBuilder: new () => GooglePickerBuilderLike;
+    ViewId: { DOCS: unknown };
+    Feature: {
+        MULTISELECT_ENABLED: unknown;
+        SUPPORT_DRIVES: unknown;
+        SUPPORT_TEAM_DRIVES: unknown;
+    };
+    Action: { PICKED: unknown };
+    Response: { DOCUMENTS: string };
+}
+
 function mergeFiles(existing: DriveFile[], incoming: DriveFile[]): DriveFile[] {
     const byId = new Map<string, DriveFile>();
     for (const file of existing) byId.set(file.id, file);
@@ -206,8 +236,8 @@ export function KnowledgeBase() {
             }
 
             await loadGooglePicker();
-            const googleAny = window.google as unknown as Record<string, any> | undefined;
-            const picker = googleAny?.picker;
+            const googleAny = window.google as unknown as UnknownRecord | undefined;
+            const picker = (googleAny?.picker as unknown) as GooglePickerLike | undefined;
             if (!picker) {
                 throw new Error("Google Picker is unavailable");
             }
@@ -224,17 +254,29 @@ export function KnowledgeBase() {
                 .enableFeature(picker.Feature.MULTISELECT_ENABLED)
                 .enableFeature(picker.Feature.SUPPORT_DRIVES)
                 .enableFeature(picker.Feature.SUPPORT_TEAM_DRIVES)
-                .setCallback((data: any) => {
+                .setCallback((data: unknown) => {
                     try {
-                        if (data.action !== picker.Action.PICKED) return;
-                        const docs = (data.docs || data[picker.Response.DOCUMENTS] || []) as Array<Record<string, any>>;
+                        const dataObj =
+                            typeof data === "object" && data !== null ? (data as UnknownRecord) : null;
+                        if (!dataObj) return;
+
+                        if (dataObj["action"] !== picker.Action.PICKED) return;
+
+                        const docsRaw =
+                            (dataObj["docs"] ?? dataObj[picker.Response.DOCUMENTS] ?? []) as unknown;
+                        const docs = Array.isArray(docsRaw) ? docsRaw : [];
+
                         const picked = docs
-                            .map((doc) => ({
-                                id: String(doc.id || ""),
-                                name: String(doc.name || "Untitled"),
-                                mimeType: String(doc.mimeType || "application/octet-stream"),
-                                webViewLink: String(doc.url || ""),
-                            }))
+                            .map((doc) => {
+                                const docObj =
+                                    typeof doc === "object" && doc !== null ? (doc as UnknownRecord) : {};
+                                return {
+                                    id: String(docObj["id"] ?? ""),
+                                    name: String(docObj["name"] ?? "Untitled"),
+                                    mimeType: String(docObj["mimeType"] ?? "application/octet-stream"),
+                                    webViewLink: String(docObj["url"] ?? ""),
+                                };
+                            })
                             .filter((doc) => doc.id && doc.mimeType !== "application/vnd.google-apps.folder");
 
                         if (picked.length === 0) return;

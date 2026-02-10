@@ -15,6 +15,8 @@ copy .env.local.example .env.local
 - `NEXT_PUBLIC_FIREBASE_*` (Firebase web app config)
 - `FIREBASE_PROJECT_ID`
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
+- Optional: `GOOGLE_PICKER_API_KEY` (browser key; enables Google Drive Picker UI in Knowledge Base)
+- Optional: `GOOGLE_DRIVE_APP_ID` (Drive Picker app id; set to your GCP project number for Shared Drives support)
 - Optional: `GOOGLE_PLACES_API_KEY` (for live lead sourcing)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`

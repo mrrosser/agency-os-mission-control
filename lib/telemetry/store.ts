@@ -4,6 +4,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { createHash } from "crypto";
 import { getAdminDb } from "@/lib/firebase-admin";
 import type { Logger } from "@/lib/logging";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 
 export type TelemetryErrorKind = "client" | "react" | "server";
 
@@ -23,26 +24,6 @@ export interface TelemetryErrorEvent {
 
 function hashIp(ip: string): string {
   return createHash("sha256").update(ip).digest("hex");
-}
-
-function stripUndefined(value: unknown): unknown {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => stripUndefined(item))
-      .filter((item) => item !== undefined);
-  }
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      const cleaned = stripUndefined(val);
-      if (cleaned === undefined) continue;
-      out[key] = cleaned;
-    }
-    return out;
-  }
-  return value;
 }
 
 export async function storeTelemetryErrorEvent(

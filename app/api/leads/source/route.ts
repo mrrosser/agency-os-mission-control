@@ -9,6 +9,7 @@ import { resolveSecret } from "@/lib/api/secrets";
 import { sanitizeLogPayload } from "@/lib/api/guardrails";
 import { sourceLeads } from "@/lib/leads/sourcing";
 import type { LeadSourceRequest } from "@/lib/leads/types";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 
 const bodySchema = z.object({
   query: z.string().min(1).max(120).optional(),
@@ -93,26 +94,26 @@ export const POST = withApiHandler(
       const docId = `${lead.source}-${lead.id}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
       batch.set(
         leadsRef.doc(docId),
-        {
+        stripUndefined({
           ...lead,
           userId: user.uid,
           runId,
           createdAt: FieldValue.serverTimestamp(),
-        },
+        }) as Record<string, unknown>,
         { merge: true }
       );
     });
 
     batch.set(
       runRef,
-      {
+      stripUndefined({
         userId: user.uid,
         request: requestPayload,
         sourcesUsed,
         warnings,
         total: scored.length,
         createdAt: FieldValue.serverTimestamp(),
-      },
+      }) as Record<string, unknown>,
       { merge: true }
     );
 

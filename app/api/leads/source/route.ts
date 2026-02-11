@@ -84,9 +84,11 @@ export const POST = withApiHandler(
       log,
     });
 
+    const candidateTotal = leads.length;
     const scored = leads
       .filter((lead) => (requestPayload.minScore ? (lead.score || 0) >= requestPayload.minScore : true))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
+    const filteredOut = Math.max(0, candidateTotal - scored.length);
 
     const batch = getAdminDb().batch();
     const leadsRef = runRef.collection("leads");
@@ -111,6 +113,8 @@ export const POST = withApiHandler(
         request: requestPayload,
         sourcesUsed,
         warnings,
+        candidateTotal,
+        filteredOut,
         total: scored.length,
         createdAt: FieldValue.serverTimestamp(),
       }) as Record<string, unknown>,
@@ -130,6 +134,8 @@ export const POST = withApiHandler(
       leads: scored,
       sourcesUsed,
       warnings,
+      candidateTotal,
+      filteredOut,
     });
   },
   { route: "leads.source" }

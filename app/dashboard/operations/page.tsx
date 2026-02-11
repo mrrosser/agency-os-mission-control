@@ -76,6 +76,19 @@ interface LeadRunTemplate {
     };
 }
 
+type ApiErrorIssue = { path?: Array<string | number>; message?: string };
+type ApiErrorDetails = { issues?: ApiErrorIssue[] };
+
+const TEMPLATE_NAME_MAX = 120;
+const TEMPLATE_CLIENT_NAME_MAX = 120;
+
+function formatApiIssues(details?: ApiErrorDetails): string | null {
+    const first = details?.issues?.[0];
+    if (!first || !first.message) return null;
+    const path = Array.isArray(first.path) ? first.path.filter(Boolean).join(".") : "";
+    return path ? `${path}: ${first.message}` : first.message;
+}
+
 export default function OperationsPage() {
     const { user } = useAuth();
     const [isRunning, setIsRunning] = useState(false);
@@ -202,7 +215,12 @@ export default function OperationsPage() {
     const openTemplateDialog = () => {
         const selected = templates.find((t) => t.templateId === selectedTemplateId);
         const suggestedName = (selected?.name || templateName || leadQuery || targetIndustry || "Lead Run").trim();
-        setTemplateName(suggestedName);
+        // Avoid server-side validation failures by keeping suggestions within the API limit.
+        const cappedName =
+            suggestedName.length > TEMPLATE_NAME_MAX
+                ? suggestedName.slice(0, TEMPLATE_NAME_MAX).trimEnd()
+                : suggestedName;
+        setTemplateName(cappedName);
         setTemplateClientName((selected?.clientName || templateClientName || "").trim());
         setTemplateDialogOpen(true);
     };
@@ -212,6 +230,25 @@ export default function OperationsPage() {
         const name = templateName.trim();
         if (!name) {
             toast.error("Template name is required");
+            return;
+        }
+        if (name.length > TEMPLATE_NAME_MAX) {
+            toast.error(`Template name must be ${TEMPLATE_NAME_MAX} characters or fewer`);
+            return;
+        }
+
+        const clientName = templateClientName.trim();
+        if (clientName.length > TEMPLATE_CLIENT_NAME_MAX) {
+            toast.error(`Client/Org label must be ${TEMPLATE_CLIENT_NAME_MAX} characters or fewer`);
+            return;
+        }
+
+        if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+            toast.error("Lead Limit must be an integer between 1 and 25");
+            return;
+        }
+        if (!Number.isInteger(minScore) || minScore < 0 || minScore > 100) {
+            toast.error("Minimum Score must be an integer between 0 and 100");
             return;
         }
 
@@ -227,7 +264,7 @@ export default function OperationsPage() {
                 body: JSON.stringify({
                     templateId: selectedTemplateId || undefined,
                     name,
-                    clientName: templateClientName.trim() || undefined,
+                    clientName: clientName || undefined,
                     params: {
                         query: leadQuery.trim() || undefined,
                         industry: targetIndustry.trim() || undefined,
@@ -243,12 +280,20 @@ export default function OperationsPage() {
                 }),
             });
 
-            const data = await readApiJson<{ template?: LeadRunTemplate; error?: string }>(res);
+            const data = await readApiJson<{
+                template?: LeadRunTemplate;
+                error?: string;
+                details?: ApiErrorDetails;
+            }>(res);
             if (!res.ok || !data.template) {
                 const cid = getResponseCorrelationId(res);
-                throw new Error(
+                const issues = formatApiIssues(data.details);
+                const baseMessage =
                     data?.error ||
-                    `Failed to save template (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                    `Failed to save template (status ${res.status}${cid ? ` cid=${cid}` : ""})`;
+                const message = issues ? `${baseMessage} (${issues})` : baseMessage;
+                throw new Error(
+                    message
                 );
             }
 
@@ -390,6 +435,8 @@ export default function OperationsPage() {
                 leads?: LeadCandidate[];
                 runId?: string;
                 warnings?: string[];
+                candidateTotal?: number;
+                filteredOut?: number;
                 error?: string;
             }>(sourceResponse);
             if (!sourceResponse.ok) {
@@ -412,7 +459,14 @@ export default function OperationsPage() {
                 throw new Error("No leads found. Adjust your query or add a Places key.");
             }
 
-            addLog(`✓ Scored ${sourcedLeads.length} leads above ${minScore}`);
+            if (typeof sourcePayload.candidateTotal === "number") {
+                const filteredOut = typeof sourcePayload.filteredOut === "number" ? sourcePayload.filteredOut : null;
+                const filteredMsg =
+                    filteredOut && filteredOut > 0 ? ` (${filteredOut} filtered out below ${minScore})` : "";
+                addLog(`✓ Found ${sourcePayload.candidateTotal} candidates; ${sourcedLeads.length} scored >= ${minScore}${filteredMsg}`);
+            } else {
+                addLog(`✓ Scored ${sourcedLeads.length} leads above ${minScore}`);
+            }
 
             setJourneys(
                 sourcedLeads.map((lead) => ({

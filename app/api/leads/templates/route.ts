@@ -26,8 +26,9 @@ const paramsSchema = z.object({
   query: z.string().min(1).max(120).optional(),
   industry: z.string().min(1).max(80).optional(),
   location: z.string().min(1).max(120).optional(),
-  limit: z.number().int().min(1).max(25).optional(),
-  minScore: z.number().int().min(0).max(100).optional(),
+  // Be tolerant to number-like strings coming from clients.
+  limit: z.coerce.number().int().min(1).max(25).optional(),
+  minScore: z.coerce.number().int().min(0).max(100).optional(),
   sources: sourcesSchema.optional(),
   includeEnrichment: z.boolean().optional(),
 });
@@ -42,8 +43,9 @@ const outreachSchema = z
 
 const bodySchema = z.object({
   templateId: z.string().min(1).max(120).optional(),
-  name: z.string().trim().min(1).max(80),
-  clientName: z.string().trim().min(1).max(80).optional(),
+  // Allow slightly longer names since users often paste their ICP / query as the template label.
+  name: z.string().trim().min(1).max(120),
+  clientName: z.string().trim().min(1).max(120).optional(),
   params: paramsSchema,
   outreach: outreachSchema,
 });

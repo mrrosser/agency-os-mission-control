@@ -4,9 +4,8 @@ import { withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
-import { sendEmail } from "@/lib/google/gmail";
+import { createDraftEmail } from "@/lib/google/gmail";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
-import { dbAdmin } from "@/lib/db-admin";
 import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 
 const emailSchema = z.object({
@@ -34,15 +33,22 @@ export const POST = withApiHandler(
     const idempotencyKey = getIdempotencyKey(request, body);
 
     if (body.dryRun) {
-      const messageId = `dryrun_${correlationId.slice(0, 8)}`;
-      const threadId = `dryrun_${correlationId.slice(0, 8)}_thread`;
+      const draftId = `dryrun_${correlationId.slice(0, 8)}`;
+      const payload = {
+        success: true,
+        draftId,
+        messageId: draftId,
+        threadId: undefined as string | undefined,
+        dryRun: true,
+        replayed: false,
+      };
 
       if (body.runId && body.leadDocId) {
         await recordLeadActionReceipt(
           {
             runId: body.runId,
             leadDocId: body.leadDocId,
-            actionId: body.receiptActionId || "gmail.send",
+            actionId: body.receiptActionId || "gmail.draft",
             uid: user.uid,
             correlationId,
             status: "simulated",
@@ -52,42 +58,28 @@ export const POST = withApiHandler(
             data: {
               to: body.email.to,
               subject: body.email.subject,
-              messageId,
-              threadId,
+              draftId,
             },
           },
           log
         );
       }
 
-      return NextResponse.json({
-        success: true,
-        messageId,
-        threadId,
-        dryRun: true,
-        replayed: false,
-      });
+      return NextResponse.json(payload);
     }
 
     const accessToken = await getAccessTokenForUser(user.uid, log);
     const result = await withIdempotency(
-      { uid: user.uid, route: "gmail.send", key: idempotencyKey, log },
-      () => sendEmail(accessToken, body.email, log)
+      { uid: user.uid, route: "gmail.draft", key: idempotencyKey, log },
+      () => createDraftEmail(accessToken, body.email, log)
     );
-
-    await dbAdmin.logActivity({
-      userId: user.uid,
-      action: "Email sent",
-      details: body.email.subject,
-      type: "email"
-    });
 
     if (body.runId && body.leadDocId) {
       await recordLeadActionReceipt(
         {
           runId: body.runId,
           leadDocId: body.leadDocId,
-          actionId: body.receiptActionId || "gmail.send",
+          actionId: body.receiptActionId || "gmail.draft",
           uid: user.uid,
           correlationId,
           status: "complete",
@@ -97,7 +89,8 @@ export const POST = withApiHandler(
           data: {
             to: body.email.to,
             subject: body.email.subject,
-            messageId: result.data.id,
+            draftId: result.data.draftId,
+            messageId: result.data.messageId,
             threadId: result.data.threadId,
           },
         },
@@ -107,11 +100,13 @@ export const POST = withApiHandler(
 
     return NextResponse.json({
       success: true,
-      messageId: result.data.id,
+      draftId: result.data.draftId,
+      messageId: result.data.messageId,
       threadId: result.data.threadId,
       dryRun: false,
       replayed: result.replayed,
     });
   },
-  { route: "gmail.send" }
+  { route: "gmail.draft" }
 );
+

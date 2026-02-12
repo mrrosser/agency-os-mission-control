@@ -10,6 +10,7 @@ import { sanitizeLogPayload } from "@/lib/api/guardrails";
 import { sourceLeads } from "@/lib/leads/sourcing";
 import type { LeadSourceRequest } from "@/lib/leads/types";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { buildLeadDocId } from "@/lib/lead-runs/ids";
 
 const bodySchema = z.object({
   query: z.string().min(1).max(120).optional(),
@@ -93,7 +94,7 @@ export const POST = withApiHandler(
     const batch = getAdminDb().batch();
     const leadsRef = runRef.collection("leads");
     scored.forEach((lead) => {
-      const docId = `${lead.source}-${lead.id}`.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 120);
+      const docId = buildLeadDocId({ source: lead.source, id: lead.id });
       batch.set(
         leadsRef.doc(docId),
         stripUndefined({

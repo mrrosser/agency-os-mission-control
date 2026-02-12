@@ -31,8 +31,10 @@ import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/a
 import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
+import { RunDiagnostics, type LeadRunDiagnostics } from "@/components/operations/RunDiagnostics";
 import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
 import { buildCandidateMeetingSlots } from "@/lib/calendar/slot-finder";
+import { buildLeadActionIdempotencyKey, buildLeadDocId } from "@/lib/lead-runs/ids";
 
 interface LeadContext {
     companyName: string;
@@ -45,6 +47,7 @@ interface LeadContext {
 interface DriveCreateFolderResponse {
     success?: boolean;
     replayed?: boolean;
+    dryRun?: boolean;
     mainFolder?: {
         id?: string;
         name?: string;
@@ -54,14 +57,32 @@ interface DriveCreateFolderResponse {
     error?: string;
 }
 
-interface CalendarCreateEventResponse {
+interface CalendarScheduleResponse {
     success?: boolean;
+    scheduledStart?: string;
+    scheduledEnd?: string;
+    meetLink?: string;
     event?: {
+        id?: string;
+        htmlLink?: string;
         conferenceData?: {
             entryPoints?: Array<{ uri?: string }>;
         };
     };
     replayed?: boolean;
+    dryRun?: boolean;
+    checked?: number;
+    busyCount?: number;
+    error?: string;
+}
+
+interface GmailDraftResponse {
+    success?: boolean;
+    draftId?: string;
+    messageId?: string;
+    threadId?: string;
+    replayed?: boolean;
+    dryRun?: boolean;
     error?: string;
 }
 
@@ -110,9 +131,11 @@ export default function OperationsPage() {
     const [useSMS, setUseSMS] = useState(false);
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
+    const [dryRun, setDryRun] = useState(false);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
     const [sourceRunId, setSourceRunId] = useState<string | null>(null);
     const [sourceWarnings, setSourceWarnings] = useState<string[]>([]);
+    const [diagnostics, setDiagnostics] = useState<LeadRunDiagnostics>({});
     const [templates, setTemplates] = useState<LeadRunTemplate[]>([]);
     const [templatesLoading, setTemplatesLoading] = useState(false);
     const [templateSaving, setTemplateSaving] = useState(false);
@@ -364,11 +387,28 @@ export default function OperationsPage() {
             return;
         }
 
+        const runId = crypto.randomUUID();
+        const correlationId = runId;
+
         setIsRunning(true);
         setLogs([]);
         setJourneys([]);
-        setSourceRunId(null);
+        setSourceRunId(runId);
         setSourceWarnings([]);
+        setDiagnostics({
+            runId,
+            dryRun,
+            candidateTotal: null,
+            scoredCount: null,
+            filteredOut: null,
+            processed: 0,
+            meetingsScheduled: 0,
+            meetingsDrafted: 0,
+            noSlot: 0,
+            emailsSent: 0,
+            emailsDrafted: 0,
+            noEmail: 0,
+        });
 
         try {
 
@@ -392,7 +432,7 @@ export default function OperationsPage() {
                 try {
                     // For demo, just read first file to save tokens/time
                     // In production, we would merge all selected files or use a vector search
-                    const readHeaders = await buildAuthHeaders(user);
+                    const readHeaders = await buildAuthHeaders(user, { correlationId });
                      const readResponse = await fetch('/api/drive/read', {
                          method: 'POST',
                          headers: readHeaders,
@@ -419,7 +459,8 @@ export default function OperationsPage() {
             addLog(`🔍 Sourcing ${limit} leads for ${targetIndustry || 'your ICP'}...`);
 
             const sourceHeaders = await buildAuthHeaders(user, {
-                idempotencyKey: crypto.randomUUID(),
+                idempotencyKey: runId,
+                correlationId,
             });
              const sourceResponse = await fetch("/api/leads/source", {
                  method: "POST",
@@ -450,8 +491,8 @@ export default function OperationsPage() {
                 );
             }
 
-            const sourcedLeads = (sourcePayload.leads || []) as LeadCandidate[];
-            setSourceRunId(sourcePayload.runId || null);
+             const sourcedLeads = (sourcePayload.leads || []) as LeadCandidate[];
+            setSourceRunId(sourcePayload.runId || runId);
             setSourceWarnings(sourcePayload.warnings || []);
 
             if (sourcePayload.warnings?.length) {
@@ -467,8 +508,20 @@ export default function OperationsPage() {
                 const filteredMsg =
                     filteredOut && filteredOut > 0 ? ` (${filteredOut} filtered out below ${minScore})` : "";
                 addLog(`✓ Found ${sourcePayload.candidateTotal} candidates; ${sourcedLeads.length} scored >= ${minScore}${filteredMsg}`);
+                setDiagnostics((prev) => ({
+                    ...prev,
+                    candidateTotal: sourcePayload.candidateTotal ?? null,
+                    scoredCount: sourcedLeads.length,
+                    filteredOut: filteredOut ?? null,
+                }));
             } else {
                 addLog(`✓ Scored ${sourcedLeads.length} leads above ${minScore}`);
+                setDiagnostics((prev) => ({
+                    ...prev,
+                    candidateTotal: null,
+                    scoredCount: sourcedLeads.length,
+                    filteredOut: null,
+                }));
             }
 
             setJourneys(
@@ -498,6 +551,8 @@ export default function OperationsPage() {
                 }
 
                 const lead = sourcedLeads[i];
+                const leadDocId = buildLeadDocId({ source: lead.source, id: lead.id });
+                setDiagnostics((prev) => ({ ...prev, processed: (prev.processed || 0) + 1 }));
                 addLog(`\n--- Processing: ${lead.companyName} (${i + 1}/${sourcedLeads.length}) ---`);
 
                 const leadName = lead.founderName || "there";
@@ -510,84 +565,24 @@ export default function OperationsPage() {
                     updateJourneyStep(lead.id, "script", "skipped");
                 }
 
-                // Check calendar availability (find next open slot instead of skipping on first conflict)
-                addLog(`Checking calendar for ${lead.companyName}...`);
-                const candidateSlots = buildCandidateMeetingSlots({
-                    now: new Date(),
-                    leadTimeDays: 2,
-                    slotMinutes: 30,
-                    businessStartHour: 9,
-                    businessEndHour: 17,
-                    searchDays: 7,
-                    maxSlots: 32,
-                });
-
-                const availabilityHeaders = await buildAuthHeaders(user);
-                let meetingTime: Date | null = null;
-                let slotsChecked = 0;
-                let availabilityErrors = 0;
-
-                for (const candidateStart of candidateSlots) {
-                    const candidateEnd = new Date(candidateStart.getTime() + 30 * 60000);
-                    const availResponse = await fetch("/api/calendar/availability", {
-                        method: "POST",
-                        headers: availabilityHeaders,
-                        body: JSON.stringify({
-                            startTime: candidateStart.toISOString(),
-                            endTime: candidateEnd.toISOString(),
-                        }),
-                    });
-
-                    slotsChecked += 1;
-                    const availResult = await readApiJson<{ available?: boolean; error?: string }>(availResponse);
-                    if (!availResponse.ok) {
-                        availabilityErrors += 1;
-                        const cid = getResponseCorrelationId(availResponse);
-                        addLog(
-                            `⚠ Availability check failed for ${candidateStart.toLocaleString()} (status ${availResponse.status}${cid ? ` cid=${cid}` : ""
-                            })`
-                        );
-                        if (availResponse.status === 401 || availResponse.status === 403) {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    if (availResult.available) {
-                        meetingTime = candidateStart;
-                        break;
-                    }
-                }
-
-                if (!meetingTime) {
-                    updateJourneyStep(lead.id, "booking", "skipped");
-                    if (availabilityErrors === slotsChecked && slotsChecked > 0) {
-                        addLog(`⚠ Calendar availability checks failed for ${lead.companyName}, skipping...`);
-                    } else {
-                        addLog(`⚠ No open 30-minute slot found for ${lead.companyName} in the next 7 business days, skipping...`);
-                    }
-                    continue;
-                }
-
-                if (slotsChecked > 1) {
-                    addLog(`↪ Found next available slot after ${slotsChecked} checks`);
-                }
-                addLog(`✓ Time slot available: ${meetingTime.toLocaleString()}`);
-                const meetingEnd = new Date(meetingTime.getTime() + 30 * 60000);
-
-                // Create Drive folder
-                addLog(`Creating Drive folder for ${lead.companyName}...`);
+                // Create Drive folder (idempotent per run+lead)
+                addLog(`${dryRun ? "DRY RUN: " : ""}Creating Drive folder for ${lead.companyName}...`);
                 const folderHeaders = await buildAuthHeaders(user, {
-                    idempotencyKey: crypto.randomUUID(),
+                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "drive.create-folder" }),
+                    correlationId,
                 });
-                 const folderResponse = await fetch("/api/drive/create-folder", {
-                     method: "POST",
-                     headers: folderHeaders,
-                     body: JSON.stringify({
-                         clientName: lead.companyName,
-                     }),
-                 });
- 
+                const folderResponse = await fetch("/api/drive/create-folder", {
+                    method: "POST",
+                    headers: folderHeaders,
+                    body: JSON.stringify({
+                        clientName: lead.companyName,
+                        dryRun,
+                        runId,
+                        leadDocId,
+                        receiptActionId: "drive.folder",
+                    }),
+                });
+  
                 let folderResult: DriveCreateFolderResponse | null = null;
                 try {
                     folderResult = await readApiJson<DriveCreateFolderResponse>(folderResponse);
@@ -602,45 +597,149 @@ export default function OperationsPage() {
                     addLog(`⚠ Failed to create folder, continuing...`);
                 }
 
-                // Create calendar event
+                // Create calendar event (server-side slot search + fallback)
                 updateJourneyStep(lead.id, "booking", "running");
-                addLog(`Scheduling meeting with ${leadName}...`);
-                const eventHeaders = await buildAuthHeaders(user, {
-                    idempotencyKey: crypto.randomUUID(),
+                addLog(`${dryRun ? "DRY RUN: " : ""}Scheduling meeting with ${leadName}...`);
+
+                const scheduleIdempotencyKey = buildLeadActionIdempotencyKey({ runId, leadDocId, action: "calendar.schedule" });
+                const scheduleHeaders = await buildAuthHeaders(user, {
+                    idempotencyKey: scheduleIdempotencyKey,
+                    correlationId,
                 });
-                 const eventResponse = await fetch("/api/calendar/create-event", {
-                     method: "POST",
-                     headers: eventHeaders,
-                     body: JSON.stringify({
-                         event: {
-                            summary: `Discovery Call - ${lead.companyName}`,
-                            description: `Call with ${leadName} from ${lead.companyName}`,
-                            start: {
-                                dateTime: meetingTime.toISOString(),
-                            },
-                            end: {
-                                dateTime: meetingEnd.toISOString(),
-                            },
-                            attendees: leadEmail ? [{ email: leadEmail }] : [],
-                            conferenceData: {
-                                createRequest: {
-                                    requestId: crypto.randomUUID(),
-                                    conferenceSolutionKey: { type: "hangoutsMeet" },
+
+                const primaryCandidates = buildCandidateMeetingSlots({
+                    now: new Date(),
+                    leadTimeDays: 2,
+                    slotMinutes: 30,
+                    businessStartHour: 9,
+                    businessEndHour: 17,
+                    searchDays: 7,
+                    maxSlots: 40,
+                });
+
+                const scheduleAttempt = async (candidateStarts: Date[]) => {
+                    const scheduleResponse = await fetch("/api/calendar/schedule", {
+                        method: "POST",
+                        headers: scheduleHeaders,
+                        body: JSON.stringify({
+                            runId,
+                            leadDocId,
+                            receiptActionId: "calendar.booking",
+                            dryRun,
+                            durationMinutes: 30,
+                            candidateStarts: candidateStarts.map((d) => d.toISOString()),
+                            event: {
+                                summary: `Discovery Call - ${lead.companyName}`,
+                                description: `Call with ${leadName} from ${lead.companyName}`,
+                                attendees: leadEmail ? [{ email: leadEmail }] : [],
+                                conferenceData: {
+                                    createRequest: {
+                                        requestId: crypto.randomUUID(),
+                                        conferenceSolutionKey: { type: "hangoutsMeet" },
+                                    },
                                 },
                             },
-                         },
-                     }),
-                 });
- 
-                const eventResult = await readApiJson<CalendarCreateEventResponse>(eventResponse);
-                const meetLink = eventResult?.event?.conferenceData?.entryPoints?.[0]?.uri || "Meeting link pending";
-                 if (eventResponse.ok) {
-                     updateJourneyStep(lead.id, "booking", "complete");
-                     addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
-                 } else {
-                     updateJourneyStep(lead.id, "booking", "error");
-                     addLog(`⚠ Meeting scheduling failed`);
-                 }
+                        }),
+                    });
+
+                    const scheduleJson = await readApiJson<CalendarScheduleResponse & { error?: string; details?: unknown }>(scheduleResponse);
+                    return { scheduleResponse, scheduleJson };
+                };
+
+                let meetingTime: Date | null = null;
+                let meetLink: string | null = null;
+
+                let scheduleResponse: Response | null = null;
+                let scheduleJson: (CalendarScheduleResponse & { error?: string; details?: unknown }) | null = null;
+
+                // Primary window: next 7 business days, 9a-5p.
+                ({ scheduleResponse, scheduleJson } = await scheduleAttempt(primaryCandidates));
+
+                // Secondary window: expand to 14 days and broader hours if needed.
+                if (!scheduleResponse.ok && scheduleResponse.status === 409) {
+                    setDiagnostics((prev) => ({ ...prev, noSlot: (prev.noSlot || 0) + 1 }));
+                    addLog(`⚠ No slot in primary window. Expanding search window...`);
+                    const secondaryCandidates = buildCandidateMeetingSlots({
+                        now: new Date(),
+                        leadTimeDays: 2,
+                        slotMinutes: 30,
+                        businessStartHour: 8,
+                        businessEndHour: 18,
+                        searchDays: 14,
+                        maxSlots: 100,
+                    });
+                    ({ scheduleResponse, scheduleJson } = await scheduleAttempt(secondaryCandidates));
+                }
+
+                if (scheduleResponse.ok && scheduleJson?.scheduledStart && scheduleJson.scheduledEnd) {
+                    meetingTime = new Date(scheduleJson.scheduledStart);
+                    meetLink =
+                        scheduleJson.meetLink ||
+                        scheduleJson?.event?.conferenceData?.entryPoints?.[0]?.uri ||
+                        null;
+                    updateJourneyStep(lead.id, "booking", "complete");
+                    setDiagnostics((prev) => ({ ...prev, meetingsScheduled: (prev.meetingsScheduled || 0) + 1 }));
+                    addLog(`✓ Meeting scheduled: ${meetingTime.toLocaleString()}`);
+                    if (scheduleJson.checked && scheduleJson.checked > 1) {
+                        addLog(`↪ Slot selected after ${scheduleJson.checked} checks`);
+                    }
+                } else if (scheduleResponse.status === 409) {
+                    // Fallback: draft an email requesting availability (no silent skip).
+                    updateJourneyStep(lead.id, "booking", "running");
+                    if (leadEmail) {
+                        addLog(`✉ No availability found. Drafting an email to request availability...`);
+                        const suggestedTimes = primaryCandidates.slice(0, 3).map((d) => d.toLocaleString());
+                        const draftBody = `
+                            <h2>Hi ${leadName},</h2>
+                            <p>I tried to find a quick 30-minute slot on my calendar, but didn’t see a clean opening this week.</p>
+                            <p>Would any of these times work for a quick discovery call?</p>
+                            <ul>
+                                ${suggestedTimes.map((t) => `<li>${t}</li>`).join("")}
+                            </ul>
+                            <p>If not, reply with 2-3 times that work for you next week and I’ll send an invite.</p>
+                            <br/>
+                            <p>Best regards,</p>
+                            <p>${identity.founderName}<br/>${identity.businessName}</p>
+                        `;
+
+                        const draftHeaders = await buildAuthHeaders(user, {
+                            idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "gmail.draft" }),
+                            correlationId,
+                        });
+                        const draftResponse = await fetch("/api/gmail/draft", {
+                            method: "POST",
+                            headers: draftHeaders,
+                            body: JSON.stringify({
+                                dryRun,
+                                runId,
+                                leadDocId,
+                                receiptActionId: "gmail.availability_draft",
+                                email: {
+                                    to: [leadEmail],
+                                    subject: `Quick scheduling question - ${lead.companyName}`,
+                                    body: draftBody,
+                                    isHtml: true,
+                                },
+                            }),
+                        });
+
+                        const draftJson = await readApiJson<GmailDraftResponse & { error?: string }>(draftResponse);
+                        if (draftResponse.ok) {
+                            updateJourneyStep(lead.id, "booking", "complete");
+                            setDiagnostics((prev) => ({ ...prev, meetingsDrafted: (prev.meetingsDrafted || 0) + 1 }));
+                            addLog(`✓ Draft created (Gmail Draft ID: ${draftJson.draftId || "unknown"})`);
+                        } else {
+                            updateJourneyStep(lead.id, "booking", "error");
+                            addLog(`⚠ Failed to create draft email`);
+                        }
+                    } else {
+                        updateJourneyStep(lead.id, "booking", "skipped");
+                        addLog(`⚠ No availability found and no email to draft. Skipping booking.`);
+                    }
+                } else {
+                    updateJourneyStep(lead.id, "booking", "error");
+                    addLog(`⚠ Meeting scheduling failed`);
+                }
 
                 let outreachAttempted = false;
                 let outreachSucceeded = false;
@@ -655,22 +754,27 @@ export default function OperationsPage() {
                         <p>I noticed ${lead.companyName} and thought we could help with ${identity.primaryService}.</p>
                         <p>Our core value: ${identity.coreValue}</p>
                         <p><strong>Key benefit:</strong> ${identity.keyBenefit}</p>
-                        <p>I've scheduled a brief 30-minute discovery call for ${meetingTime.toLocaleString()}.</p>
-                        <p><strong>Join here:</strong> <a href="${meetLink}">${meetLink}</a></p>
-                         <p>I've also created a shared folder for our collaboration: 
+                        ${meetingTime ? `<p>I've scheduled a brief 30-minute discovery call for ${meetingTime.toLocaleString()}.</p>` : ""}
+                        ${meetLink ? `<p><strong>Join here:</strong> <a href="${meetLink}">${meetLink}</a></p>` : ""}
+                          <p>I've also created a shared folder for our collaboration: 
                         <a href="${folderResult?.mainFolder?.webViewLink || '#'}">View Folder</a></p>
-                         <br/>
-                         <p>Best regards,</p>
-                         <p>${identity.founderName}<br/>${identity.businessName}</p>
-                     `;
+                          <br/>
+                          <p>Best regards,</p>
+                          <p>${identity.founderName}<br/>${identity.businessName}</p>
+                      `;
 
                     const emailHeaders = await buildAuthHeaders(user, {
-                        idempotencyKey: crypto.randomUUID(),
+                        idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "gmail.send" }),
+                        correlationId,
                     });
                     const emailResponse = await fetch("/api/gmail/send", {
                         method: "POST",
                         headers: emailHeaders,
                         body: JSON.stringify({
+                            dryRun,
+                            runId,
+                            leadDocId,
+                            receiptActionId: "gmail.outreach",
                             email: {
                                 to: [leadEmail],
                                 subject: `Quick Question - ${lead.companyName}`,
@@ -683,22 +787,27 @@ export default function OperationsPage() {
                     if (emailResponse.ok) {
                         outreachSucceeded = true;
                         addLog(`✓ Email sent to ${leadEmail}`);
+                        setDiagnostics((prev) => ({ ...prev, emailsSent: (prev.emailsSent || 0) + 1 }));
 
                         // Sync to CRM
                         try {
-                            await dbService.addLead({
-                                userId: user.uid,
-                                name: leadName,
-                                email: leadEmail,
-                                company: lead.companyName,
-                                phone: leadPhone,
-                                website: lead.website,
-                                industry: lead.industry,
-                                score: lead.score,
-                                source: lead.source,
-                                status: 'contacted'
-                            });
-                            addLog(`✓ Syncing ${lead.companyName} to Deal Pipeline`);
+                            if (!dryRun) {
+                                await dbService.addLead({
+                                    userId: user.uid,
+                                    name: leadName,
+                                    email: leadEmail,
+                                    company: lead.companyName,
+                                    phone: leadPhone,
+                                    website: lead.website,
+                                    industry: lead.industry,
+                                    score: lead.score,
+                                    source: lead.source,
+                                    status: 'contacted'
+                                });
+                                addLog(`✓ Syncing ${lead.companyName} to Deal Pipeline`);
+                            } else {
+                                addLog(`DRY RUN: Skipping Deal Pipeline sync`);
+                            }
                         } catch (e) {
                             console.error("CRM sync error", e);
                         }
@@ -707,6 +816,7 @@ export default function OperationsPage() {
                     }
                 } else {
                     addLog(`⚠ No email found for ${lead.companyName}, skipping email outreach`);
+                    setDiagnostics((prev) => ({ ...prev, noEmail: (prev.noEmail || 0) + 1 }));
                 }
 
                 // --- NEW: Context-Aware AI ---
@@ -726,20 +836,26 @@ export default function OperationsPage() {
                     } else {
                         addLog(`📱 Sending SMS follow-up...`);
                         try {
-                            const smsHeaders = await buildAuthHeaders(user, {
-                                idempotencyKey: crypto.randomUUID(),
-                            });
-                            const smsResponse = await fetch('/api/twilio/send-sms', {
-                                method: 'POST',
-                                headers: smsHeaders,
-                                body: JSON.stringify({
-                                    to: leadPhone,
-                                    message: `Hi ${leadName}, just sent you an email regarding ${lead.companyName}. - ${identity.founderName}`
-                                })
-                            });
-                            if (smsResponse.ok) {
+                            if (dryRun) {
                                 followupSucceeded = true;
-                                addLog(`✓ SMS sent successfully`);
+                                addLog(`DRY RUN: Would send SMS to ${leadPhone}`);
+                            } else {
+                                const smsHeaders = await buildAuthHeaders(user, {
+                                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "twilio.send-sms" }),
+                                    correlationId,
+                                });
+                                const smsResponse = await fetch('/api/twilio/send-sms', {
+                                    method: 'POST',
+                                    headers: smsHeaders,
+                                    body: JSON.stringify({
+                                        to: leadPhone,
+                                        message: `Hi ${leadName}, just sent you an email regarding ${lead.companyName}. - ${identity.founderName}`
+                                    })
+                                });
+                                if (smsResponse.ok) {
+                                    followupSucceeded = true;
+                                    addLog(`✓ SMS sent successfully`);
+                                }
                             }
                         } catch (e) { addLog(`⚠ SMS Error: ${e}`); }
                     }
@@ -754,37 +870,42 @@ export default function OperationsPage() {
                     } else {
                         addLog(`📞 Initiating AI Outbound Call...`);
                         try {
-                            updateJourneyStep(lead.id, "script", "running");
-                            const callScript = await ScriptGenerator.generate(context, {
-                                companyName: lead.companyName,
-                                founderName: leadName,
-                                email: leadEmail,
-                                phone: leadPhone,
-                                targetIndustry: lead.industry,
-                            } as LeadContext, 'voice');
-                            updateJourneyStep(lead.id, "script", "complete");
-                            scriptGenerated = true;
-                            addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
+                            if (dryRun) {
+                                followupSucceeded = true;
+                                addLog(`DRY RUN: Would place outbound call to ${leadPhone}`);
+                            } else {
+                                updateJourneyStep(lead.id, "script", "running");
+                                const callScript = await ScriptGenerator.generate(context, {
+                                    companyName: lead.companyName,
+                                    founderName: leadName,
+                                    email: leadEmail,
+                                    phone: leadPhone,
+                                    targetIndustry: lead.industry,
+                                } as LeadContext, 'voice');
+                                updateJourneyStep(lead.id, "script", "complete");
+                                scriptGenerated = true;
+                                addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
 
-                            const audioHeaders = await buildAuthHeaders(user, {
-                                idempotencyKey: crypto.randomUUID(),
-                            });
-                            const audioResponse = await fetch('/api/elevenlabs/synthesize', {
-                                method: 'POST',
-                                headers: audioHeaders,
-                                body: JSON.stringify({
-                                    text: callScript
-                                })
-                            });
-                            if (!audioResponse.ok) {
-                                throw new Error("Audio synthesis failed");
+                                const audioHeaders = await buildAuthHeaders(user, {
+                                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "elevenlabs.synthesize" }),
+                                    correlationId,
+                                });
+                                const audioResponse = await fetch('/api/elevenlabs/synthesize', {
+                                    method: 'POST',
+                                    headers: audioHeaders,
+                                    body: JSON.stringify({
+                                        text: callScript
+                                    })
+                                });
+                                if (!audioResponse.ok) {
+                                    throw new Error("Audio synthesis failed");
+                                }
+
+                                // In production: upload the synthesized audio to storage and call Twilio with a public URL.
+                                await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
+                                followupSucceeded = true;
+                                addLog(`✓ Call connected & AI message played`);
                             }
-
-                            // In production: upload the synthesized audio to storage and call Twilio with a public URL.
-                            await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
-                            followupSucceeded = true;
-                            addLog(`✓ Call connected & AI message played`);
-
                         } catch (e) {
                             updateJourneyStep(lead.id, "script", "error");
                             scriptErrored = true;
@@ -799,34 +920,41 @@ export default function OperationsPage() {
                     updateJourneyStep(lead.id, "outreach", "running");
                     addLog(`🎬 Creating context-aware avatar video...`);
                     try {
-                        updateJourneyStep(lead.id, "script", "running");
-                        const videoScript = await ScriptGenerator.generate(context, {
-                            companyName: lead.companyName,
-                            founderName: leadName,
-                            email: leadEmail,
-                            phone: leadPhone,
-                            targetIndustry: lead.industry,
-                        } as LeadContext, 'video');
-                        updateJourneyStep(lead.id, "script", "complete");
-                        scriptGenerated = true;
-                        addLog(`📝 Video script tailored to ${lead.industry || 'industry'}`);
-
-                        const avatarHeaders = await buildAuthHeaders(user, {
-                            idempotencyKey: crypto.randomUUID(),
-                        });
-                        const avatarResponse = await fetch('/api/heygen/create-avatar', {
-                            method: 'POST',
-                            headers: avatarHeaders,
-                            body: JSON.stringify({
-                                script: videoScript
-                            })
-                        });
-                        if (avatarResponse.ok) {
+                        if (dryRun) {
                             outreachSucceeded = true;
-                            await new Promise(r => setTimeout(r, 1000));
-                            addLog(`✓ Avatar video queued for generation`);
+                            addLog(`DRY RUN: Would create avatar video job`);
+                            updateJourneyStep(lead.id, "script", "complete");
                         } else {
-                            addLog(`⚠ Avatar request failed`);
+                            updateJourneyStep(lead.id, "script", "running");
+                            const videoScript = await ScriptGenerator.generate(context, {
+                                companyName: lead.companyName,
+                                founderName: leadName,
+                                email: leadEmail,
+                                phone: leadPhone,
+                                targetIndustry: lead.industry,
+                            } as LeadContext, 'video');
+                            updateJourneyStep(lead.id, "script", "complete");
+                            scriptGenerated = true;
+                            addLog(`📝 Video script tailored to ${lead.industry || 'industry'}`);
+
+                            const avatarHeaders = await buildAuthHeaders(user, {
+                                idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "heygen.create-avatar" }),
+                                correlationId,
+                            });
+                            const avatarResponse = await fetch('/api/heygen/create-avatar', {
+                                method: 'POST',
+                                headers: avatarHeaders,
+                                body: JSON.stringify({
+                                    script: videoScript
+                                })
+                            });
+                            if (avatarResponse.ok) {
+                                outreachSucceeded = true;
+                                await new Promise(r => setTimeout(r, 1000));
+                                addLog(`✓ Avatar video queued for generation`);
+                            } else {
+                                addLog(`⚠ Avatar request failed`);
+                            }
                         }
                     } catch (e) {
                         updateJourneyStep(lead.id, "script", "error");
@@ -1108,11 +1236,11 @@ export default function OperationsPage() {
                                         <KnowledgeBase />
                                     </div>
 
-                                    <div className="space-y-3 pt-4 border-t border-zinc-800">
-                                        <div className="space-y-1">
-                                            <h3 className="text-sm font-semibold text-white">Advanced AI Actions ⚡</h3>
-                                            <p className="text-xs text-zinc-400">Context-aware agentic outreach</p>
-                                        </div>
+                                     <div className="space-y-3 pt-4 border-t border-zinc-800">
+                                         <div className="space-y-1">
+                                             <h3 className="text-sm font-semibold text-white">Advanced AI Actions ⚡</h3>
+                                             <p className="text-xs text-zinc-400">Context-aware agentic outreach</p>
+                                         </div>
 
                                         <div className="space-y-3">
                                             <div className="flex items-start space-x-3">
@@ -1168,6 +1296,27 @@ export default function OperationsPage() {
                                                     </p>
                                                 </div>
                                             </div>
+                                         </div>
+                                     </div>
+                                 </div>
+
+                                <div className="pt-4 border-t border-zinc-800">
+                                    <div className="flex items-start space-x-3">
+                                        <input
+                                            type="checkbox"
+                                            id="dryRun"
+                                            checked={dryRun}
+                                            onChange={(e) => setDryRun(e.target.checked)}
+                                            disabled={isRunning}
+                                            className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20 disabled:opacity-50"
+                                        />
+                                        <div className="grid gap-1.5 leading-none">
+                                            <label htmlFor="dryRun" className="text-sm font-medium leading-none text-zinc-200">
+                                                Dry Run (no side effects)
+                                            </label>
+                                            <p className="text-xs text-zinc-500">
+                                                Simulates calendar/email/drive actions and writes receipts as simulated.
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
@@ -1201,13 +1350,14 @@ export default function OperationsPage() {
                         </Card>
                     </div>
 
-                    {/* Lead Journey + Terminal */}
-                    <div className="lg:col-span-2 space-y-6">
-                        <LeadJourney
-                            journeys={journeys}
-                            runId={sourceRunId}
-                            warnings={sourceWarnings}
-                        />
+                     {/* Lead Journey + Terminal */}
+                     <div className="lg:col-span-2 space-y-6">
+                        <RunDiagnostics diagnostics={diagnostics} />
+                         <LeadJourney
+                             journeys={journeys}
+                             runId={sourceRunId}
+                             warnings={sourceWarnings}
+                         />
 
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
                             <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">

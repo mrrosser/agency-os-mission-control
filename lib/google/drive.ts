@@ -19,6 +19,7 @@ export interface DriveFolder {
     name: string;
     parents?: string[];
     description?: string;
+    webViewLink?: string;
 }
 
 /**
@@ -44,8 +45,12 @@ export async function createFolder(
         metadata.description = description;
     }
 
+    const queryParams = new URLSearchParams({
+        fields: "id,name,parents,description,webViewLink",
+    });
+
     const response = await callGoogleAPI<DriveFolder>(
-        `${DRIVE_API_BASE}/files`,
+        `${DRIVE_API_BASE}/files?${queryParams}`,
         accessToken,
         {
             method: 'POST',

@@ -23,6 +23,9 @@ export interface CalendarEvent {
         displayName?: string;
         responseStatus?: 'needsAction' | 'declined' | 'tentative' | 'accepted';
     }>;
+    conferenceData?: {
+        entryPoints?: Array<{ uri?: string }>;
+    };
     htmlLink?: string;
     creator?: {
         email?: string;
@@ -143,6 +146,45 @@ export async function deleteEvent(
 
 interface FreeBusyResponse {
     calendars?: Record<string, { busy?: Array<{ start: string; end: string }> }>;
+}
+
+export interface BusyInterval {
+    start: string;
+    end: string;
+}
+
+/**
+ * List busy intervals for a time window using the FreeBusy API.
+ */
+export async function listBusyIntervals(
+    accessToken: string,
+    timeMin: Date,
+    timeMax: Date,
+    calendarId: string = "primary",
+    log?: Logger
+): Promise<BusyInterval[]> {
+    if (Number.isNaN(timeMin.valueOf()) || Number.isNaN(timeMax.valueOf())) {
+        throw new Error("Invalid timeMin or timeMax");
+    }
+
+    const response = await callGoogleAPI<FreeBusyResponse>(
+        `${CALENDAR_API_BASE}/freeBusy`,
+        accessToken,
+        {
+            method: "POST",
+            body: JSON.stringify({
+                timeMin: timeMin.toISOString(),
+                timeMax: timeMax.toISOString(),
+                items: [{ id: calendarId }],
+            }),
+        },
+        log
+    );
+
+    return (response.calendars?.[calendarId]?.busy || []).map((range) => ({
+        start: range.start,
+        end: range.end,
+    }));
 }
 
 /**

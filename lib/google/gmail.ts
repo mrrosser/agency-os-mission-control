@@ -130,6 +130,58 @@ export async function sendEmail(
 }
 
 /**
+ * Create a Gmail draft (no send).
+ */
+export async function createDraftEmail(
+    accessToken: string,
+    email: EmailMessage,
+    log?: Logger
+): Promise<{ draftId: string; messageId: string; threadId?: string }> {
+    const messageParts: string[] = [];
+
+    messageParts.push(`To: ${email.to.join(', ')}`);
+
+    if (email.cc && email.cc.length > 0) {
+        messageParts.push(`Cc: ${email.cc.join(', ')}`);
+    }
+
+    messageParts.push(`Subject: ${email.subject}`);
+
+    const contentType = email.isHtml ? 'text/html' : 'text/plain';
+    messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
+    messageParts.push('');
+    messageParts.push(email.body);
+
+    const rawMessage = messageParts.join('\r\n');
+    const encodedMessage = Buffer.from(rawMessage)
+        .toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+
+    const response = await callGoogleAPI<{
+        id: string;
+        message?: { id?: string; threadId?: string };
+    }>(
+        `${GMAIL_API_BASE}/users/me/drafts`,
+        accessToken,
+        {
+            method: 'POST',
+            body: JSON.stringify({
+                message: { raw: encodedMessage },
+            }),
+        },
+        log
+    );
+
+    return {
+        draftId: response.id,
+        messageId: response.message?.id || response.id,
+        threadId: response.message?.threadId,
+    };
+}
+
+/**
  * Get inbox messages (with pagination)
  */
 export async function getInboxMessages(

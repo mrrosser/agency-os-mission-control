@@ -124,8 +124,7 @@ export default function OperationsPage() {
 
     const hasTwilio =
         secretStatus.twilioSid !== "missing" &&
-        secretStatus.twilioToken !== "missing" &&
-        secretStatus.twilioPhoneNumber !== "missing";
+        secretStatus.twilioToken !== "missing";
     const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
     const hasHeyGen = secretStatus.heyGenKey !== "missing";
     const hasGooglePlaces = secretStatus.googlePlacesKey !== "missing";

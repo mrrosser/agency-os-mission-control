@@ -726,7 +726,11 @@ export default function OperationsPage() {
                         const draftJson = await readApiJson<GmailDraftResponse & { error?: string }>(draftResponse);
                         if (draftResponse.ok) {
                             updateJourneyStep(lead.id, "booking", "complete");
-                            setDiagnostics((prev) => ({ ...prev, meetingsDrafted: (prev.meetingsDrafted || 0) + 1 }));
+                            setDiagnostics((prev) => ({
+                                ...prev,
+                                meetingsDrafted: (prev.meetingsDrafted || 0) + 1,
+                                emailsDrafted: (prev.emailsDrafted || 0) + 1,
+                            }));
                             addLog(`✓ Draft created (Gmail Draft ID: ${draftJson.draftId || "unknown"})`);
                         } else {
                             updateJourneyStep(lead.id, "booking", "error");

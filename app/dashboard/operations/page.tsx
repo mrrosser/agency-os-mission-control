@@ -32,6 +32,7 @@ import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
 import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
+import { buildCandidateMeetingSlots } from "@/lib/calendar/slot-finder";
 
 interface LeadContext {
     companyName: string;
@@ -121,7 +122,10 @@ export default function OperationsPage() {
     const [templateName, setTemplateName] = useState("");
     const [templateClientName, setTemplateClientName] = useState("");
 
-    const hasTwilio = secretStatus.twilioSid !== "missing" && secretStatus.twilioToken !== "missing";
+    const hasTwilio =
+        secretStatus.twilioSid !== "missing" &&
+        secretStatus.twilioToken !== "missing" &&
+        secretStatus.twilioPhoneNumber !== "missing";
     const hasElevenLabs = secretStatus.elevenLabsKey !== "missing";
     const hasHeyGen = secretStatus.heyGenKey !== "missing";
     const hasGooglePlaces = secretStatus.googlePlacesKey !== "missing";
@@ -178,13 +182,13 @@ export default function OperationsPage() {
         const wantsAvatar = Boolean(outreach.useAvatar);
 
         if (wantsSMS && !hasTwilio) {
-            toast.warning("Template requested SMS, but Twilio keys are missing.", {
-                description: "SMS has been disabled for this run.",
+            toast.warning("Template requested SMS, but Twilio config is incomplete.", {
+                description: "Set SID, token, and phone number in Settings. SMS has been disabled for this run.",
             });
         }
         if (wantsCall && !(hasTwilio && hasElevenLabs)) {
             toast.warning("Template requested outbound calls, but required keys are missing.", {
-                description: "Outbound calls have been disabled for this run.",
+                description: "Set Twilio SID/token/phone and ElevenLabs key. Outbound calls have been disabled for this run.",
             });
         }
         if (wantsAvatar && !hasHeyGen) {
@@ -507,37 +511,70 @@ export default function OperationsPage() {
                     updateJourneyStep(lead.id, "script", "skipped");
                 }
 
-                // Check calendar availability
+                // Check calendar availability (find next open slot instead of skipping on first conflict)
                 addLog(`Checking calendar for ${lead.companyName}...`);
-                const meetingTime = new Date();
-                meetingTime.setDate(meetingTime.getDate() + 2);
-                meetingTime.setHours(14, 0, 0, 0);
+                const candidateSlots = buildCandidateMeetingSlots({
+                    now: new Date(),
+                    leadTimeDays: 2,
+                    slotMinutes: 30,
+                    businessStartHour: 9,
+                    businessEndHour: 17,
+                    searchDays: 7,
+                    maxSlots: 32,
+                });
 
                 const availabilityHeaders = await buildAuthHeaders(user);
-                 const availResponse = await fetch("/api/calendar/availability", {
-                     method: "POST",
-                     headers: availabilityHeaders,
-                     body: JSON.stringify({
-                         startTime: meetingTime.toISOString(),
-                         endTime: new Date(meetingTime.getTime() + 30 * 60000).toISOString(),
-                     }),
-                 });
- 
-                const availResult = await readApiJson<{ available?: boolean; error?: string }>(availResponse);
-                if (!availResponse.ok) {
-                    const cid = getResponseCorrelationId(availResponse);
+                let meetingTime: Date | null = null;
+                let slotsChecked = 0;
+                let availabilityErrors = 0;
+
+                for (const candidateStart of candidateSlots) {
+                    const candidateEnd = new Date(candidateStart.getTime() + 30 * 60000);
+                    const availResponse = await fetch("/api/calendar/availability", {
+                        method: "POST",
+                        headers: availabilityHeaders,
+                        body: JSON.stringify({
+                            startTime: candidateStart.toISOString(),
+                            endTime: candidateEnd.toISOString(),
+                        }),
+                    });
+
+                    slotsChecked += 1;
+                    const availResult = await readApiJson<{ available?: boolean; error?: string }>(availResponse);
+                    if (!availResponse.ok) {
+                        availabilityErrors += 1;
+                        const cid = getResponseCorrelationId(availResponse);
+                        addLog(
+                            `⚠ Availability check failed for ${candidateStart.toLocaleString()} (status ${availResponse.status}${cid ? ` cid=${cid}` : ""
+                            })`
+                        );
+                        if (availResponse.status === 401 || availResponse.status === 403) {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    if (availResult.available) {
+                        meetingTime = candidateStart;
+                        break;
+                    }
+                }
+
+                if (!meetingTime) {
                     updateJourneyStep(lead.id, "booking", "skipped");
-                    addLog(`⚠ Availability check failed (status ${availResponse.status}${cid ? ` cid=${cid}` : ""}), skipping...`);
+                    if (availabilityErrors === slotsChecked && slotsChecked > 0) {
+                        addLog(`⚠ Calendar availability checks failed for ${lead.companyName}, skipping...`);
+                    } else {
+                        addLog(`⚠ No open 30-minute slot found for ${lead.companyName} in the next 7 business days, skipping...`);
+                    }
                     continue;
                 }
- 
-                if (!availResult.available) {
-                     updateJourneyStep(lead.id, "booking", "skipped");
-                     addLog(`⚠ Time conflict for ${lead.companyName}, skipping...`);
-                     continue;
-                 }
 
-                addLog(`✓ Time slot available`);
+                if (slotsChecked > 1) {
+                    addLog(`↪ Found next available slot after ${slotsChecked} checks`);
+                }
+                addLog(`✓ Time slot available: ${meetingTime.toLocaleString()}`);
+                const meetingEnd = new Date(meetingTime.getTime() + 30 * 60000);
 
                 // Create Drive folder
                 addLog(`Creating Drive folder for ${lead.companyName}...`);
@@ -583,7 +620,7 @@ export default function OperationsPage() {
                                 dateTime: meetingTime.toISOString(),
                             },
                             end: {
-                                dateTime: new Date(meetingTime.getTime() + 30 * 60000).toISOString(),
+                                dateTime: meetingEnd.toISOString(),
                             },
                             attendees: leadEmail ? [{ email: leadEmail }] : [],
                             conferenceData: {

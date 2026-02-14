@@ -13,7 +13,8 @@ import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { buildLeadDocId } from "@/lib/lead-runs/ids";
 
 const bodySchema = z.object({
-  query: z.string().min(1).max(120).optional(),
+  // Allow longer natural-language descriptions; downstream providers may further truncate.
+  query: z.string().min(1).max(500).optional(),
   industry: z.string().min(1).max(80).optional(),
   location: z.string().min(1).max(120).optional(),
   limit: z.number().int().min(1).max(25).optional(),

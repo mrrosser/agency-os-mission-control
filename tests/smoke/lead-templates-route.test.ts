@@ -126,6 +126,61 @@ describe("lead templates routes", () => {
     expect((templatesCollection.doc as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0]).toBe("t-upsert");
   });
 
+  it("upserts a template with a long query description", async () => {
+    const docRef = { id: "t-long" };
+
+    const templatesCollection = {
+      doc: vi.fn(() => docRef),
+    };
+
+    const identityDoc = {
+      collection: vi.fn(() => templatesCollection),
+    };
+
+    const identitiesCollection = {
+      doc: vi.fn(() => identityDoc),
+    };
+
+    const txGet = vi.fn(async () => ({ exists: false }));
+    const txSet = vi.fn();
+
+    const runTransaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      return fn({ get: txGet, set: txSet });
+    });
+
+    getAdminDbMock.mockReturnValue({
+      collection: vi.fn(() => identitiesCollection),
+      runTransaction,
+    } as unknown as ReturnType<typeof getAdminDb>);
+
+    const longQuery =
+      "We are looking for art buyers in New Orleans that want to book private gallery events and commission local artists. ";
+
+    const body = {
+      templateId: "t-long",
+      name: "Long Query Template",
+      clientName: "Client A",
+      params: { query: longQuery.repeat(3).trim(), location: "New Orleans, LA", limit: 5, minScore: 60 },
+      outreach: { useSMS: true, useAvatar: false, useOutboundCall: true, draftFirst: true },
+    };
+
+    const req = new Request("http://localhost/api/leads/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.template.templateId).toBe("t-long");
+    expect(txSet).toHaveBeenCalledOnce();
+  });
+
   it("deletes a template", async () => {
     const deleteMock = vi.fn(async () => undefined);
     const templateDoc = { delete: deleteMock };

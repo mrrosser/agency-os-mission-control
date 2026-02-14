@@ -62,8 +62,11 @@ function withTimeout(timeoutMs: number) {
 
 function buildQuery(query: string, location?: string) {
     const trimmed = query.trim();
-    if (!location) return trimmed;
-    return `${trimmed} in ${location.trim()}`;
+    // Long "ICP" descriptions degrade Places search; cap to a reasonable prefix.
+    const cappedBase = trimmed.split(/\s+/).slice(0, 12).join(" ").slice(0, 120).trim();
+    if (!location) return cappedBase;
+    const combined = `${cappedBase} in ${location.trim()}`;
+    return combined.length > 160 ? combined.slice(0, 160).trimEnd() : combined;
 }
 
 export async function fetchGooglePlacesLeads(params: GooglePlacesSearchParams): Promise<LeadCandidate[]> {

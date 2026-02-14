@@ -25,7 +25,8 @@ type LeadRunTemplate = {
 const sourcesSchema = z.array(z.enum(["googlePlaces", "firestore"] satisfies LeadSource[]));
 
 const paramsSchema = z.object({
-  query: z.string().min(1).max(120).optional(),
+  // Allow longer natural-language descriptions; downstream providers may further truncate.
+  query: z.string().min(1).max(500).optional(),
   industry: z.string().min(1).max(80).optional(),
   location: z.string().min(1).max(120).optional(),
   // Be tolerant to number-like strings coming from clients.

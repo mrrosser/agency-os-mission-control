@@ -22,7 +22,6 @@ import { db } from "@/lib/firebase";
 import { KnowledgeBase } from "@/components/operations/KnowledgeBase";
 import { FollowupSequencingCard } from "@/components/operations/FollowupSequencingCard";
 import { SavedRunTemplates } from "@/components/operations/SavedRunTemplates";
-import { ScriptGenerator } from "@/lib/ai/script-generator";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
@@ -33,14 +32,6 @@ import { RunAuditDrawer } from "@/components/operations/RunAuditDrawer";
 import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
 import { buildLeadActionIdempotencyKey, buildLeadDocId } from "@/lib/lead-runs/ids";
 import { leadsToCsv } from "@/lib/leads/export";
-
-interface LeadContext {
-    companyName: string;
-    founderName?: string;
-    email?: string;
-    phone?: string;
-    targetIndustry?: string;
-}
 
 interface DriveCreateFolderResponse {
     success?: boolean;
@@ -1866,16 +1857,42 @@ export default function OperationsPage() {
                                 addLog(`DRY RUN: Would place outbound call to ${leadPhone}`);
                             } else {
                                 updateJourneyStep(lead.id, "script", "running");
-                                const callScript = await ScriptGenerator.generate(context, {
-                                    companyName: lead.companyName,
-                                    founderName: leadName,
-                                    email: leadEmail,
-                                    phone: leadPhone,
-                                    targetIndustry: lead.industry,
-                                } as LeadContext, 'voice');
+                                const scriptHeaders = await buildAuthHeaders(user, {
+                                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "ai.script.voice" }),
+                                    correlationId,
+                                });
+                                const scriptResponse = await fetch("/api/ai/script", {
+                                    method: "POST",
+                                    headers: scriptHeaders,
+                                    body: JSON.stringify({
+                                        context,
+                                        type: "voice",
+                                        lead: {
+                                            companyName: lead.companyName,
+                                            founderName: leadName,
+                                            targetIndustry: lead.industry,
+                                        },
+                                    }),
+                                });
+                                const scriptPayload = await readApiJson<{
+                                    script?: string;
+                                    provider?: string;
+                                    error?: string;
+                                }>(scriptResponse);
+                                if (!scriptResponse.ok) {
+                                    const cid = getResponseCorrelationId(scriptResponse);
+                                    throw new Error(
+                                        scriptPayload?.error ||
+                                        `Script generation failed (status ${scriptResponse.status}${cid ? ` cid=${cid}` : ""})`
+                                    );
+                                }
+                                const callScript = String(scriptPayload?.script || "").trim();
+                                if (!callScript) {
+                                    throw new Error("Script generation returned an empty result");
+                                }
                                 updateJourneyStep(lead.id, "script", "complete");
                                 scriptGenerated = true;
-                                addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
+                                addLog(`📝 Script generated (${scriptPayload?.provider || "unknown"}): "${callScript.slice(0, 30)}..."`);
 
                                 const callHeaders = await buildAuthHeaders(user, {
                                     idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "twilio.make-call" }),
@@ -1917,16 +1934,42 @@ export default function OperationsPage() {
                             updateJourneyStep(lead.id, "script", "complete");
                         } else {
                             updateJourneyStep(lead.id, "script", "running");
-                            const videoScript = await ScriptGenerator.generate(context, {
-                                companyName: lead.companyName,
-                                founderName: leadName,
-                                email: leadEmail,
-                                phone: leadPhone,
-                                targetIndustry: lead.industry,
-                            } as LeadContext, 'video');
+                            const scriptHeaders = await buildAuthHeaders(user, {
+                                idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "ai.script.video" }),
+                                correlationId,
+                            });
+                            const scriptResponse = await fetch("/api/ai/script", {
+                                method: "POST",
+                                headers: scriptHeaders,
+                                body: JSON.stringify({
+                                    context,
+                                    type: "video",
+                                    lead: {
+                                        companyName: lead.companyName,
+                                        founderName: leadName,
+                                        targetIndustry: lead.industry,
+                                    },
+                                }),
+                            });
+                            const scriptPayload = await readApiJson<{
+                                script?: string;
+                                provider?: string;
+                                error?: string;
+                            }>(scriptResponse);
+                            if (!scriptResponse.ok) {
+                                const cid = getResponseCorrelationId(scriptResponse);
+                                throw new Error(
+                                    scriptPayload?.error ||
+                                    `Script generation failed (status ${scriptResponse.status}${cid ? ` cid=${cid}` : ""})`
+                                );
+                            }
+                            const videoScript = String(scriptPayload?.script || "").trim();
+                            if (!videoScript) {
+                                throw new Error("Script generation returned an empty result");
+                            }
                             updateJourneyStep(lead.id, "script", "complete");
                             scriptGenerated = true;
-                            addLog(`📝 Video script tailored to ${lead.industry || 'industry'}`);
+                            addLog(`📝 Video script (${scriptPayload?.provider || "unknown"}) tailored to ${lead.industry || 'industry'}`);
 
                             const avatarHeaders = await buildAuthHeaders(user, {
                                 idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "heygen.create-avatar" }),

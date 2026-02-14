@@ -14,6 +14,7 @@
 - Build: `npm run build` PASS (included in RT loop).
 - Smoke: `npm run test:smoke` PASS (included in RT loop).
 - Unit: `npm run test:unit` PASS (included in RT loop).
+- Deploy: Firebase Hosting + SSR backend updated for `leadflow-review` (`https://leadflow-review.web.app`).
 
 ## Security / Compliance Evidence
 - Vulnerability scan: `scan_repo.ps1 -IncludeSecrets` ran (run_id=8b0dd9d7-cd7b-4b4a-bd3e-ae178b06d74a).

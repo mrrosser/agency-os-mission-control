@@ -51,3 +51,4 @@ Run a full product + code audit, capture actionable findings, and execute a tigh
 - [x] First Scan Tour replay: Settings entry point + force-show flag for existing users.
 - [x] Operations page refactor: split into smaller view components (no behavior change).
 - [x] Booking clarity: record + render explicit `no_slot` receipts; expand lead contact candidates with confidence tags.
+- [x] Deploy reliability: fix Firebase deploy helper on Windows (`npx` spawn / `EINVAL`).

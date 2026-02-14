@@ -1,8 +1,8 @@
 # Full Audit Report (2026-02-13)
 
 ## Baseline Evidence
-- RT loop: PASS (RUN_ID=20260213-204013-2117). See `docs/reports/latest-run.md`.
-- Security scan: `npm audit` clean. See `.security/reports/npm-audit.txt`. (Local secrets scan requires `gitleaks`.)
+- RT loop: PASS (RUN_ID=20260213-231846-4574). See `docs/reports/latest-run.md`.
+- Security scan: `npm audit --audit-level=high` passes. Full `npm audit` currently reports 2 low-severity transitive findings (`cookie` via `firebase-frameworks`). See `.security/reports/npm-audit.txt` (local; secrets scan requires `gitleaks`).
 - Playwright (optional): run `npm run test:pw` (requires Playwright browsers installed).
 
 ## Current Product Surface (High Level)
@@ -13,7 +13,9 @@
 
 ## Changes Shipped In This Audit Sprint
 - RT loop harness + CI gate: `scripts/loop/run.ps1`, `scripts/loop/run.sh`, `.github/workflows/rt-loop.yml`.
-- Dependency/security cleanup: `npm audit --audit-level=high` now clean.
+- RT loop hardening: retry build once after cleaning `.next` to mitigate intermittent Next.js Windows build trace flakes.
+- Firebase deploy helper: omit dev deps during frameworks SSR build (`NPM_CONFIG_OMIT=dev`) to keep deploys reliable and bundles small.
+- Dependency/security cleanup: `npm audit --audit-level=high` passes (see note above re: low-severity transitive findings).
 - Removed eslint warnings (hooks deps, unused vars, `any` types) and documented blob-image exceptions.
 - Optimized onboarding tour mounting to avoid secrets-status auto-fetch unless the tour is eligible to show.
 - Normalized Playwright local base URL to `http://localhost:3000` to avoid Next.js dev cross-origin warnings.

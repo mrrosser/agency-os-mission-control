@@ -8,7 +8,8 @@ const args = argv.length > 0 ? argv : ["deploy", "--only", "hosting"];
 const env = {
   ...process.env,
   NODE_ENV: "production",
-  NPM_CONFIG_PRODUCTION: "true",
+  // Prefer npm's modern omit flag over deprecated "production=true".
+  NPM_CONFIG_OMIT: "dev",
   FIREBASE_CLI_EXPERIMENTS: process.env.FIREBASE_CLI_EXPERIMENTS || "webframeworks",
 };
 

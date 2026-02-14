@@ -57,6 +57,42 @@ run() {
   log "gate=$name result=PASS"
 }
 
+clean_next_build_artifacts() {
+  if [[ -d ".next" ]]; then
+    log "gate=build cleanup=.next"
+    rm -rf .next
+  fi
+}
+
+run_build_gate() {
+  local cmd="$1"
+  local max_attempts="${2:-2}"
+  local attempt=1
+
+  while true; do
+    log "gate=build attempt=$attempt cmd=$cmd"
+    set +e
+    bash -lc "$cmd"
+    local ec=$?
+    set -e
+
+    if [[ $ec -eq 0 ]]; then
+      log "gate=build result=PASS attempts=$attempt"
+      return 0
+    fi
+
+    if [[ $attempt -ge $max_attempts ]]; then
+      log "gate=build result=FAIL exit=$ec attempts=$attempt"
+      return $ec
+    fi
+
+    log "gate=build result=RETRY exit=$ec attempt=$attempt reason=clean_retry"
+    clean_next_build_artifacts
+    sleep 1
+    attempt=$((attempt + 1))
+  done
+}
+
 log_tool_version() {
   local tool="$1"
   local version_cmd="$2"
@@ -195,7 +231,7 @@ SECURITY_CMD="${RT_SECURITY_CMD:-npm audit --audit-level=high}"
 run "format_lint" "$FORMAT_CMD"
 run "unit" "$UNIT_CMD"
 run "smoke" "$SMOKE_CMD"
-run "build" "$BUILD_CMD"
+run_build_gate "$BUILD_CMD"
 run "security" "$SECURITY_CMD"
 
 if [[ -n "${RT_SECRETS_CMD:-}" ]]; then

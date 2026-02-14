@@ -51,6 +51,37 @@ function Run-Gate([string]$Name, [string]$Cmd) {
   Log "gate=$Name result=PASS"
 }
 
+function Clean-NextBuildArtifacts {
+  if (Test-Path ".next") {
+    Log "gate=build cleanup=.next"
+    & cmd.exe /c "rmdir /s /q .next"
+  }
+}
+
+function Run-BuildGate([string]$Cmd, [int]$MaxAttempts = 2) {
+  $attempt = 1
+  while ($true) {
+    Log "gate=build attempt=$attempt cmd=$Cmd"
+    & cmd.exe /c $Cmd
+    $ec = $LASTEXITCODE
+
+    if ($ec -eq 0) {
+      Log "gate=build result=PASS attempts=$attempt"
+      return
+    }
+
+    if ($attempt -ge $MaxAttempts) {
+      Log "gate=build result=FAIL exit=$ec attempts=$attempt"
+      exit $ec
+    }
+
+    Log "gate=build result=RETRY exit=$ec attempt=$attempt reason=clean_retry"
+    Clean-NextBuildArtifacts
+    Start-Sleep -Seconds 1
+    $attempt += 1
+  }
+}
+
 try {
   Log "start artifacts_dir=$artifactsDir"
   if (Get-Command node -ErrorAction SilentlyContinue) { Log "tool=node version=""$(node --version)""" }
@@ -65,7 +96,7 @@ try {
   Run-Gate -Name "format_lint" -Cmd $formatCmd
   Run-Gate -Name "unit" -Cmd $unitCmd
   Run-Gate -Name "smoke" -Cmd $smokeCmd
-  Run-Gate -Name "build" -Cmd $buildCmd
+  Run-BuildGate -Cmd $buildCmd
   Run-Gate -Name "security" -Cmd $securityCmd
 
   if ($env:RT_SECRETS_CMD) {

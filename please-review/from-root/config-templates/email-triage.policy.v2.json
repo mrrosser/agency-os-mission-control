@@ -1,0 +1,233 @@
+{
+  "version": "2.0",
+  "timezone": "America/Chicago",
+  "mode": {
+    "draftOnly": true,
+    "sendWithoutApproval": false
+  },
+  "accounts": [
+    {
+      "email": "mrosser@rossernftgallery.com",
+      "businessPriority": [
+        "rosser_nft_gallery",
+        "rt_solutions",
+        "ai_cofoundry"
+      ],
+      "maxThreadsPerRun": 10
+    },
+    {
+      "email": "mcool4444@gmail.com",
+      "businessPriority": [
+        "ai_cofoundry",
+        "rt_solutions",
+        "rosser_nft_gallery"
+      ],
+      "maxThreadsPerRun": 10
+    },
+    {
+      "email": "marcus@aicofoundry.com",
+      "businessPriority": [
+        "ai_cofoundry"
+      ],
+      "maxThreadsPerRun": 10
+    },
+    {
+      "email": "marcuslrosser@gmail.com",
+      "businessPriority": [
+        "ai_cofoundry",
+        "rt_solutions",
+        "rosser_nft_gallery"
+      ],
+      "maxThreadsPerRun": 10
+    }
+  ],
+  "triage": {
+    "searchQuery": "is:unread in:inbox newer_than:7d -category:promotions -category:social -category:updates",
+    "suppression": {
+      "skipIfFromContains": [
+        "no-reply",
+        "noreply",
+        "donotreply",
+        "mailer-daemon",
+        "postmaster"
+      ],
+      "skipIfSubjectContains": [
+        "receipt",
+        "invoice paid",
+        "payment confirmation",
+        "verification code",
+        "password reset",
+        "newsletter",
+        "digest",
+        "meeting notes",
+        "your note",
+        "calendar summary"
+      ],
+      "skipIfHeadersPresent": [
+        "Auto-Submitted",
+        "List-Id",
+        "Precedence: bulk"
+      ]
+    },
+    "intents": {
+      "draftMinConfidence": 0.72,
+      "needsReplyMinConfidence": 0.68,
+      "quoteMinConfidence": 0.7,
+      "meetingRequestMinConfidence": 0.84
+    },
+    "actions": {
+      "createDraftWhenConfidenceAtLeast": 0.72,
+      "createDraftForUnknownIntent": false,
+      "applyNeedsReplyLabel": true,
+      "applyQuoteLabel": true,
+      "postDigestForSkipped": true
+    },
+    "testing": {
+      "allowCrossMailboxInternalSenders": true,
+      "selfMailPolicy": "skip_unless_subject_starts_with_marker",
+      "selfMailMarkerPrefix": "[triage-test]"
+    }
+  },
+  "calendar": {
+    "enabled": true,
+    "autoBookMode": "strict",
+    "requireGoogleMeet": true,
+    "freeBusyAccounts": [
+      "mrosser@rossernftgallery.com",
+      "mcool4444@gmail.com",
+      "marcus@aicofoundry.com",
+      "marcuslrosser@gmail.com"
+    ],
+    "requiredSignals": [
+      "single_confirmed_slot",
+      "explicit_start_time",
+      "explicit_end_time_or_duration",
+      "explicit_timezone",
+      "requester_email_present"
+    ],
+    "defaultEvent": {
+      "durationMinutes": 20,
+      "bufferBeforeMinutes": 10,
+      "bufferAfterMinutes": 10,
+      "minimumNoticeMinutes": 120,
+      "workingHoursLocal": {
+        "start": "08:00",
+        "end": "18:00"
+      },
+      "allowedDays": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
+      ],
+      "attachMeetLink": true,
+      "sendUpdates": "all"
+    },
+    "conflicts": {
+      "onConflict": "no_book",
+      "draftAlternatives": true,
+      "alternativeSlots": 3
+    },
+    "idempotency": {
+      "enabled": true,
+      "key": [
+        "account",
+        "threadId",
+        "attendeeEmail",
+        "startIso",
+        "endIso"
+      ]
+    },
+    "bookingProfiles": [
+      {
+        "id": "rts_discovery_primary",
+        "businessId": "rt_solutions",
+        "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+        "calendarId": "mrosser@rossernftgallery.com",
+        "defaultDurationMinutes": 20,
+        "attachMeetLink": true,
+        "verificationState": "verified"
+      },
+      {
+        "id": "rng_events_primary",
+        "businessId": "rosser_nft_gallery",
+        "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+        "calendarId": "mrosser@rossernftgallery.com",
+        "defaultDurationMinutes": 30,
+        "attachMeetLink": true,
+        "verificationState": "verified"
+      },
+      {
+        "id": "aicf_discovery_primary",
+        "businessId": "ai_cofoundry",
+        "bookingLink": "https://calendar.app.google/LEk5GQobBpAXTfpR9",
+        "calendarId": "marcus@aicofoundry.com",
+        "defaultDurationMinutes": 30,
+        "attachMeetLink": true,
+        "verificationState": "verified"
+      }
+    ],
+    "businessCalendarProfileMap": {
+      "rt_solutions": "rts_discovery_primary",
+      "rosser_nft_gallery": "rng_events_primary",
+      "ai_cofoundry": "aicf_discovery_primary"
+    },
+    "mailboxDefaultCalendarProfile": [
+      {
+        "account": "mrosser@rossernftgallery.com",
+        "profileId": "rng_events_primary"
+      },
+      {
+        "account": "mcool4444@gmail.com",
+        "profileId": "aicf_discovery_primary"
+      },
+      {
+        "account": "marcus@aicofoundry.com",
+        "profileId": "aicf_discovery_primary"
+      },
+      {
+        "account": "marcuslrosser@gmail.com",
+        "profileId": "aicf_discovery_primary"
+      }
+    ],
+    "enforceBusinessBookingLink": true
+  },
+  "voice": {
+    "id": "voice-pack.marcus.openclaw.v1",
+    "version": "1.0.1",
+    "style": {
+      "useContractions": true,
+      "shortParagraphs": true,
+      "avoidFluff": true,
+      "askQuestionsMax": 2,
+      "alwaysProposeNextStep": true
+    },
+    "doNotSay": [
+      "As an AI",
+      "I am just a system",
+      "Guaranteed results",
+      "Get rich quick"
+    ],
+    "businessToneProfiles": {
+      "rt_solutions": {
+        "humor": 0,
+        "formality": 6,
+        "respectfulness": 9,
+        "enthusiasm": 5
+      },
+      "rosser_nft_gallery": {
+        "humor": 2,
+        "formality": 4,
+        "respectfulness": 9,
+        "enthusiasm": 7
+      },
+      "ai_cofoundry": {
+        "humor": 0,
+        "formality": 6,
+        "respectfulness": 9,
+        "enthusiasm": 5
+      }
+    }
+  }
+}

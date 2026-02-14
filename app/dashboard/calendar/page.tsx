@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { CalendarEvent } from "@/lib/google/calendar";
-import { Calendar, Plus, RefreshCw, AlertCircle, Clock, MapPin } from "lucide-react";
+import { Plus, RefreshCw, AlertCircle, Clock, MapPin } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -106,7 +107,7 @@ export default function CalendarPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <Calendar className="h-8 w-8 text-blue-500" />
+                        <AfroGlyph variant="calendar" className="h-8 w-8 text-blue-500" />
                         <h1 className="text-3xl font-bold text-white">Calendar</h1>
                     </div>
                     <div className="flex items-center gap-2">
@@ -144,7 +145,7 @@ export default function CalendarPage() {
                     </div>
                 ) : events.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-500">
-                        <Calendar className="h-16 w-16 mb-4 opacity-20" />
+                        <AfroGlyph variant="calendar" className="h-16 w-16 mb-4 opacity-20" />
                         <p className="text-lg">No upcoming events</p>
                         <p className="text-sm">Create your first event to get started</p>
                     </div>

@@ -1,0 +1,451 @@
+{
+  "meta": {
+    "version": "2.0",
+    "createdAt": "2026-02-12T00:00:00Z",
+    "timezone": "America/Chicago",
+    "owner": "Marcus Rosser",
+    "status": "active_draft",
+    "notes": "Normalized operating pack for OpenClaw across AI CoFoundry, RT Solutions, and Rosser NFT Gallery."
+  },
+  "sources": {
+    "websites": [
+      "https://aicofoundry.com/",
+      "https://aicofoundry.com/terms",
+      "https://aicofoundry.com/demos",
+      "https://rossernftgallery.com/",
+      "https://eventsize.com/@rt-solutions-17486315356094"
+    ],
+    "internal": [
+      "Google Workspace (Gmail, Drive, Calendar, Contacts)",
+      "OpenClaw logs and operator notes"
+    ]
+  },
+  "globalPolicies": {
+    "approvalMatrix": {
+      "readEmail": "auto",
+      "applyLabel": "auto",
+      "createDraft": "auto",
+      "sendEmail": "manual",
+      "createCalendarEvent": "auto_strict",
+      "updateCalendarEvent": "manual",
+      "deleteCalendarEvent": "manual",
+      "sendSms": "manual",
+      "startVoiceCall": "manual"
+    },
+    "mailboxRouting": [
+      {
+        "address": "mrosser@rossernftgallery.com",
+        "role": "shared_ops",
+        "businessPriority": [
+          "rosser_nft_gallery",
+          "rt_solutions",
+          "ai_cofoundry"
+        ]
+      },
+      {
+        "address": "marcus@aicofoundry.com",
+        "role": "business_primary",
+        "businessPriority": [
+          "ai_cofoundry"
+        ]
+      },
+      {
+        "address": "mcool4444@gmail.com",
+        "role": "personal_admin",
+        "businessPriority": [
+          "ai_cofoundry",
+          "rt_solutions",
+          "rosser_nft_gallery"
+        ]
+      },
+      {
+        "address": "marcuslrosser@gmail.com",
+        "role": "personal_mobile_admin",
+        "businessPriority": [
+          "ai_cofoundry",
+          "rt_solutions",
+          "rosser_nft_gallery"
+        ]
+      }
+    ],
+    "routingRules": [
+      {
+        "id": "rng_priority",
+        "matchAny": [
+          "nft",
+          "commission",
+          "3d print",
+          "gallery",
+          "exhibition",
+          "event booking"
+        ],
+        "routeTo": "rosser_nft_gallery"
+      },
+      {
+        "id": "rts_priority",
+        "matchAny": [
+          "school",
+          "district",
+          "teacher",
+          "students",
+          "professional development",
+          "after-school",
+          "workshop"
+        ],
+        "routeTo": "rt_solutions"
+      },
+      {
+        "id": "aicf_priority",
+        "matchAny": [
+          "ai automation",
+          "workflow",
+          "agent",
+          "pilot",
+          "discovery call",
+          "integration"
+        ],
+        "routeTo": "ai_cofoundry"
+      }
+    ],
+    "triage": {
+      "searchDefaults": {
+        "query": "is:unread in:inbox newer_than:7d -category:promotions -category:social -category:updates",
+        "maxThreadsPerAccount": 10
+      },
+      "suppressions": {
+        "skipIfFromContains": [
+          "no-reply",
+          "noreply",
+          "donotreply",
+          "mailer-daemon",
+          "postmaster"
+        ],
+        "skipIfSubjectContains": [
+          "receipt",
+          "invoice paid",
+          "payment confirmation",
+          "verification code",
+          "security alert",
+          "password reset",
+          "newsletter",
+          "weekly digest",
+          "daily digest",
+          "meeting notes",
+          "your note",
+          "summary"
+        ],
+        "skipIfAutoSubmittedHeader": true,
+        "skipIfListIdHeader": true,
+        "skipIfBulkPrecedenceHeader": true
+      },
+      "intentThresholds": {
+        "draftMinConfidence": 0.72,
+        "needsReplyMinConfidence": 0.68,
+        "quoteMinConfidence": 0.7,
+        "calendarBookMinConfidence": 0.84
+      },
+      "intentPolicy": {
+        "meeting_request": {
+          "createDraft": true,
+          "autoBookCalendar": true,
+          "requiredSignals": [
+            "explicit_datetime_range",
+            "explicit_timezone",
+            "single_time_option_or_confirmed_choice",
+            "freebusy_clear"
+          ]
+        },
+        "lead_or_quote": {
+          "createDraft": true,
+          "autoBookCalendar": false
+        },
+        "support_or_client_followup": {
+          "createDraft": true,
+          "autoBookCalendar": false
+        },
+        "low_confidence_or_unknown": {
+          "createDraft": false,
+          "autoBookCalendar": false,
+          "escalateToChatDigest": true
+        }
+      }
+    },
+    "calendarPolicy": {
+      "enabled": true,
+      "autoBookMode": "strict",
+      "freeBusyAccounts": [
+        "mrosser@rossernftgallery.com",
+        "mcool4444@gmail.com",
+        "marcus@aicofoundry.com",
+        "marcuslrosser@gmail.com"
+      ],
+      "defaultEventSettings": {
+        "durationMinutes": 20,
+        "bufferBeforeMinutes": 10,
+        "bufferAfterMinutes": 10,
+        "minimumNoticeMinutes": 120,
+        "workingHoursLocal": {
+          "start": "08:00",
+          "end": "18:00"
+        },
+        "daysAllowed": [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday"
+        ],
+        "attachGoogleMeet": true,
+        "sendUpdates": "all"
+      },
+      "conflictHandling": {
+        "onConflict": "no_book",
+        "action": "draft_alternate_times",
+        "alternateSlotCount": 3
+      },
+      "idempotency": {
+        "keyFields": [
+          "account",
+          "threadId",
+          "normalizedStartIso",
+          "normalizedEndIso",
+          "attendeeEmail"
+        ],
+        "allowDuplicates": false
+      },
+      "enforceBusinessBookingLink": true,
+      "calendarProfiles": [
+        {
+          "id": "rts_discovery_primary",
+          "businessId": "rt_solutions",
+          "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+          "calendarId": "mrosser@rossernftgallery.com",
+          "attachGoogleMeet": true,
+          "defaultDurationMinutes": 20,
+          "allowAutoBook": true,
+          "verificationState": "verified"
+        },
+        {
+          "id": "rng_events_primary",
+          "businessId": "rosser_nft_gallery",
+          "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+          "calendarId": "mrosser@rossernftgallery.com",
+          "attachGoogleMeet": true,
+          "defaultDurationMinutes": 30,
+          "allowAutoBook": true,
+          "verificationState": "verified",
+          "notes": "Primary Rosser NFT Gallery booking link; always include Google Meet."
+        },
+        {
+          "id": "aicf_discovery_primary",
+          "businessId": "ai_cofoundry",
+          "bookingLink": "https://calendar.app.google/LEk5GQobBpAXTfpR9",
+          "calendarId": "marcus@aicofoundry.com",
+          "attachGoogleMeet": true,
+          "defaultDurationMinutes": 30,
+          "allowAutoBook": true,
+          "verificationState": "verified"
+        }
+      ],
+      "mailboxDefaultCalendarProfile": [
+        {
+          "account": "mrosser@rossernftgallery.com",
+          "profileId": "rng_events_primary"
+        },
+        {
+          "account": "mcool4444@gmail.com",
+          "profileId": "aicf_discovery_primary"
+        },
+        {
+          "account": "marcus@aicofoundry.com",
+          "profileId": "aicf_discovery_primary"
+        },
+        {
+          "account": "marcuslrosser@gmail.com",
+          "profileId": "aicf_discovery_primary"
+        }
+      ],
+      "businessCalendarProfileMap": {
+        "rt_solutions": "rts_discovery_primary",
+        "rosser_nft_gallery": "rng_events_primary",
+        "ai_cofoundry": "aicf_discovery_primary"
+      }
+    }
+  },
+  "businesses": [
+    {
+      "id": "rt_solutions",
+      "name": "RT Solutions",
+      "aliases": [
+        "RT SOLUTIONS LLC",
+        "Tennessee RT Solutions"
+      ],
+      "status": "active",
+      "location": {
+        "primaryCity": "New Orleans",
+        "state": "LA",
+        "country": "US",
+        "notes": "Public references include PO Box in Kenner and New Orleans service footprint."
+      },
+      "publicFacts": {
+        "formationDate": "2025-02-26",
+        "filingNamesSeen": [
+          "RT SOLUTIONS LLC"
+        ],
+        "publicPage": "https://eventsize.com/@rt-solutions-17486315356094"
+      },
+      "voiceAndStyle": {
+        "tone": [
+          "practical",
+          "calm",
+          "security-conscious",
+          "systems-builder"
+        ],
+        "sla": {
+          "standard": "1 business day",
+          "urgentAck": "same day"
+        }
+      },
+      "serviceCatalog": [
+        "Automation and workflow design",
+        "Cloud strategy and infrastructure",
+        "Cybersecurity advisory and secure deployments",
+        "Workshops and demos"
+      ],
+      "pipelineStages": [
+        "lead_capture",
+        "qualification",
+        "discovery_call",
+        "needs_summary",
+        "proposal_sow",
+        "close_deposit",
+        "onboarding",
+        "delivery",
+        "handoff",
+        "retainer_upsell"
+      ],
+      "calendarDefaults": {
+        "calendarProfileId": "rts_discovery_primary",
+        "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+        "defaultDurationMinutes": 20,
+        "googleMeetRequired": true
+      }
+    },
+    {
+      "id": "rosser_nft_gallery",
+      "name": "Rosser NFT Gallery",
+      "aliases": [
+        "ROSSER NFT GALLERY LLC",
+        "RNG"
+      ],
+      "status": "active",
+      "location": {
+        "addressLine1": "2505 N Tonti St",
+        "city": "New Orleans",
+        "state": "LA",
+        "postalCode": "70117",
+        "country": "US"
+      },
+      "contacts": {
+        "phone": "+17572147313",
+        "website": "https://rossernftgallery.com",
+        "primaryEmail": "mrosser@rossernftgallery.com"
+      },
+      "publicFacts": {
+        "formationDate": "2022-10-10",
+        "positioning": "Digital and physical art gallery with technology-forward programs."
+      },
+      "voiceAndStyle": {
+        "tone": [
+          "creative",
+          "premium",
+          "community-centered",
+          "clear on scope and timing"
+        ],
+        "sla": {
+          "standard": "1 business day",
+          "urgentAck": "same day"
+        }
+      },
+      "serviceCatalog": [
+        "Exhibitions and events",
+        "Art sales",
+        "Digital-to-physical production",
+        "Custom commissions",
+        "Venue and workshop bookings"
+      ],
+      "pipelineStages": [
+        "inquiry",
+        "qualification",
+        "consultation",
+        "quote_or_package",
+        "deposit",
+        "delivery_or_event",
+        "closeout_followup"
+      ],
+      "calendarDefaults": {
+        "calendarProfileId": "rng_events_primary",
+        "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+        "defaultDurationMinutes": 30,
+        "googleMeetRequired": true
+      }
+    },
+    {
+      "id": "ai_cofoundry",
+      "name": "AI CoFoundry",
+      "aliases": [
+        "AI COFOUNDRY"
+      ],
+      "status": "active",
+      "location": {
+        "city": "New Orleans",
+        "state": "LA",
+        "country": "US"
+      },
+      "contacts": {
+        "website": "https://aicofoundry.com",
+        "linkedin": "https://www.linkedin.com/company/ai-cofoundry",
+        "primaryEmail": "marcus@aicofoundry.com"
+      },
+      "publicFacts": {
+        "foundedYear": 2025,
+        "termsLastUpdated": "2026-02-09",
+        "positioning": "Agentic AI operating capability and fractional AI department."
+      },
+      "voiceAndStyle": {
+        "tone": [
+          "operator-first",
+          "outcomes-focused",
+          "governance-aware",
+          "no-hype"
+        ],
+        "sla": {
+          "standard": "1 business day",
+          "urgentAck": "same day"
+        }
+      },
+      "serviceCatalog": [
+        "Workflow-first AI automation",
+        "Managed AI operations",
+        "Pilot-to-production implementation",
+        "Voice and multimodal systems",
+        "Venture studio programs"
+      ],
+      "pipelineStages": [
+        "inbound",
+        "qualification",
+        "ops_discovery",
+        "capability_plan",
+        "pilot_agreement",
+        "deploy",
+        "managed_ops"
+      ],
+      "calendarDefaults": {
+        "calendarProfileId": "aicf_discovery_primary",
+        "bookingLink": "https://calendar.app.google/LEk5GQobBpAXTfpR9",
+        "defaultDurationMinutes": 30,
+        "googleMeetRequired": true
+      }
+    }
+  ]
+}

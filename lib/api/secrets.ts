@@ -8,10 +8,12 @@ export interface ApiKeys {
   openaiKey?: string;
   twilioSid?: string;
   twilioToken?: string;
+  twilioPhoneNumber?: string;
   elevenLabsKey?: string;
   heyGenKey?: string;
   googlePlacesKey?: string;
   firecrawlKey?: string;
+  googlePickerApiKey?: string;
 }
 
 export type SecretKey = keyof ApiKeys;
@@ -21,20 +23,24 @@ const SECRET_KEYS: SecretKey[] = [
   "openaiKey",
   "twilioSid",
   "twilioToken",
+  "twilioPhoneNumber",
   "elevenLabsKey",
   "heyGenKey",
   "googlePlacesKey",
   "firecrawlKey",
+  "googlePickerApiKey",
 ];
 
 const SECRET_ENV_MAP: Record<SecretKey, string> = {
   openaiKey: "OPENAI_API_KEY",
   twilioSid: "TWILIO_ACCOUNT_SID",
   twilioToken: "TWILIO_AUTH_TOKEN",
+  twilioPhoneNumber: "TWILIO_PHONE_NUMBER",
   elevenLabsKey: "ELEVENLABS_API_KEY",
   heyGenKey: "HEYGEN_API_KEY",
   googlePlacesKey: "GOOGLE_PLACES_API_KEY",
   firecrawlKey: "FIRECRAWL_API_KEY",
+  googlePickerApiKey: "GOOGLE_PICKER_API_KEY",
 };
 
 async function migrateLegacyKeys(uid: string): Promise<void> {

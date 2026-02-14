@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ConfirmationResult } from "firebase/auth";
 import {
     signInWithPopup,
@@ -18,9 +19,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GridPattern } from "@/components/magicui/grid-pattern";
-import ShineBorder from "@/components/magicui/shine-border";
-import { Loader2, Rocket, AlertCircle, Apple } from "lucide-react";
+import { LeadFlowBackdrop } from "@/components/visuals/LeadFlowBackdrop";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
+import { Loader2, AlertCircle, Apple } from "lucide-react";
 
 function isErrorWithMessage(error: unknown): error is { message: string } {
     return (
@@ -145,23 +146,18 @@ export default function LoginPage() {
 
     return (
         <div className="relative min-h-screen w-full overflow-hidden bg-[#05060b]">
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(700px_circle_at_12%_-10%,rgba(56,189,248,0.22),transparent_55%),radial-gradient(900px_circle_at_88%_10%,rgba(99,102,241,0.2),transparent_60%),radial-gradient(800px_circle_at_50%_90%,rgba(16,185,129,0.16),transparent_60%)] motion-safe:animate-aurora-drift" />
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(5,6,11,0.3),rgba(5,6,11,0.85))]" />
-            <GridPattern className="text-white/10 [mask-image:radial-gradient(circle_at_center,white,transparent_70%)]" />
+            <LeadFlowBackdrop className="opacity-[0.96]" />
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(3,6,12,0.2),rgba(4,7,14,0.48)_35%,rgba(2,3,7,0.76)_80%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(450px_circle_at_50%_50%,rgba(2,8,18,0.08),rgba(2,7,16,0.35),rgba(1,3,8,0.7))]" />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/36 blur-3xl" />
 
             <div className="relative z-10 flex min-h-screen w-full items-center justify-center px-4 py-16">
-                <ShineBorder
-                    borderRadius={24}
-                    borderWidth={1}
-                    duration={18}
-                    color={["#38bdf8", "#6366f1", "#22d3ee"]}
-                    className="w-full max-w-sm bg-black/60 p-1.5 backdrop-blur-2xl"
-                >
-                    <Card className="border-white/10 bg-black/40 shadow-none">
+                <div data-testid="login-card" className="w-full max-w-sm rounded-[24px] border border-white/18 bg-black/72 p-1.5 backdrop-blur-2xl shadow-[0_32px_90px_rgba(3,6,15,0.9)]">
+                    <Card className="border-white/15 bg-black/86 shadow-none">
                         <CardHeader className="text-center space-y-2">
                             <div className="flex justify-center mb-2">
                                 <div className="p-3 rounded-2xl bg-gradient-to-br from-sky-500/20 via-indigo-500/10 to-emerald-500/10 border border-white/10 shadow-[0_0_40px_rgba(56,189,248,0.25)]">
-                                    <Rocket className="w-8 h-8 text-sky-200" />
+                                    <AfroGlyph variant="mission" className="h-8 w-8 text-sky-200" />
                                 </div>
                             </div>
                             <CardTitle className="text-2xl font-semibold text-white">
@@ -322,12 +318,23 @@ export default function LoginPage() {
                                 </TabsContent>
                             </Tabs>
 
-                            <p className="mt-6 text-[10px] text-center text-white/40 uppercase tracking-[0.4em]">
-                                Leadflow Mission Control Alpha v0.1
-                            </p>
+                            <div className="mt-6 space-y-2">
+                                <p className="text-[10px] text-center text-white/40 uppercase tracking-[0.4em]">
+                                    Leadflow Mission Control Alpha v0.1
+                                </p>
+                                <div className="flex items-center justify-center gap-3 text-[11px] text-white/55">
+                                    <Link className="hover:text-white" href="/privacy">
+                                        Privacy Policy
+                                    </Link>
+                                    <span className="text-white/25">|</span>
+                                    <Link className="hover:text-white" href="/terms">
+                                        Terms of Service
+                                    </Link>
+                                </div>
+                            </div>
                         </CardContent>
                     </Card>
-                </ShineBorder>
+                </div>
             </div>
         </div>
     );

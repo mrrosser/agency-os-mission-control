@@ -9,16 +9,71 @@ import type { Logger } from "@/lib/logging";
 const TOKEN_COLLECTION = "google_oauth_tokens";
 
 export const GOOGLE_OAUTH_SCOPES = [
-  "https://www.googleapis.com/auth/calendar",
+  // Default = full access preset. Prefer using a preset via getGoogleAuthUrl(..., { scopePreset }).
+  // Note: keep scopes minimal to reduce verification friction.
+  // FreeBusy + list needs calendar.readonly; create/update needs calendar.events.
+  "https://www.googleapis.com/auth/calendar.readonly",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/contacts.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
+
+export type GoogleScopePreset = "core" | "drive" | "calendar" | "gmail" | "full";
+
+const GOOGLE_SCOPE_GROUPS = {
+  identity: [
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ],
+  drive: ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/drive.file"],
+  calendar: [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+  ],
+  gmail: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
+} as const;
+
+function uniqueScopes(values: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const scope of values) {
+    if (seen.has(scope)) continue;
+    seen.add(scope);
+    out.push(scope);
+  }
+  return out;
+}
+
+export function scopesForPreset(preset: GoogleScopePreset): string[] {
+  if (preset === "drive") {
+    return uniqueScopes([...GOOGLE_SCOPE_GROUPS.identity, ...GOOGLE_SCOPE_GROUPS.drive]);
+  }
+  if (preset === "calendar") {
+    return uniqueScopes([...GOOGLE_SCOPE_GROUPS.identity, ...GOOGLE_SCOPE_GROUPS.calendar]);
+  }
+  if (preset === "gmail") {
+    return uniqueScopes([...GOOGLE_SCOPE_GROUPS.identity, ...GOOGLE_SCOPE_GROUPS.gmail]);
+  }
+  if (preset === "core") {
+    return uniqueScopes([
+      ...GOOGLE_SCOPE_GROUPS.identity,
+      ...GOOGLE_SCOPE_GROUPS.drive,
+      ...GOOGLE_SCOPE_GROUPS.calendar,
+    ]);
+  }
+
+  // "full"
+  return uniqueScopes([
+    ...GOOGLE_SCOPE_GROUPS.identity,
+    ...GOOGLE_SCOPE_GROUPS.drive,
+    ...GOOGLE_SCOPE_GROUPS.calendar,
+    ...GOOGLE_SCOPE_GROUPS.gmail,
+  ]);
+}
 
 function getOAuthConfig() {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
@@ -60,12 +115,14 @@ export function getOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function getGoogleAuthUrl(state: string) {
+export function getGoogleAuthUrl(state: string, options?: { scopePreset?: GoogleScopePreset }) {
   const client = getOAuthClient();
+  const preset = options?.scopePreset ?? "full";
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: GOOGLE_OAUTH_SCOPES,
+    include_granted_scopes: true,
+    scope: scopesForPreset(preset),
     state,
   });
 }

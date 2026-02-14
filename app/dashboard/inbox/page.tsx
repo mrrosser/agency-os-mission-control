@@ -6,7 +6,8 @@ import { EmailDetail } from "@/components/gmail/EmailDetail";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { GmailMessage } from "@/lib/google/gmail";
-import { RefreshCw, Inbox as InboxIcon, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -108,7 +109,7 @@ export default function InboxPage() {
             <div className="w-1/3 min-w-[300px] border-r border-zinc-800 flex flex-col bg-zinc-950">
                 <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
                     <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                        <InboxIcon className="h-5 w-5" />
+                        <AfroGlyph variant="inbox" className="h-5 w-5 text-cyan-200" />
                         Inbox
                     </h1>
                     <Button
@@ -147,7 +148,7 @@ export default function InboxPage() {
                     />
                 ) : (
                     <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-                        <InboxIcon className="h-16 w-16 mb-4 opacity-10" />
+                        <AfroGlyph variant="inbox" className="h-16 w-16 mb-4 opacity-10" />
                         <p>Select an email to view details</p>
                     </div>
                 )}

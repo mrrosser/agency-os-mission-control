@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
-import { Mail } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { GmailMessage } from "@/lib/google/gmail";
 
 interface InboxListProps {
@@ -26,7 +26,7 @@ export function InboxList({ messages, selectedId, onSelect, loading }: InboxList
     if (messages.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center text-zinc-500">
-                <Mail className="h-12 w-12 mb-4 opacity-20" />
+                <AfroGlyph variant="inbox" className="h-12 w-12 mb-4 opacity-20" />
                 <p>Your inbox is empty</p>
             </div>
         );

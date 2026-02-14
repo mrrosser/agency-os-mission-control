@@ -1,19 +1,28 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Save, Key, Building2, User, Loader2, CheckCircle2, Mail, Power } from "lucide-react";
+import { Save, Key, Building2, User, Loader2, CheckCircle2, Power } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 
 interface IdentityProfile {
     businessName: string;
@@ -22,17 +31,31 @@ interface IdentityProfile {
     primaryService: string;
     coreValue: string;
     keyBenefit: string;
+    voiceProfiles?: Record<string, { voiceId?: string; modelId?: string }>;
 }
 
 function getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+type MotionSetting = "auto" | "on" | "off";
+
 export default function SettingsPage() {
     const { user } = useAuth();
+    const searchParams = useSearchParams();
     const [loading, setLoading] = useState(false);
-    const [googleStatus, setGoogleStatus] = useState({ connected: false, loading: true });
+    const [googleStatus, setGoogleStatus] = useState({
+        connected: false,
+        loading: true,
+        capabilities: { drive: false, gmail: false, calendar: false },
+    });
     const { status: secretStatus, loading: secretsLoading, refresh: refreshSecrets } = useSecretsStatus();
+    const [activeTab, setActiveTab] = useState("identity");
+    const [motionSetting, setMotionSetting] = useState<MotionSetting>("auto");
+
+    const googleError = searchParams.get("google") === "error";
+    const googleErrorCode = searchParams.get("googleError");
+    const googleErrorDescription = searchParams.get("googleErrorDescription");
 
     // Identity State
     const [identity, setIdentity] = useState<IdentityProfile>({
@@ -41,7 +64,20 @@ export default function SettingsPage() {
         website: "",
         primaryService: "",
         coreValue: "",
-        keyBenefit: ""
+        keyBenefit: "",
+        voiceProfiles: {},
+    });
+
+    // ElevenLabs voice profiles (non-secret). Stored in Firestore under identities/{uid}.voiceProfiles
+    const [voiceProfiles, setVoiceProfiles] = useState({
+        aicfVoiceId: "",
+        aicfModelId: "",
+        rngVoiceId: "",
+        rngModelId: "",
+        rtsVoiceId: "",
+        rtsModelId: "",
+        defaultVoiceId: "",
+        defaultModelId: "",
     });
 
     // API Keys State
@@ -49,10 +85,12 @@ export default function SettingsPage() {
         openaiKey: "",
         twilioSid: "",
         twilioToken: "",
+        twilioPhoneNumber: "",
         elevenLabsKey: "",
         heyGenKey: "",
         googlePlacesKey: "",
         firecrawlKey: "",
+        googlePickerApiKey: "",
     });
 
     useEffect(() => {
@@ -65,16 +103,44 @@ export default function SettingsPage() {
                 if (identityDoc.exists()) {
                     const data = identityDoc.data() as Partial<IdentityProfile>;
                     setIdentity((prev) => ({ ...prev, ...data }));
+
+                    // Load voice profiles (non-secret). Keep UI state normalized.
+                    const profiles = (data.voiceProfiles || {}) as Record<
+                        string,
+                        { voiceId?: string; modelId?: string }
+                    >;
+                    setVoiceProfiles({
+                        aicfVoiceId: String(profiles.aicf?.voiceId || ""),
+                        aicfModelId: String(profiles.aicf?.modelId || ""),
+                        rngVoiceId: String(profiles.rng?.voiceId || ""),
+                        rngModelId: String(profiles.rng?.modelId || ""),
+                        rtsVoiceId: String(profiles.rts?.voiceId || ""),
+                        rtsModelId: String(profiles.rts?.modelId || ""),
+                        defaultVoiceId: String(profiles.default?.voiceId || ""),
+                        defaultModelId: String(profiles.default?.modelId || ""),
+                    });
                 }
 
                 // Check Google Status
                 const headers = await buildAuthHeaders(user);
                 const res = await fetch("/api/google/status", { headers });
-                const status = await readApiJson<{ connected?: boolean; error?: string }>(res);
+                const status = await readApiJson<{
+                    connected?: boolean;
+                    capabilities?: { drive?: boolean; gmail?: boolean; calendar?: boolean };
+                    error?: string;
+                }>(res);
                 if (!res.ok) {
                     throw new Error(status?.error || "Failed to check Google connection");
                 }
-                setGoogleStatus({ connected: Boolean(status?.connected), loading: false });
+                setGoogleStatus({
+                    connected: Boolean(status?.connected),
+                    loading: false,
+                    capabilities: {
+                        drive: Boolean(status?.capabilities?.drive),
+                        gmail: Boolean(status?.capabilities?.gmail),
+                        calendar: Boolean(status?.capabilities?.calendar),
+                    },
+                });
             } catch (e) {
                 console.error("Error loading settings", e);
                 setGoogleStatus(prev => ({ ...prev, loading: false }));
@@ -84,6 +150,37 @@ export default function SettingsPage() {
         loadData();
     }, [user]);
 
+    useEffect(() => {
+        const tab = searchParams.get("tab");
+        if (tab === "integrations" || tab === "identity" || tab === "appearance") {
+            setActiveTab(tab);
+        }
+    }, [searchParams]);
+
+    useEffect(() => {
+        try {
+            const stored = window.localStorage.getItem("mission_control.motion");
+            if (stored === "auto" || stored === "on" || stored === "off") {
+                setMotionSetting(stored);
+            }
+        } catch {
+            // ignore (storage disabled)
+        }
+    }, []);
+
+    const handleMotionSettingChange = (value: string) => {
+        if (value !== "auto" && value !== "on" && value !== "off") return;
+        setMotionSetting(value);
+        try {
+            window.localStorage.setItem("mission_control.motion", value);
+        } catch {
+            // ignore (storage disabled)
+        }
+        toast.success("Appearance updated", {
+            description: "Motion preference saved for this browser.",
+        });
+    };
+
     const handleConnectGoogle = async () => {
         if (!user) return;
         setLoading(true);
@@ -92,7 +189,10 @@ export default function SettingsPage() {
             const res = await fetch("/api/google/connect", {
                 method: "POST",
                 headers,
-                body: JSON.stringify({ returnTo: window.location.pathname })
+                body: JSON.stringify({
+                    returnTo: `${window.location.pathname}${window.location.search}`,
+                    scopePreset: "core",
+                })
             });
             const payload = await readApiJson<{ authUrl?: string; error?: string }>(res);
             if (!res.ok) {
@@ -119,7 +219,11 @@ export default function SettingsPage() {
                 const payload = await readApiJson<{ error?: string }>(res);
                 throw new Error(payload?.error || "Failed to disconnect");
             }
-            setGoogleStatus({ connected: false, loading: false });
+            setGoogleStatus({
+                connected: false,
+                loading: false,
+                capabilities: { drive: false, gmail: false, calendar: false },
+            });
             toast.success("Google account disconnected");
         } catch (e: unknown) {
             toast.error("Failed to disconnect", {
@@ -139,6 +243,42 @@ export default function SettingsPage() {
         } catch (e: unknown) {
             console.error("Failed to update identity", e);
             toast.error("Failed to update identity", {
+                description: getErrorMessage(e),
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSaveVoiceProfiles = async () => {
+        if (!user) return;
+        setLoading(true);
+        try {
+            const payload = {
+                voiceProfiles: {
+                    aicf: {
+                        voiceId: voiceProfiles.aicfVoiceId.trim() || undefined,
+                        modelId: voiceProfiles.aicfModelId.trim() || undefined,
+                    },
+                    rng: {
+                        voiceId: voiceProfiles.rngVoiceId.trim() || undefined,
+                        modelId: voiceProfiles.rngModelId.trim() || undefined,
+                    },
+                    rts: {
+                        voiceId: voiceProfiles.rtsVoiceId.trim() || undefined,
+                        modelId: voiceProfiles.rtsModelId.trim() || undefined,
+                    },
+                    default: {
+                        voiceId: voiceProfiles.defaultVoiceId.trim() || undefined,
+                        modelId: voiceProfiles.defaultModelId.trim() || undefined,
+                    },
+                },
+            };
+
+            await setDoc(doc(db, "identities", user.uid), payload, { merge: true });
+            toast.success("Voice profiles saved");
+        } catch (e: unknown) {
+            toast.error("Failed to save voice profiles", {
                 description: getErrorMessage(e),
             });
         } finally {
@@ -180,10 +320,12 @@ export default function SettingsPage() {
                 openaiKey: "",
                 twilioSid: "",
                 twilioToken: "",
+                twilioPhoneNumber: "",
                 elevenLabsKey: "",
                 heyGenKey: "",
                 googlePlacesKey: "",
                 firecrawlKey: "",
+                googlePickerApiKey: "",
             });
             await refreshSecrets();
             toast.success("API keys saved securely in Secret Manager");
@@ -237,10 +379,11 @@ export default function SettingsPage() {
                     <p className="text-zinc-400">Manage your lead engine profile and outreach stack</p>
                 </div>
 
-                <Tabs defaultValue="identity" className="w-full">
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <TabsList className="bg-zinc-900 border-zinc-800">
                         <TabsTrigger value="identity">Business Identity</TabsTrigger>
                         <TabsTrigger value="integrations">API Access</TabsTrigger>
+                        <TabsTrigger value="appearance">Appearance</TabsTrigger>
                     </TabsList>
 
                     {/* --- Identity Tab --- */}
@@ -313,8 +456,8 @@ export default function SettingsPage() {
                                 <div className="space-y-4 p-4 rounded-lg bg-zinc-900/50 border border-zinc-800">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
-                                            <div className="p-2 rounded-full bg-red-500/10 text-red-500">
-                                                <Mail className="h-5 w-5" />
+                                            <div className="p-2 rounded-full bg-cyan-500/10 text-cyan-300">
+                                                <AfroGlyph variant="integrations" className="h-5 w-5" />
                                             </div>
                                             <div>
                                                 <p className="font-medium text-white">Google Workspace</p>
@@ -331,6 +474,52 @@ export default function SettingsPage() {
                                             <Badge variant="outline" className="text-zinc-500">Disconnected</Badge>
                                         )}
                                     </div>
+
+                                    {googleError && (
+                                        <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                                            <p className="font-medium">Google connection was denied.</p>
+                                            <p className="mt-1 text-red-200/80">
+                                                {googleErrorCode ? `Code: ${googleErrorCode}. ` : ""}
+                                                {googleErrorDescription || "If you are using a managed Google Workspace account, your admin may block unverified apps until this OAuth consent screen is verified."}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {googleStatus.connected && (
+                                        <div className="flex flex-wrap gap-2 text-xs">
+                                            <span
+                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.drive
+                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                    }`}
+                                            >
+                                                Drive {googleStatus.capabilities.drive ? "enabled" : "missing"}
+                                            </span>
+                                            <span
+                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.calendar
+                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                    }`}
+                                            >
+                                                Calendar {googleStatus.capabilities.calendar ? "enabled" : "missing"}
+                                            </span>
+                                            <span
+                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.gmail
+                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                    }`}
+                                            >
+                                                Gmail {googleStatus.capabilities.gmail ? "enabled" : "missing"}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {googleStatus.connected && !googleStatus.capabilities.gmail && (
+                                        <p className="text-xs text-zinc-500">
+                                            Gmail permissions are not enabled yet. Open the Integrations page to enable Gmail when you&apos;re ready.
+                                        </p>
+                                    )}
+
                                     {googleStatus.connected ? (
                                         <Button
                                             variant="outline"
@@ -403,6 +592,28 @@ export default function SettingsPage() {
                                         Enables website enrichment (emails/signals) during lead sourcing.
                                     </p>
                                 </div>
+                                <div className="space-y-4">
+                                    <Label className="flex justify-between">
+                                        Google Picker API Key
+                                        {renderSecretBadge(secretStatus.googlePickerApiKey)}
+                                    </Label>
+                                    <div className="relative">
+                                        <Key className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                                        <Input
+                                            type="password"
+                                            className="pl-9 bg-zinc-900 border-zinc-700"
+                                            placeholder="AIza..."
+                                            value={apiKeys.googlePickerApiKey}
+                                            onChange={e => setApiKeys({ ...apiKeys, googlePickerApiKey: e.target.value })}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-zinc-500">
+                                        Required for the Drive &quot;Browse Drive&quot; picker UI in Operations Knowledge Base.
+                                        Create a browser API key restricted to your app origin (for example
+                                        <span className="text-zinc-300"> https://leadflow-review.web.app/*</span> and
+                                        <span className="text-zinc-300"> http://localhost:3000/*</span>).
+                                    </p>
+                                </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label className="flex justify-between">
@@ -428,6 +639,22 @@ export default function SettingsPage() {
                                         />
                                     </div>
                                 </div>
+                                <p className="text-xs text-zinc-500">
+                                    Twilio values come from your Twilio Console account dashboard: Account SID (starts with
+                                    AC), Auth Token, and your purchased/verified Twilio number in E.164 format.
+                                </p>
+                                <div className="space-y-2">
+                                    <Label className="flex justify-between">
+                                        Twilio Phone Number (E.164)
+                                        {renderSecretBadge(secretStatus.twilioPhoneNumber)}
+                                    </Label>
+                                    <Input
+                                        className="bg-zinc-900 border-zinc-700"
+                                        placeholder="+15005550006"
+                                        value={apiKeys.twilioPhoneNumber}
+                                        onChange={e => setApiKeys({ ...apiKeys, twilioPhoneNumber: e.target.value })}
+                                    />
+                                </div>
                                 <div className="space-y-2">
                                     <Label className="flex justify-between">
                                         ElevenLabs API Key
@@ -439,6 +666,124 @@ export default function SettingsPage() {
                                         value={apiKeys.elevenLabsKey}
                                         onChange={e => setApiKeys({ ...apiKeys, elevenLabsKey: e.target.value })}
                                     />
+                                </div>
+                                <p className="text-xs text-zinc-500">
+                                    ElevenLabs API key comes from ElevenLabs settings. Keep keys in this vault only; do not
+                                    paste them into chat or repo files.
+                                </p>
+
+                                <div className="space-y-3 p-4 rounded-lg bg-zinc-900/40 border border-zinc-800">
+                                    <div>
+                                        <p className="text-sm font-medium text-white">ElevenLabs Voice Profiles</p>
+                                        <p className="text-xs text-zinc-500">
+                                            Voice IDs are not secrets. These defaults are used for outbound calls when a business workspace is selected.
+                                        </p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">AICF Voice ID</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+                                                value={voiceProfiles.aicfVoiceId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, aicfVoiceId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">AICF Model ID (optional)</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="e.g. eleven_turbo_v2_5"
+                                                value={voiceProfiles.aicfModelId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, aicfModelId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">RNG Voice ID</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Voice ID"
+                                                value={voiceProfiles.rngVoiceId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, rngVoiceId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">RNG Model ID (optional)</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Model ID"
+                                                value={voiceProfiles.rngModelId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, rngModelId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">RTS Voice ID</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Voice ID"
+                                                value={voiceProfiles.rtsVoiceId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, rtsVoiceId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">RTS Model ID (optional)</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Model ID"
+                                                value={voiceProfiles.rtsModelId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, rtsModelId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">Default Voice ID (fallback)</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Voice ID"
+                                                value={voiceProfiles.defaultVoiceId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, defaultVoiceId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-zinc-300">Default Model ID (optional)</Label>
+                                            <Input
+                                                className="bg-zinc-900 border-zinc-700"
+                                                placeholder="Model ID"
+                                                value={voiceProfiles.defaultModelId}
+                                                onChange={(e) =>
+                                                    setVoiceProfiles((prev) => ({ ...prev, defaultModelId: e.target.value }))
+                                                }
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <Button
+                                        onClick={handleSaveVoiceProfiles}
+                                        disabled={loading}
+                                        className="w-full bg-zinc-100 text-black hover:bg-zinc-200"
+                                    >
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Save Voice Profiles
+                                    </Button>
                                 </div>
                                 <div className="space-y-2">
                                     <Label className="flex justify-between">
@@ -456,6 +801,36 @@ export default function SettingsPage() {
                                     <Save className="mr-2 h-4 w-4" />
                                     Save Keys
                                 </Button>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* --- Appearance Tab --- */}
+                    <TabsContent value="appearance">
+                        <Card className="bg-zinc-950 border-zinc-800">
+                            <CardHeader>
+                                <CardTitle>Visual Effects</CardTitle>
+                                <CardDescription>
+                                    Control motion and animations. OS Reduce Motion is always respected.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label>Animated backgrounds</Label>
+                                    <Select value={motionSetting} onValueChange={handleMotionSettingChange}>
+                                        <SelectTrigger className="bg-zinc-900 border-zinc-700">
+                                            <SelectValue placeholder="Auto (recommended)" />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
+                                            <SelectItem value="auto">Auto (recommended)</SelectItem>
+                                            <SelectItem value="on">On</SelectItem>
+                                            <SelectItem value="off">Off</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-zinc-500">
+                                        Applies to the login and landing visuals in this browser via localStorage.
+                                    </p>
+                                </div>
                             </CardContent>
                         </Card>
                     </TabsContent>

@@ -6,12 +6,26 @@ import { buildAuthHeaders, readApiJson } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Plug, CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, XCircle } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
+
+type ScopePreset = "core" | "drive" | "calendar" | "gmail" | "full";
+
+type GoogleCapabilities = {
+  drive: boolean;
+  gmail: boolean;
+  calendar: boolean;
+};
 
 export function GoogleWorkspaceConnect() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [capabilities, setCapabilities] = useState<GoogleCapabilities>({
+    drive: false,
+    gmail: false,
+    calendar: false,
+  });
 
   const loadStatus = useCallback(async () => {
     if (!user) return;
@@ -19,11 +33,20 @@ export function GoogleWorkspaceConnect() {
     try {
       const headers = await buildAuthHeaders(user);
       const response = await fetch("/api/google/status", { headers });
-      const result = await readApiJson<{ connected?: boolean; error?: string }>(response);
+      const result = await readApiJson<{
+        connected?: boolean;
+        capabilities?: Partial<GoogleCapabilities>;
+        error?: string;
+      }>(response);
       if (!response.ok) {
         throw new Error(result?.error || "Failed to check Google connection");
       }
       setConnected(Boolean(result?.connected));
+      setCapabilities({
+        drive: Boolean(result?.capabilities?.drive),
+        gmail: Boolean(result?.capabilities?.gmail),
+        calendar: Boolean(result?.capabilities?.calendar),
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       toast.error("Failed to check Google connection", {
@@ -50,7 +73,7 @@ export function GoogleWorkspaceConnect() {
     loadStatus();
   }, [loadStatus]);
 
-  const handleConnect = async () => {
+  const handleConnect = async (scopePreset: ScopePreset) => {
     if (!user) return;
     setLoading(true);
     try {
@@ -60,7 +83,7 @@ export function GoogleWorkspaceConnect() {
       const response = await fetch("/api/google/connect", {
         method: "POST",
         headers,
-        body: JSON.stringify({ returnTo: "/dashboard/integrations" }),
+        body: JSON.stringify({ returnTo: "/dashboard/integrations", scopePreset }),
       });
 
       const result = await readApiJson<{ authUrl?: string; error?: string }>(response);
@@ -136,7 +159,7 @@ export function GoogleWorkspaceConnect() {
     <Card className="bg-zinc-950 border-zinc-800">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-white flex items-center gap-2">
-          <Plug className="h-4 w-4 text-blue-500" />
+          <AfroGlyph variant="integrations" className="h-4 w-4 text-cyan-300" />
           Google Workspace
         </CardTitle>
         {connected ? (
@@ -153,23 +176,85 @@ export function GoogleWorkspaceConnect() {
         <p className="text-sm text-zinc-400">
           Connect Gmail, Drive, and Calendar so Mission Control can orchestrate your outreach.
         </p>
+
+        {connected && (
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className={`rounded-full border px-2 py-1 ${capabilities.drive ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-300"}`}>
+              Drive {capabilities.drive ? "enabled" : "missing"}
+            </span>
+            <span className={`rounded-full border px-2 py-1 ${capabilities.calendar ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-300"}`}>
+              Calendar {capabilities.calendar ? "enabled" : "missing"}
+            </span>
+            <span className={`rounded-full border px-2 py-1 ${capabilities.gmail ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-zinc-700 bg-zinc-900 text-zinc-300"}`}>
+              Gmail {capabilities.gmail ? "enabled" : "missing"}
+            </span>
+          </div>
+        )}
+
         {connected ? (
-          <Button
-            variant="outline"
-            onClick={handleDisconnect}
-            disabled={loading}
-            className="border-zinc-700 text-zinc-300 hover:text-white"
-          >
-            Disconnect Google
-          </Button>
+          <>
+            {(!capabilities.drive || !capabilities.calendar || !capabilities.gmail) && (
+              <div className="grid grid-cols-1 gap-2">
+                {!capabilities.drive && (
+                  <Button
+                    onClick={() => handleConnect("drive")}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-500 text-white"
+                  >
+                    Enable Drive
+                  </Button>
+                )}
+                {!capabilities.calendar && (
+                  <Button
+                    onClick={() => handleConnect("calendar")}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-500 text-white"
+                  >
+                    Enable Calendar
+                  </Button>
+                )}
+                {!capabilities.gmail && (
+                  <Button
+                    onClick={() => handleConnect("gmail")}
+                    disabled={loading}
+                    className="bg-blue-600 hover:bg-blue-500 text-white"
+                  >
+                    Enable Gmail
+                  </Button>
+                )}
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              onClick={handleDisconnect}
+              disabled={loading}
+              className="border-zinc-700 text-zinc-300 hover:text-white"
+            >
+              Disconnect Google
+            </Button>
+          </>
         ) : (
-          <Button
-            onClick={handleConnect}
-            disabled={loading}
-            className="bg-blue-600 hover:bg-blue-500 text-white"
-          >
-            Connect Google
-          </Button>
+          <div className="grid grid-cols-1 gap-2">
+            <Button
+              onClick={() => handleConnect("core")}
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-500 text-white"
+            >
+              Connect Google (Drive + Calendar)
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleConnect("full")}
+              disabled={loading}
+              className="border-zinc-700 text-zinc-200 hover:bg-zinc-900"
+            >
+              Connect Full (includes Gmail)
+            </Button>
+            <p className="text-xs text-zinc-500">
+              Tip: start with Drive + Calendar to reduce verification friction, then enable Gmail when needed.
+            </p>
+          </div>
         )}
       </CardContent>
     </Card>

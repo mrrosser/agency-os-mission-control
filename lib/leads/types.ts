@@ -11,21 +11,47 @@ export interface LeadScoreSignals {
     hasEmail: boolean;
 }
 
+export interface PlacePhotoRef {
+    ref: string;
+    width: number;
+    height: number;
+    htmlAttributions?: string[];
+}
+
 export interface LeadCandidate {
     id: string;
     companyName: string;
     founderName?: string;
     email?: string;
     phone?: string;
+    phones?: string[];
     website?: string;
+    googleMapsUrl?: string;
+    placePhotos?: PlacePhotoRef[];
+    websiteDomain?: string;
     websiteTitle?: string;
     websiteDescription?: string;
     websiteKeywords?: string;
     websiteEmails?: string[];
+    socialLinks?: Partial<{
+        linkedin: string;
+        facebook: string;
+        instagram: string;
+        x: string;
+        youtube: string;
+        tiktok: string;
+    }>;
     location?: string;
     industry?: string;
     rating?: number;
     reviewCount?: number;
+    businessStatus?: string;
+    openNow?: boolean;
+    openingHours?: string[];
+    priceLevel?: number;
+    lat?: number;
+    lng?: number;
+    domainClusterSize?: number;
     source: LeadSource;
     score?: number;
     scoreSignals?: LeadScoreSignals;

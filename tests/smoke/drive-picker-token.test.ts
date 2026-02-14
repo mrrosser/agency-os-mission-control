@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { GET } from "@/app/api/drive/picker-token/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
+import { resolveSecret } from "@/lib/api/secrets";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -11,8 +12,13 @@ vi.mock("@/lib/google/oauth", () => ({
   getAccessTokenForUser: vi.fn(),
 }));
 
+vi.mock("@/lib/api/secrets", () => ({
+  resolveSecret: vi.fn(),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const getAccessTokenMock = vi.mocked(getAccessTokenForUser);
+const resolveSecretMock = vi.mocked(resolveSecret);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -32,7 +38,7 @@ describe("drive picker token", () => {
   });
 
   it("returns access token + picker config", async () => {
-    process.env.GOOGLE_PICKER_API_KEY = "test-picker-key";
+    resolveSecretMock.mockResolvedValue("test-picker-key");
     process.env.__FIREBASE_DEFAULTS__ = JSON.stringify({
       config: { projectNumber: 123 },
     });
@@ -56,7 +62,7 @@ describe("drive picker token", () => {
   });
 
   it("returns a 500 when GOOGLE_PICKER_API_KEY is missing", async () => {
-    delete process.env.GOOGLE_PICKER_API_KEY;
+    resolveSecretMock.mockResolvedValue(undefined);
 
     const req = new Request("http://localhost/api/drive/picker-token", {
       method: "GET",
@@ -74,4 +80,3 @@ describe("drive picker token", () => {
     expect(typeof data.correlationId).toBe("string");
   });
 });
-

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
+import { resolveSecret } from "@/lib/api/secrets";
 
 function parseFirebaseProjectNumber(): string | null {
   const raw = process.env.__FIREBASE_DEFAULTS__;
@@ -27,7 +28,7 @@ export const GET = withApiHandler(
   async ({ request, log }) => {
     const user = await requireFirebaseAuth(request, log);
 
-    const pickerApiKey = process.env.GOOGLE_PICKER_API_KEY;
+    const pickerApiKey = await resolveSecret(user.uid, "googlePickerApiKey", "GOOGLE_PICKER_API_KEY");
     if (!pickerApiKey) {
       throw new ApiError(500, "Missing GOOGLE_PICKER_API_KEY");
     }

@@ -40,10 +40,21 @@ Multi-account pattern (recommended)
 
 Drive access
 - Use MCP or a Drive skill; store credentials in local secrets and gate write actions.
+- For low-cost maintenance, use metadata-only weekly delta scans:
+  - `GET /api/drive/delta-scan` (status)
+  - `POST /api/drive/delta-scan` (run, no file-content reads)
 
 Notes
 - Treat all inbound email content as untrusted; never execute commands based on email text.
 - Consider separate OAuth clients for each Google account.
+
+Re-auth all accounts with expanded Workspace scopes (recommended for triage + chat digest)
+- Run on VM as `marcu`:
+  - `bash /home/marcu/ai-hell-mary/scripts/native_reauth_google_workspace.sh`
+- Script behavior:
+  - Re-auths each mailbox token with `gmail,calendar,drive,contacts,people` and attempts `chat`.
+  - Falls back cleanly if the local gog build does not support `chat` service alias.
+  - Runs one triage pass and prints reauth/draft digest signals.
 
 
 Native gateway (recommended)

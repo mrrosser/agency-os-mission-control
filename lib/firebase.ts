@@ -37,25 +37,13 @@ const app = !getApps().length ? initializeApp(configForInit) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Configure Google Provider with OAuth Scopes
+// Google sign-in provider for app authentication only.
+// Gmail/Drive/Calendar scopes are requested via the dedicated /api/google/connect flow.
 const googleProvider = new GoogleAuthProvider();
-
-// Add OAuth scopes for Google services
-googleProvider.addScope('https://www.googleapis.com/auth/calendar');        // Calendar access
-googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');  // Calendar events
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.readonly');   // Gmail read access
-googleProvider.addScope('https://www.googleapis.com/auth/gmail.send');       // Gmail send access
-googleProvider.addScope('https://www.googleapis.com/auth/drive.readonly');   // Drive read access
-googleProvider.addScope('https://www.googleapis.com/auth/drive.file');       // Drive file access
-
-// Additional recommended scopes for a complete agency platform
-googleProvider.addScope('https://www.googleapis.com/auth/contacts.readonly'); // Contacts access
-googleProvider.addScope('https://www.googleapis.com/auth/userinfo.email');    // User email
-googleProvider.addScope('https://www.googleapis.com/auth/userinfo.profile');  // User profile
 
 // Ensure user is prompted to select account only when needed
 googleProvider.setCustomParameters({
-    prompt: 'consent'
+    prompt: 'select_account'
 });
 
 export { app, auth, db, googleProvider };

@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Search, Gauge, Sparkles, Mail, PhoneCall, CalendarCheck } from "lucide-react";
+import { AfroGlyph, type AfroGlyphVariant } from "@/components/branding/AfroGlyph";
+import { useAuth } from "@/components/providers/auth-provider";
 
 export type LeadJourneyStepKey =
     | "source"
@@ -22,6 +25,16 @@ export interface LeadJourneyEntry {
     founderName?: string;
     score?: number;
     source?: string;
+    website?: string;
+    googleMapsUrl?: string;
+    websiteDomain?: string;
+    domainClusterSize?: number;
+    placePhotos?: Array<{
+        ref: string;
+        width: number;
+        height: number;
+        htmlAttributions?: string[];
+    }>;
     steps: Record<LeadJourneyStepKey, LeadJourneyStatus>;
 }
 
@@ -29,21 +42,23 @@ interface LeadJourneyProps {
     journeys: LeadJourneyEntry[];
     runId?: string | null;
     warnings?: string[];
+    selectedLeadId?: string | null;
+    onViewDetails?: (leadId: string) => void;
 }
 
 const STEP_DEFS: Array<{
     key: LeadJourneyStepKey;
     label: string;
     type: "MCP" | "AI";
-    icon: typeof Search;
+    icon: AfroGlyphVariant;
 }> = [
-        { key: "source", label: "Source", type: "MCP", icon: Search },
-        { key: "score", label: "Score", type: "AI", icon: Gauge },
-        { key: "enrich", label: "Enrich", type: "MCP", icon: Sparkles },
-        { key: "script", label: "Script", type: "AI", icon: Sparkles },
-        { key: "outreach", label: "Outreach", type: "MCP", icon: Mail },
-        { key: "followup", label: "Follow-up", type: "MCP", icon: PhoneCall },
-        { key: "booking", label: "Booking", type: "MCP", icon: CalendarCheck },
+        { key: "source", label: "Source", type: "MCP", icon: "source" },
+        { key: "score", label: "Score", type: "AI", icon: "score" },
+        { key: "enrich", label: "Enrich", type: "MCP", icon: "enrich" },
+        { key: "script", label: "Script", type: "AI", icon: "script" },
+        { key: "outreach", label: "Outreach", type: "MCP", icon: "outreach" },
+        { key: "followup", label: "Follow-up", type: "MCP", icon: "followup" },
+        { key: "booking", label: "Booking", type: "MCP", icon: "booking" },
     ];
 
 const STATUS_STYLES: Record<LeadJourneyStatus, string> = {
@@ -57,7 +72,82 @@ const STATUS_STYLES: Record<LeadJourneyStatus, string> = {
         "border-red-500/40 text-red-300 bg-gradient-to-r from-red-500/15 via-orange-500/10 to-rose-500/15 bg-[length:200%_200%] motion-safe:animate-shine",
 };
 
-export function LeadJourney({ journeys, runId, warnings }: LeadJourneyProps) {
+function normalizeHttpUrl(value?: string): string | null {
+    const trimmed = (value || "").trim();
+    if (!trimmed) return null;
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+}
+
+function PlacesPhotoThumb(props: { photoRef?: string; companyName: string }) {
+    const { user } = useAuth();
+    const [src, setSrc] = useState<string | null>(null);
+    const [failed, setFailed] = useState(false);
+
+    const photoRef = (props.photoRef || "").trim();
+
+    useEffect(() => {
+        if (!user) return;
+        if (!photoRef) return;
+        if (failed) return;
+
+        const authedUser = user;
+        let cancelled = false;
+        const controller = new AbortController();
+        let blobUrl: string | null = null;
+
+        async function load() {
+            const token = await authedUser.getIdToken();
+            const res = await fetch(
+                `/api/google/places/photo?ref=${encodeURIComponent(photoRef)}&maxWidth=240`,
+                {
+                    method: "GET",
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        "X-Correlation-Id": crypto.randomUUID(),
+                    },
+                    signal: controller.signal,
+                }
+            );
+            if (!res.ok) {
+                throw new Error(`photo fetch failed (${res.status})`);
+            }
+            const blob = await res.blob();
+            blobUrl = URL.createObjectURL(blob);
+            if (!cancelled) setSrc(blobUrl);
+        }
+
+        void load().catch(() => {
+            if (!cancelled) setFailed(true);
+        });
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+            if (blobUrl) URL.revokeObjectURL(blobUrl);
+        };
+    }, [user, photoRef, failed]);
+
+    if (!photoRef) return null;
+
+    return src ? (
+        // eslint-disable-next-line @next/next/no-img-element -- blob URL is generated at runtime (Next/Image can't optimize it).
+        <img
+            src={src}
+            alt={`${props.companyName} photo`}
+            className="h-10 w-10 shrink-0 rounded-lg border border-zinc-800 object-cover"
+            loading="lazy"
+        />
+    ) : (
+        <div className="h-10 w-10 shrink-0 animate-pulse rounded-lg border border-zinc-800 bg-zinc-900/50" />
+    );
+}
+
+export function LeadJourney({ journeys, runId, warnings, selectedLeadId, onViewDetails }: LeadJourneyProps) {
+    const sortedJourneys = useMemo(() => {
+        return journeys.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    }, [journeys]);
+
     return (
         <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
             <CardContent className="p-6 space-y-4">
@@ -89,23 +179,97 @@ export function LeadJourney({ journeys, runId, warnings }: LeadJourneyProps) {
                     </div>
                 ) : (
                     <div className="space-y-4">
-                        {journeys.map((journey) => (
-                            <div key={journey.leadId} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+                        {sortedJourneys.map((journey) => (
+                            <div
+                                key={journey.leadId}
+                                className={cn(
+                                    "rounded-xl border bg-zinc-900/40 p-4 space-y-3",
+                                    selectedLeadId === journey.leadId
+                                        ? "border-blue-500/40 shadow-[0_0_0_1px_rgba(59,130,246,0.25)]"
+                                        : "border-zinc-800"
+                                )}
+                            >
                                 <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-sm font-semibold text-white">{journey.companyName}</p>
-                                        <p className="text-xs text-zinc-500">
-                                            {journey.founderName || "Lead"} • {journey.source || "source"} • Score {journey.score ?? 0}
-                                        </p>
+                                    <div className="flex items-start gap-3">
+                                        <PlacesPhotoThumb
+                                            photoRef={journey.placePhotos?.[0]?.ref}
+                                            companyName={journey.companyName}
+                                        />
+                                        <div>
+                                            {(() => {
+                                                const href = normalizeHttpUrl(journey.website) || normalizeHttpUrl(journey.googleMapsUrl);
+                                                if (!href) {
+                                                    return <p className="text-sm font-semibold text-white">{journey.companyName}</p>;
+                                                }
+                                                return (
+                                                    <a
+                                                        href={href}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-sm font-semibold text-white hover:underline underline-offset-4"
+                                                        title="Open lead website"
+                                                    >
+                                                        {journey.companyName}
+                                                    </a>
+                                                );
+                                            })()}
+                                            <p className="text-xs text-zinc-500">
+                                                {journey.founderName || "Lead"} • {journey.source || "source"} • Score {journey.score ?? 0}
+                                            </p>
+                                        </div>
                                     </div>
-                                    <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
-                                        ICP Fit {journey.score ?? 0}
-                                    </Badge>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
+                                            ICP Fit {journey.score ?? 0}
+                                        </Badge>
+                                        {journey.websiteDomain && journey.domainClusterSize && journey.domainClusterSize > 1 && (
+                                            <Badge variant="secondary" className="bg-zinc-900 text-zinc-400">
+                                                {journey.websiteDomain} x{journey.domainClusterSize}
+                                            </Badge>
+                                        )}
+                                        {normalizeHttpUrl(journey.website) && (
+                                            <Button
+                                                asChild
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                            >
+                                                <a href={normalizeHttpUrl(journey.website) as string} target="_blank" rel="noreferrer">
+                                                    <AfroGlyph variant="network" className="mr-1 h-3.5 w-3.5" />
+                                                    Site
+                                                </a>
+                                            </Button>
+                                        )}
+                                        {normalizeHttpUrl(journey.googleMapsUrl) && (
+                                            <Button
+                                                asChild
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                            >
+                                                <a href={normalizeHttpUrl(journey.googleMapsUrl) as string} target="_blank" rel="noreferrer">
+                                                    <AfroGlyph variant="trend" className="mr-1 h-3.5 w-3.5" />
+                                                    Maps
+                                                </a>
+                                            </Button>
+                                        )}
+                                        {onViewDetails && (
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                                onClick={() => onViewDetails(journey.leadId)}
+                                            >
+                                                <AfroGlyph variant="receipt" className="mr-1 h-3.5 w-3.5" />
+                                                Details
+                                            </Button>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
                                     {STEP_DEFS.map((step) => {
-                                        const Icon = step.icon;
                                         const status = journey.steps[step.key];
                                         return (
                                             <div
@@ -116,7 +280,7 @@ export function LeadJourney({ journeys, runId, warnings }: LeadJourneyProps) {
                                                 )}
                                             >
                                                 <div className="flex items-center justify-center gap-1">
-                                                    <Icon className="h-3 w-3" />
+                                                    <AfroGlyph variant={step.icon} className="h-3 w-3" />
                                                     <span>{step.label}</span>
                                                 </div>
                                                 <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-zinc-500">

@@ -1,0 +1,373 @@
+{
+  "version": 1,
+  "dryRun": false,
+  "maxThreadsPerAccount": 10,
+  "searchQuery": "is:unread in:inbox newer_than:7d -category:promotions -category:social -category:updates",
+  "searchQueryAutoExcludeLabels": true,
+  "guardrails": {
+    "enabled": true,
+    "deny": {
+      "emails": [],
+      "domains": []
+    },
+    "allowListMailReplyToOverride": true,
+    "requireActionableSignalForDraft": true,
+    "actionableMinBodyChars": 55,
+    "actionableKeywordsAny": [
+      "can we",
+      "could we",
+      "quote",
+      "proposal",
+      "book",
+      "availability",
+      "schedule",
+      "meeting",
+      "follow up",
+      "interested",
+      "next step",
+      "please advise",
+      "could you send",
+      "can you help",
+      "book us",
+      "commission",
+      "discovery call",
+      "consultation"
+    ],
+    "actionableRequestVerbsAny": [
+      "review",
+      "confirm",
+      "approve",
+      "book",
+      "schedule",
+      "quote",
+      "scope",
+      "send",
+      "discuss",
+      "reserve",
+      "hold"
+    ],
+    "nonActionablePhrasesAny": [
+      "for your notes",
+      "for your records",
+      "no reply needed",
+      "no action needed",
+      "newsletter",
+      "weekly digest",
+      "daily digest",
+      "unsubscribe",
+      "password reset",
+      "fyi only",
+      "for awareness",
+      "status update",
+      "meeting minutes",
+      "recap attached",
+      "calendar invitation",
+      "invitation accepted",
+      "invitation declined",
+      "invitation tentative"
+    ],
+    "lowValueSubjectPatterns": [
+      "receipt",
+      "invoice paid",
+      "payment confirmation",
+      "verification code",
+      "security alert",
+      "password reset",
+      "newsletter",
+      "digest",
+      "meeting notes",
+      "your note",
+      "summary",
+      "meeting invitation",
+      "invitation:",
+      "accepted:",
+      "declined:",
+      "tentative:",
+      "calendar reminder"
+    ],
+    "ignoreLabel": "Ignore",
+    "applyIgnoreLabelOnSkip": true,
+    "noReplyPatterns": [
+      "no-reply",
+      "noreply",
+      "donotreply",
+      "mailer-daemon",
+      "postmaster"
+    ]
+  },
+  "calendar": {
+    "enabled": true,
+    "policy": "auto_if_unambiguous_and_free_else_chat",
+    "requireMeetingIntent": true,
+    "skipIfSchedulingLink": true,
+    "sendUpdates": "all",
+    "withMeet": true,
+    "defaultDurationMinutes": 30,
+    "minMinutesFromNow": 5,
+    "maxDurationMinutes": 180,
+    "timezoneRequired": true,
+    "meetingIntentKeywordsAny": [
+      "book us",
+      "studio visit",
+      "discovery call",
+      "consultation",
+      "availability this week",
+      "book a call",
+      "hold this time",
+      "book us event"
+    ],
+    "checkAccounts": [
+      "mrosser@rossernftgallery.com",
+      "mcool4444@gmail.com",
+      "marcus@aicofoundry.com",
+      "marcuslrosser@gmail.com"
+    ],
+    "autoBookGuardrails": {
+      "requireSenderAllowlist": false,
+      "allowFromEmails": [],
+      "allowFromDomains": [],
+      "blockFreeEmailDomains": false,
+      "maxBookingsPerSenderPerDay": 2,
+      "businessHours": {
+        "enabled": true,
+        "weekdaysOnly": true,
+        "startHourLocal": 7,
+        "endHourLocal": 20
+      }
+    }
+  },
+  "chat": {
+    "notifySpaceId": "spaces/AAQA62xqRGQ",
+    "mode": "digest",
+    "includeSkippedThreadsInDigest": false,
+    "includeSubjectFrom": false,
+    "alertsEnabled": true,
+    "alertSpaceId": "",
+    "dailyDigest": {
+      "enabled": true,
+      "spaceId": "",
+      "hourUtc": 22,
+      "minuteUtc": 0,
+      "includePerAccount": true
+    },
+    "spaces": {
+      "outreach": "spaces/AAQA62xqRGQ",
+      "coding": "spaces/AAQALocqO7Q"
+    },
+    "spaceByRoute": {
+      "rt_solutions": "outreach",
+      "rosser_nft_gallery": "outreach",
+      "ai_cofoundry": "coding"
+    },
+    "threadPerEmail": true
+  },
+  "labels": {
+    "baseAllInboxes": [
+      "Needs-Reply",
+      "Lead",
+      "Client",
+      "Quote",
+      "Follow-Up",
+      "Ignore"
+    ],
+    "enableDraftedLabel": true,
+    "draftedLabel": "OpenClaw/Drafted",
+    "rngMailboxOnly": [
+      "RNG/NFT",
+      "RNG/Commission",
+      "RNG/3D-Print",
+      "RNG/Preservation",
+      "RNG/Event",
+      "RNG/Reputation",
+      "RTS/Workshop",
+      "RTS/PD",
+      "RTS/AfterSchool",
+      "RTS/Consulting"
+    ],
+    "aicfMailboxOnly": [
+      "AICF/Discovery",
+      "AICF/Pilot",
+      "AICF/Build",
+      "AICF/Support"
+    ]
+  },
+  "accounts": [
+    {
+      "key": "mrosser",
+      "email": "mrosser@rossernftgallery.com",
+      "labelScope": "rng"
+    },
+    {
+      "key": "mcool4444",
+      "email": "mcool4444@gmail.com",
+      "labelScope": "base"
+    },
+    {
+      "key": "marcus",
+      "email": "marcus@aicofoundry.com",
+      "labelScope": "aicf"
+    },
+    {
+      "key": "marcuslrosser",
+      "email": "marcuslrosser@gmail.com",
+      "labelScope": "all"
+    }
+  ],
+  "routing": {
+    "precedence": ["rt_solutions", "rosser_nft_gallery", "ai_cofoundry"],
+    "defaultRoute": "ai_cofoundry",
+    "defaultRouteByAccount": {
+      "mrosser": "rosser_nft_gallery",
+      "mcool4444": "rt_solutions",
+      "marcus": "ai_cofoundry",
+      "marcuslrosser": "ai_cofoundry"
+    },
+    "requireSignalForDraft": true,
+    "applyIgnoreLabelOnWeakSignal": true,
+    "rt_solutions": {
+      "labels": ["Needs-Reply", "Lead", "RTS/Consulting"],
+      "allowFromEmails": [],
+      "allowFromDomains": [],
+      "keywordsAll": [],
+      "keywordsAny": [
+        "automation",
+        "workflow",
+        "cloud strategy",
+        "infrastructure",
+        "secure deployment",
+        "cybersecurity",
+        "consulting",
+        "school",
+        "district",
+        "teacher",
+        "teachers",
+        "student",
+        "students",
+        "classroom",
+        "curriculum",
+        "lesson plan",
+        "professional development",
+        "pd",
+        "workshop",
+        "after-school",
+        "afterschool",
+        "camp",
+        "professional services",
+        "implementation"
+      ]
+    },
+    "rosser_nft_gallery": {
+      "labels": ["Needs-Reply", "Lead", "RNG/Commission"],
+      "allowFromEmails": [],
+      "allowFromDomains": [],
+      "keywordsAll": [],
+      "keywordsAny": [
+        "artist",
+        "collector",
+        "venue",
+        "rental",
+        "opening",
+        "installation",
+        "commission",
+        "sculpture",
+        "3d print",
+        "3d printing",
+        "3d scan",
+        "3d scanning",
+        "gallery",
+        "exhibition",
+        "event",
+        "nft",
+        "mint",
+        "smart contract",
+        "crossmint",
+        "reputation",
+        "serp",
+        "seo",
+        "suppression",
+        "exhibit",
+        "curation"
+      ]
+    },
+    "ai_cofoundry": {
+      "labels": ["Needs-Reply", "Lead", "AICF/Discovery"],
+      "allowFromEmails": [],
+      "allowFromDomains": [],
+      "keywordsAll": [],
+      "keywordsAny": [
+        "agentic",
+        "fractional ai",
+        "governance",
+        "guardrails",
+        "managed ai ops",
+        "venture studio",
+        "socialops",
+        "automation",
+        "workflow",
+        "sop",
+        "playbook",
+        "integration",
+        "api",
+        "webhook",
+        "mvp",
+        "pilot",
+        "prototype",
+        "build an app",
+        "dashboard",
+        "agent",
+        "ai agent",
+        "rag",
+        "embeddings",
+        "vector database",
+        "pilot scope",
+        "production rollout"
+      ]
+    }
+  },
+  "knowledgePacks": {
+    "enabled": true,
+    "baseDir": "/etc/openclaw/knowledge-packs",
+    "maxCharsPerRun": 12000,
+    "shared": ["shared_voice_and_policy.md"],
+    "routes": {
+      "rt_solutions": ["rt_solutions.md"],
+      "rosser_nft_gallery": ["rosser_nft_gallery.md"],
+      "ai_cofoundry": ["ai_cofoundry.md"]
+    },
+    "accounts": {}
+  },
+  "aiDrafting": {
+    "enabled": true,
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "timeoutMs": 20000,
+    "maxOutputTokens": 360,
+    "maxReplyChars": 2200,
+    "maxContextChars": 12000,
+    "maxKnowledgeChars": 6000,
+    "maxMessagesFromThread": 12,
+    "temperature": 0.15,
+    "fallbackToTemplate": true,
+    "promptDefault": "Write exactly in Marcus's voice: warm, direct, practical, and concise. Use contractions and short paragraphs. Start from the thread context first: read the latest message plus prior thread history, reuse concrete details already provided (names, timing, scope), and do not ask for information already in the thread. If this contact has an ongoing thread, acknowledge continuity in one sentence. Mirror the goal in one line, then move to action. Offer two paths when helpful (quick call vs async). Ask at most 1-2 precise questions. End with one concrete next step. Use natural openers like 'Quick note:' or 'Real quick:' when it fits. Never sound robotic, never mention AI, and do not second-guess dates unless clearly ambiguous.",
+    "promptByRoute": {
+      "rt_solutions": "Brand: RT Solutions. Tone: calm, security-conscious, and systems-builder. Prioritize scope, timeline, budget band, and operational clarity. Keep language straightforward and risk-aware. Avoid hype and generic sales talk. If prior workshop or school context exists in-thread, reference it explicitly.",
+      "rosser_nft_gallery": "Brand: Rosser NFT Gallery. Tone: human, curated, and community-centered. Focus on artistic fit, medium, dimensions, timeline, and budget range. Keep language creative but grounded. Avoid investment or speculation framing. If prior commission/event details exist, continue from them instead of restarting intake.",
+      "ai_cofoundry": "Brand: AI CoFoundry. Tone: operator-first and governance-first with no hype. Focus on workflow mapping, guardrails, pilot scope, measurable outcomes, and production runbooks. Keep it practical and outcome-oriented. If prior discovery context exists, continue from that context and only ask missing gaps."
+    }
+  },
+  "draftTemplates": {
+    "rt_solutions": {
+      "subjectPrefix": "Re:",
+      "body": "Thanks for reaching out.\n\nIf you can share grade bands, number of students or educators, schedule window, device access (Chromebooks/iPads), goals, and budget band, I can recommend the right pilot.\n\nIf easier, here is a 20-minute slot (Google Meet included): https://calendar.app.google/Yt9Lm2yBjjkrbyiHA\n\nBest,\nMarcus"
+    },
+    "rosser_nft_gallery": {
+      "subjectPrefix": "Re:",
+      "body": "Thanks for reaching out to Rosser NFT Gallery.\n\nIf you share what you want to do (commission, event, exhibit, or acquisition), timeline, and budget range, I can send the right next step right away.\n\nIf easier, book here (Google Meet included): https://calendar.app.google/d6WVsrcihD63TZZj8\n\nBest,\nMarcus"
+    },
+    "ai_cofoundry": {
+      "subjectPrefix": "Re:",
+      "body": "Thanks for reaching out.\n\nShare your top workflow bottlenecks, current stack, and what success looks like over the next 30-60 days, and I will map scope, guardrails, and next steps.\n\nIf easier, book a discovery call here (Google Meet included): https://calendar.app.google/LEk5GQobBpAXTfpR9\n\nBest,\nMarcus"
+    }
+  }
+}

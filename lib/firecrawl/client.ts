@@ -14,6 +14,7 @@ interface FirecrawlScrapeResponse {
   success: boolean;
   data?: {
     markdown?: string;
+    links?: string[];
     metadata?: FirecrawlScrapeMetadata;
     warning?: string;
   };
@@ -22,6 +23,7 @@ interface FirecrawlScrapeResponse {
 
 export interface FirecrawlScrapeResult {
   markdown?: string;
+  links?: string[];
   metadata?: FirecrawlScrapeMetadata;
   warning?: string;
 }
@@ -121,6 +123,7 @@ export async function firecrawlScrape(
 
     const result: FirecrawlScrapeResult = {
       markdown: typed.data?.markdown,
+      links: Array.isArray(typed.data?.links) ? typed.data?.links : undefined,
       metadata: typed.data?.metadata,
       warning: typed.data?.warning,
     };
@@ -128,6 +131,7 @@ export async function firecrawlScrape(
     log?.info("firecrawl.scrape.completed", {
       url,
       hasMarkdown: Boolean(result.markdown),
+      linkCount: result.links?.length ?? 0,
       statusCode: result.metadata?.statusCode,
       warning: result.warning || null,
     });

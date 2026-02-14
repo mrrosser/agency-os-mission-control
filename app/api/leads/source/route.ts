@@ -22,6 +22,19 @@ const bodySchema = z.object({
   includeEnrichment: z.boolean().optional(),
 });
 
+interface LeadSourceDiagnostics {
+  requestedLimit: number;
+  fetchedTotal: number;
+  dedupedTotal: number;
+  duplicatesRemoved: number;
+  domainClusters: number;
+  maxDomainClusterSize: number;
+  scoredTotal: number;
+  filteredByScore: number;
+  withEmail: number;
+  withoutEmail: number;
+}
+
 export const POST = withApiHandler(
   async ({ request, log, correlationId }) => {
     const body = await parseJson(request, bodySchema);
@@ -78,18 +91,36 @@ export const POST = withApiHandler(
       "FIRECRAWL_API_KEY"
     );
 
-    const { leads, sourcesUsed, warnings } = await sourceLeads(requestPayload, {
+    const { leads, sourcesUsed, warnings, diagnostics } = await sourceLeads(requestPayload, {
       uid: user.uid,
       googlePlacesKey,
       firecrawlKey,
       log,
     });
 
-    const candidateTotal = leads.length;
+    const rawTotal = diagnostics?.rawCount ?? leads.length;
+    const dedupedTotal = diagnostics?.dedupedCount ?? leads.length;
+    const duplicatesRemoved = diagnostics?.duplicatesRemoved ?? Math.max(0, rawTotal - dedupedTotal);
+    const domainClusters = diagnostics?.domainClusters ?? 0;
+    const maxDomainClusterSize = diagnostics?.maxDomainClusterSize ?? 0;
+
     const scored = leads
       .filter((lead) => (requestPayload.minScore ? (lead.score || 0) >= requestPayload.minScore : true))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
-    const filteredOut = Math.max(0, candidateTotal - scored.length);
+    const filteredOut = Math.max(0, dedupedTotal - scored.length);
+    const withEmail = scored.filter((lead) => Boolean(lead.email && lead.email.trim())).length;
+    const sourceDiagnostics: LeadSourceDiagnostics = {
+      requestedLimit: requestPayload.limit || 10,
+      fetchedTotal: rawTotal,
+      dedupedTotal,
+      duplicatesRemoved,
+      domainClusters,
+      maxDomainClusterSize,
+      scoredTotal: scored.length,
+      filteredByScore: filteredOut,
+      withEmail,
+      withoutEmail: Math.max(0, scored.length - withEmail),
+    };
 
     const batch = getAdminDb().batch();
     const leadsRef = runRef.collection("leads");
@@ -114,8 +145,9 @@ export const POST = withApiHandler(
         request: requestPayload,
         sourcesUsed,
         warnings,
-        candidateTotal,
+        candidateTotal: rawTotal,
         filteredOut,
+        sourceDiagnostics,
         total: scored.length,
         createdAt: FieldValue.serverTimestamp(),
       }) as Record<string, unknown>,
@@ -135,8 +167,9 @@ export const POST = withApiHandler(
       leads: scored,
       sourcesUsed,
       warnings,
-      candidateTotal,
+      candidateTotal: rawTotal,
       filteredOut,
+      sourceDiagnostics,
     });
   },
   { route: "leads.source" }

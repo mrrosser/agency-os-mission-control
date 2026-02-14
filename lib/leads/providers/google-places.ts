@@ -32,6 +32,25 @@ interface GooglePlacesDetailsResponse {
         formatted_phone_number?: string;
         international_phone_number?: string;
         website?: string;
+        url?: string;
+        business_status?: string;
+        photos?: Array<{
+            photo_reference?: string;
+            width?: number;
+            height?: number;
+            html_attributions?: string[];
+        }>;
+        opening_hours?: {
+            open_now?: boolean;
+            weekday_text?: string[];
+        };
+        price_level?: number;
+        geometry?: {
+            location?: {
+                lat?: number;
+                lng?: number;
+            };
+        };
     };
 }
 
@@ -97,7 +116,20 @@ export async function fetchGooglePlacesLeads(params: GooglePlacesSearchParams): 
         candidates.map(async (candidate) => {
             const detailsUrl = new URL("https://maps.googleapis.com/maps/api/place/details/json");
             detailsUrl.searchParams.set("place_id", candidate.id);
-            detailsUrl.searchParams.set("fields", "formatted_phone_number,international_phone_number,website");
+            detailsUrl.searchParams.set(
+                "fields",
+                [
+                    "formatted_phone_number",
+                    "international_phone_number",
+                "website",
+                "url",
+                "business_status",
+                "photos",
+                "opening_hours",
+                "price_level",
+                "geometry",
+            ].join(",")
+            );
             detailsUrl.searchParams.set("key", apiKey);
 
             const timeoutControl = withTimeout(8000);
@@ -109,10 +141,47 @@ export async function fetchGooglePlacesLeads(params: GooglePlacesSearchParams): 
                 if (details.status !== "OK") {
                     return candidate;
                 }
+
+                const lat = details.result?.geometry?.location?.lat;
+                const lng = details.result?.geometry?.location?.lng;
+                const placePhotos = (details.result?.photos || [])
+                    .map((photo) => {
+                        const ref = (photo.photo_reference || "").trim();
+                        const width = typeof photo.width === "number" ? photo.width : null;
+                        const height = typeof photo.height === "number" ? photo.height : null;
+                        if (!ref || !width || !height) return null;
+                        return {
+                            ref,
+                            width,
+                            height,
+                            htmlAttributions: Array.isArray(photo.html_attributions)
+                                ? photo.html_attributions.filter((v) => typeof v === "string").slice(0, 4)
+                                : undefined,
+                        };
+                    })
+                    .filter(
+                        (
+                            photo
+                        ): photo is {
+                            ref: string;
+                            width: number;
+                            height: number;
+                            htmlAttributions: string[] | undefined;
+                        } => Boolean(photo)
+                    )
+                    .slice(0, 3);
                 return {
                     ...candidate,
                     phone: details.result?.international_phone_number || details.result?.formatted_phone_number,
                     website: details.result?.website,
+                    googleMapsUrl: details.result?.url,
+                    placePhotos: placePhotos.length > 0 ? placePhotos : undefined,
+                    businessStatus: details.result?.business_status,
+                    openNow: details.result?.opening_hours?.open_now,
+                    openingHours: details.result?.opening_hours?.weekday_text,
+                    priceLevel: details.result?.price_level,
+                    lat: typeof lat === "number" ? lat : undefined,
+                    lng: typeof lng === "number" ? lng : undefined,
                     enriched: true,
                 };
             } catch (error) {

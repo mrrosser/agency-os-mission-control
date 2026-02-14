@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,7 +22,8 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Rocket, Activity, AlertCircle, Terminal, CheckCircle2, Bookmark, Save, Trash2, RefreshCcw } from "lucide-react";
+import { Activity, AlertCircle, Terminal, CheckCircle2, Bookmark, Save, Trash2, RefreshCcw, Pause, Play, Clock3, Bug, ShieldCheck, HardDrive, ArrowUpRight, Download } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -32,9 +34,11 @@ import { dbService } from "@/lib/db-service";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { LeadJourney, type LeadJourneyEntry, type LeadJourneyStepKey } from "@/components/operations/LeadJourney";
 import { RunDiagnostics, type LeadRunDiagnostics } from "@/components/operations/RunDiagnostics";
+import { LeadReceiptDrawer, type LeadReceiptLeadView } from "@/components/operations/LeadReceiptDrawer";
+import { RunAuditDrawer } from "@/components/operations/RunAuditDrawer";
 import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
-import { buildCandidateMeetingSlots } from "@/lib/calendar/slot-finder";
 import { buildLeadActionIdempotencyKey, buildLeadDocId } from "@/lib/lead-runs/ids";
+import { leadsToCsv } from "@/lib/leads/export";
 
 interface LeadContext {
     companyName: string;
@@ -92,10 +96,130 @@ interface LeadRunTemplate {
     clientName?: string | null;
     params: LeadSourceRequest;
     outreach?: {
+        businessKey?: "aicf" | "rng" | "rts" | "rt";
         useSMS?: boolean;
         useAvatar?: boolean;
         useOutboundCall?: boolean;
+        draftFirst?: boolean;
     };
+}
+
+interface DriveDeltaScanSummary {
+    lastCheckpoint: string | null;
+    lastRunAt: string | null;
+    lastResultCount: number;
+    staleDays: number | null;
+    folderIds: string[];
+    maxFiles: number;
+}
+
+interface LeadReceiptAction {
+    actionId?: string;
+    status?: "complete" | "error" | "skipped" | "simulated";
+    dryRun?: boolean;
+    replayed?: boolean;
+    correlationId?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    data?: Record<string, unknown>;
+}
+
+interface LeadReceiptEntry extends LeadCandidate {
+    leadDocId: string;
+    actions?: LeadReceiptAction[];
+}
+
+interface LeadRunReceiptsResponse {
+    run?: {
+        runId?: string;
+        createdAt?: string;
+        warnings?: string[];
+        candidateTotal?: number;
+        filteredOut?: number;
+        total?: number;
+        request?: LeadSourceRequest;
+    };
+    leads?: LeadReceiptEntry[];
+}
+
+interface TelemetryGroupSummary {
+    fingerprint: string;
+    kind: string;
+    count: number;
+    triage?: {
+        status?: string;
+        issueNumber?: number | null;
+        issueUrl?: string | null;
+        updatedAt?: string | null;
+    };
+    sample?: {
+        message?: string;
+        route?: string;
+        correlationId?: string;
+    };
+}
+
+interface LeadRunQuotaSummary {
+    orgId: string;
+    windowKey: string;
+    runsUsed: number;
+    leadsUsed: number;
+    activeRuns: number;
+    maxRunsPerDay: number;
+    maxLeadsPerDay: number;
+    maxActiveRuns: number;
+    runsRemaining: number;
+    leadsRemaining: number;
+    utilization: {
+        runsPct: number;
+        leadsPct: number;
+    };
+}
+
+interface LeadRunAlert {
+    alertId: string;
+    runId: string;
+    severity: string;
+    title: string;
+    message: string;
+    failureStreak: number;
+    status: "open" | "acked";
+    acknowledgedBy?: string | null;
+    acknowledgedAt?: string | null;
+    escalatedAt?: string | null;
+    createdAt?: string | null;
+}
+
+interface LeadRunJob {
+    runId: string;
+    status: "queued" | "running" | "paused" | "completed" | "failed";
+    nextIndex: number;
+    totalLeads: number;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+    leaseUntil?: string | null;
+    queueLagSeconds?: number | null;
+    diagnostics: {
+        sourceFetched?: number;
+        sourceScored?: number;
+        sourceFilteredByScore?: number;
+        sourceWithEmail?: number;
+        sourceWithoutEmail?: number;
+        processedLeads?: number;
+        failedLeads?: number;
+        calendarRetries?: number;
+        noEmail?: number;
+        noSlot?: number;
+        meetingsScheduled?: number;
+        meetingsDrafted?: number;
+        emailsSent?: number;
+        emailsDrafted?: number;
+        smsSent?: number;
+        callsPlaced?: number;
+        avatarsQueued?: number;
+        channelFailures?: number;
+    };
+    lastError?: string | null;
 }
 
 type ApiErrorIssue = { path?: Array<string | number>; message?: string };
@@ -109,6 +233,46 @@ function formatApiIssues(details?: ApiErrorDetails): string | null {
     if (!first || !first.message) return null;
     const path = Array.isArray(first.path) ? first.path.filter(Boolean).join(".") : "";
     return path ? `${path}: ${first.message}` : first.message;
+}
+
+function statusFromActions(
+    actions: LeadReceiptAction[] | undefined,
+    actionPrefixes: string[],
+    fallback: LeadJourneyEntry["steps"][LeadJourneyStepKey]
+): LeadJourneyEntry["steps"][LeadJourneyStepKey] {
+    const hits = (actions || []).filter((action) =>
+        actionPrefixes.some((prefix) => (action.actionId || "").startsWith(prefix))
+    );
+    if (hits.length === 0) return fallback;
+    if (hits.some((a) => a.status === "error")) return "error";
+    if (hits.some((a) => a.status === "complete" || a.status === "simulated")) return "complete";
+    if (hits.some((a) => a.status === "skipped")) return "skipped";
+    return "pending";
+}
+
+function mapReceiptLeadToJourney(lead: LeadReceiptEntry): LeadJourneyEntry {
+    const actions = lead.actions || [];
+    return {
+        leadId: lead.leadDocId || lead.id,
+        companyName: lead.companyName,
+        founderName: lead.founderName,
+        score: lead.score || 0,
+        source: lead.source,
+        website: lead.website,
+        googleMapsUrl: lead.googleMapsUrl,
+        websiteDomain: lead.websiteDomain,
+        domainClusterSize: lead.domainClusterSize,
+        placePhotos: lead.placePhotos,
+        steps: {
+            source: "complete",
+            score: "complete",
+            enrich: lead.enriched ? "complete" : "skipped",
+            script: statusFromActions(actions, ["heygen.", "elevenlabs."], "skipped"),
+            outreach: statusFromActions(actions, ["gmail.outreach", "gmail.outreach_draft"], "pending"),
+            followup: statusFromActions(actions, ["twilio.", "heygen."], "skipped"),
+            booking: statusFromActions(actions, ["calendar.booking", "gmail.availability_draft"], "pending"),
+        },
+    };
 }
 
 export default function OperationsPage() {
@@ -131,8 +295,21 @@ export default function OperationsPage() {
     const [useSMS, setUseSMS] = useState(false);
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
+    const [businessKey, setBusinessKey] = useState<"aicf" | "rng" | "rts">("aicf");
+    const [draftFirst, setDraftFirst] = useState(false);
     const [dryRun, setDryRun] = useState(false);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
+    const [receiptLeads, setReceiptLeads] = useState<LeadReceiptLeadView[]>([]);
+    const [receiptRunMeta, setReceiptRunMeta] = useState<NonNullable<LeadRunReceiptsResponse["run"]> | null>(null);
+    const [auditOpen, setAuditOpen] = useState(false);
+    const [selectedReceiptLeadId, setSelectedReceiptLeadId] = useState<string | null>(null);
+    const [telemetryGroups, setTelemetryGroups] = useState<TelemetryGroupSummary[]>([]);
+    const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+    const [quotaSummary, setQuotaSummary] = useState<LeadRunQuotaSummary | null>(null);
+    const [alerts, setAlerts] = useState<LeadRunAlert[]>([]);
+    const [loadingQuota, setLoadingQuota] = useState(false);
+    const [loadingAlerts, setLoadingAlerts] = useState(false);
+    const [acknowledgingAlertId, setAcknowledgingAlertId] = useState<string | null>(null);
     const [sourceRunId, setSourceRunId] = useState<string | null>(null);
     const [sourceWarnings, setSourceWarnings] = useState<string[]>([]);
     const [diagnostics, setDiagnostics] = useState<LeadRunDiagnostics>({});
@@ -144,6 +321,16 @@ export default function OperationsPage() {
     const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
     const [templateName, setTemplateName] = useState("");
     const [templateClientName, setTemplateClientName] = useState("");
+    const [loadingReceipts, setLoadingReceipts] = useState(false);
+    const [receiptRunIdInput, setReceiptRunIdInput] = useState("");
+    const [backgroundJob, setBackgroundJob] = useState<LeadRunJob | null>(null);
+    const [startingBackgroundRun, setStartingBackgroundRun] = useState(false);
+    const [jobActionLoading, setJobActionLoading] = useState(false);
+    const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null);
+    const [googleConnected, setGoogleConnected] = useState<boolean>(false);
+    const [driveDelta, setDriveDelta] = useState<DriveDeltaScanSummary | null>(null);
+    const [driveDeltaLoading, setDriveDeltaLoading] = useState(false);
+    const [driveDeltaRunning, setDriveDeltaRunning] = useState(false);
 
     const hasTwilio =
         secretStatus.twilioSid !== "missing" &&
@@ -155,6 +342,99 @@ export default function OperationsPage() {
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
+    };
+
+    const exportReceiptsCsv = () => {
+        if (receiptLeads.length === 0) {
+            toast.error("No leads loaded to export");
+            return;
+        }
+
+        const csv = leadsToCsv(receiptLeads);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const runToken = (sourceRunId || receiptRunIdInput || "lead-run").trim().slice(0, 12);
+        a.href = url;
+        a.download = `lead-run-${runToken}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        toast.success("Exported CSV");
+    };
+
+    const loadGoogleConnectionStatus = async () => {
+        if (!user) return;
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/google/status", { method: "GET", headers });
+            const data = await readApiJson<{ connected?: boolean; error?: string }>(res);
+            if (!res.ok) {
+                throw new Error(data?.error || "Failed to load Google connection status");
+            }
+            setGoogleConnected(Boolean(data?.connected));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.google_status" });
+        }
+    };
+
+    const loadDriveDeltaStatus = async () => {
+        if (!user) return;
+        setDriveDeltaLoading(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/drive/delta-scan", { method: "GET", headers });
+            const data = await readApiJson<{ summary?: DriveDeltaScanSummary; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error || `Failed to load Drive delta status${cid ? ` cid=${cid}` : ""}`
+                );
+            }
+            setDriveDelta(data.summary || null);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.drive_delta_status" });
+        } finally {
+            setDriveDeltaLoading(false);
+        }
+    };
+
+    const runDriveDeltaScan = async () => {
+        if (!user) return;
+        setDriveDeltaRunning(true);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const res = await fetch("/api/drive/delta-scan", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    maxFiles: 200,
+                    dryRun: false,
+                }),
+            });
+            const data = await readApiJson<{ summary?: DriveDeltaScanSummary; scannedCount?: number; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error || `Drive delta scan failed${cid ? ` cid=${cid}` : ""}`
+                );
+            }
+            setDriveDelta(data.summary || null);
+            toast.success("Drive delta scan complete", {
+                description: `${data.scannedCount || 0} modified files captured.`,
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Drive delta scan failed", { description: message });
+            reportClientError(message, { source: "operations.drive_delta_run" });
+        } finally {
+            setDriveDeltaRunning(false);
+        }
     };
 
     const loadTemplates = async () => {
@@ -184,9 +464,248 @@ export default function OperationsPage() {
         if (!user) {
             setTemplates([]);
             setSelectedTemplateId("");
+            setBackgroundJob(null);
+            setReceiptLeads([]);
+            setReceiptRunMeta(null);
+            setAuditOpen(false);
+            setSelectedReceiptLeadId(null);
+            setTelemetryGroups([]);
+            setQuotaSummary(null);
+            setAlerts([]);
+            setGoogleConnected(false);
+            setDriveDelta(null);
             return;
         }
         void loadTemplates();
+        void loadQuotaSummary();
+        void loadAlerts();
+        void loadGoogleConnectionStatus();
+        void loadDriveDeltaStatus();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.uid]);
+
+    const reportClientError = (message: string, meta?: Record<string, unknown>) => {
+        try {
+            const reporter = (window as unknown as {
+                __mcReportTelemetryError?: (input: {
+                    kind: "client" | "react";
+                    message: string;
+                    name?: string;
+                    stack?: string;
+                    route?: string;
+                    correlationId?: string;
+                    meta?: Record<string, unknown>;
+                }) => void;
+            }).__mcReportTelemetryError;
+            reporter?.({
+                kind: "client",
+                message,
+                route: window.location.pathname,
+                correlationId: sourceRunId || undefined,
+                meta: {
+                    runId: sourceRunId || null,
+                    ...meta,
+                },
+            });
+        } catch {
+            // Best-effort telemetry only.
+        }
+    };
+
+    const loadTelemetryGroups = async (runId: string) => {
+        if (!user) return;
+        const normalizedRunId = runId.trim();
+        if (!normalizedRunId) return;
+
+        setLoadingTelemetry(true);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                correlationId: normalizedRunId,
+            });
+            const res = await fetch(`/api/telemetry/groups?runId=${encodeURIComponent(normalizedRunId)}&limit=6`, {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<{ groups?: TelemetryGroupSummary[]; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load telemetry groups (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setTelemetryGroups(Array.isArray(data.groups) ? data.groups : []);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.load_telemetry_groups", runId: normalizedRunId });
+        } finally {
+            setLoadingTelemetry(false);
+        }
+    };
+
+    const loadQuotaSummary = async () => {
+        if (!user) return;
+        setLoadingQuota(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/lead-runs/quota", {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<{ quota?: LeadRunQuotaSummary; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load quota (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setQuotaSummary(data.quota || null);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.load_quota" });
+        } finally {
+            setLoadingQuota(false);
+        }
+    };
+
+    const loadAlerts = async () => {
+        if (!user) return;
+        setLoadingAlerts(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/lead-runs/alerts?limit=10", {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<{ alerts?: LeadRunAlert[]; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load alerts (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setAlerts(Array.isArray(data.alerts) ? data.alerts : []);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.load_alerts" });
+        } finally {
+            setLoadingAlerts(false);
+        }
+    };
+
+    const acknowledgeAlert = async (alertId: string) => {
+        if (!user) return;
+        setAcknowledgingAlertId(alertId);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const res = await fetch("/api/lead-runs/alerts", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    action: "acknowledge",
+                    alertId,
+                }),
+            });
+            const data = await readApiJson<{ ok?: boolean; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to acknowledge alert (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setAlerts((prev) =>
+                prev.map((alert) =>
+                    alert.alertId === alertId
+                        ? {
+                            ...alert,
+                            status: "acked",
+                            acknowledgedAt: new Date().toISOString(),
+                          }
+                        : alert
+                )
+            );
+            toast.success("Alert acknowledged");
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Could not acknowledge alert", { description: message });
+            reportClientError(message, { source: "operations.acknowledge_alert", alertId });
+        } finally {
+            setAcknowledgingAlertId(null);
+        }
+    };
+
+    const loadRunReceipts = async (runId: string) => {
+        if (!user) return;
+        const normalizedRunId = runId.trim();
+        if (!normalizedRunId) return;
+
+        setLoadingReceipts(true);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                correlationId: normalizedRunId,
+            });
+            const res = await fetch(`/api/lead-runs/${normalizedRunId}/receipts`, {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<LeadRunReceiptsResponse & { error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load receipts (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+
+            const leads = Array.isArray(data.leads) ? data.leads : [];
+            setJourneys(leads.map(mapReceiptLeadToJourney));
+            setReceiptLeads(leads);
+            setReceiptRunMeta(data.run || null);
+            setSelectedReceiptLeadId((prev) => {
+                if (!prev) return prev;
+                const stillExists = leads.some((lead) => lead.leadDocId === prev || lead.id === prev);
+                return stillExists ? prev : null;
+            });
+            setSourceRunId(normalizedRunId);
+            setReceiptRunIdInput(normalizedRunId);
+            setSourceWarnings(Array.isArray(data.run?.warnings) ? data.run?.warnings : []);
+
+            setDiagnostics((prev) => ({
+                ...prev,
+                runId: normalizedRunId,
+                candidateTotal: typeof data.run?.candidateTotal === "number" ? data.run.candidateTotal : prev.candidateTotal,
+                filteredOut: typeof data.run?.filteredOut === "number" ? data.run.filteredOut : prev.filteredOut,
+                scoredCount: typeof data.run?.total === "number" ? data.run.total : leads.length,
+                processed: leads.length,
+            }));
+
+            localStorage.setItem("mission_control_last_run_id", normalizedRunId);
+            void loadTelemetryGroups(normalizedRunId);
+            void loadQuotaSummary();
+            void loadAlerts();
+            toast.success(`Loaded receipts for run ${normalizedRunId.slice(0, 8)}`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            setLastErrorMessage(message);
+            toast.error("Could not load run receipts", { description: message });
+            reportClientError(message, { source: "operations.load_receipts" });
+        } finally {
+            setLoadingReceipts(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!user) return;
+        const stored = localStorage.getItem("mission_control_last_run_id");
+        if (stored) {
+            setReceiptRunIdInput(stored);
+            void loadRunReceipts(stored);
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid]);
 
@@ -199,9 +718,16 @@ export default function OperationsPage() {
         if (typeof p.minScore === "number" && Number.isFinite(p.minScore)) setMinScore(p.minScore);
 
         const outreach = template.outreach || {};
+        const templateBusinessKey = outreach.businessKey;
+        if (templateBusinessKey === "aicf" || templateBusinessKey === "rng" || templateBusinessKey === "rts") {
+            setBusinessKey(templateBusinessKey);
+        } else if (templateBusinessKey === "rt") {
+            setBusinessKey("rts");
+        }
         const wantsSMS = Boolean(outreach.useSMS);
         const wantsCall = Boolean(outreach.useOutboundCall);
         const wantsAvatar = Boolean(outreach.useAvatar);
+        const wantsDraftFirst = Boolean(outreach.draftFirst);
 
         if (wantsSMS && !hasTwilio) {
             toast.warning("Template requested SMS, but Twilio config is incomplete.", {
@@ -222,6 +748,7 @@ export default function OperationsPage() {
         setUseSMS(wantsSMS && hasTwilio);
         setUseOutboundCall(wantsCall && hasTwilio && hasElevenLabs);
         setUseAvatar(wantsAvatar && hasHeyGen);
+        setDraftFirst(wantsDraftFirst);
     };
 
     const onSelectTemplate = (templateId: string) => {
@@ -299,9 +826,11 @@ export default function OperationsPage() {
                         minScore,
                     },
                     outreach: {
+                        businessKey,
                         useSMS,
                         useAvatar,
                         useOutboundCall,
+                        draftFirst,
                     },
                 }),
             });
@@ -377,6 +906,305 @@ export default function OperationsPage() {
         addLog("\n🛑 Lead run stopped by user.");
     };
 
+    const refreshBackgroundJob = async (runId: string) => {
+        if (!user) return;
+        try {
+            const headers = await buildAuthHeaders(user, {
+                correlationId: runId,
+            });
+            const res = await fetch(`/api/lead-runs/${runId}/jobs`, {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<{ job?: LeadRunJob | null; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to load background job (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setBackgroundJob(data.job || null);
+            if (data.job) {
+                setDiagnostics((prev) => ({
+                    ...prev,
+                    candidateTotal: data.job?.diagnostics?.sourceFetched ?? prev.candidateTotal ?? 0,
+                    scoredCount: data.job?.diagnostics?.sourceScored ?? prev.scoredCount ?? 0,
+                    filteredOut:
+                        data.job?.diagnostics?.sourceFilteredByScore ??
+                        prev.filteredOut ??
+                        0,
+                    sourceWithEmail: data.job?.diagnostics?.sourceWithEmail ?? prev.sourceWithEmail ?? 0,
+                    sourceWithoutEmail: data.job?.diagnostics?.sourceWithoutEmail ?? prev.sourceWithoutEmail ?? 0,
+                    queueLagSeconds: data.job?.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
+                    processed: data.job?.diagnostics?.processedLeads || prev.processed || 0,
+                    failedLeads: data.job?.diagnostics?.failedLeads || prev.failedLeads || 0,
+                    calendarRetries:
+                        data.job?.diagnostics?.calendarRetries || prev.calendarRetries || 0,
+                    meetingsScheduled: data.job?.diagnostics?.meetingsScheduled || prev.meetingsScheduled || 0,
+                    meetingsDrafted: data.job?.diagnostics?.meetingsDrafted || prev.meetingsDrafted || 0,
+                    emailsSent: data.job?.diagnostics?.emailsSent || prev.emailsSent || 0,
+                    emailsDrafted: data.job?.diagnostics?.emailsDrafted || prev.emailsDrafted || 0,
+                    noEmail: data.job?.diagnostics?.noEmail || prev.noEmail || 0,
+                    noSlot: data.job?.diagnostics?.noSlot || prev.noSlot || 0,
+                    smsSent: data.job?.diagnostics?.smsSent || prev.smsSent || 0,
+                    callsPlaced: data.job?.diagnostics?.callsPlaced || prev.callsPlaced || 0,
+                    avatarsQueued: data.job?.diagnostics?.avatarsQueued || prev.avatarsQueued || 0,
+                    channelFailures: data.job?.diagnostics?.channelFailures || prev.channelFailures || 0,
+                }));
+                if (data.job.status === "completed" || data.job.status === "failed") {
+                    void loadQuotaSummary();
+                    void loadAlerts();
+                }
+            }
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            setLastErrorMessage(message);
+            reportClientError(message, { source: "operations.refresh_background_job", runId });
+        }
+    };
+
+    const controlBackgroundJob = async (action: "pause" | "resume") => {
+        if (!user || !sourceRunId) return;
+        setJobActionLoading(true);
+        try {
+            const headers = await buildAuthHeaders(user, {
+                correlationId: sourceRunId,
+            });
+            const res = await fetch(`/api/lead-runs/${sourceRunId}/jobs`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ action }),
+            });
+            const data = await readApiJson<{ job?: LeadRunJob; error?: string }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                    `Failed to ${action} background run (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setBackgroundJob(data.job || null);
+            toast.success(action === "pause" ? "Background run paused" : "Background run resumed");
+            void loadAlerts();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            setLastErrorMessage(message);
+            toast.error(`Could not ${action} background run`, { description: message });
+            reportClientError(message, { source: "operations.control_background_job", action });
+        } finally {
+            setJobActionLoading(false);
+        }
+    };
+
+    const startBackgroundRun = async () => {
+        if (!user) {
+            toast.error("You must be logged in to run lead sourcing");
+            return;
+        }
+        if (!leadQuery && !targetIndustry) {
+            toast.error("Add a lead query or target industry to source leads");
+            return;
+        }
+
+        const runId = crypto.randomUUID();
+        const correlationId = runId;
+        setStartingBackgroundRun(true);
+        setLogs([]);
+        setJourneys([]);
+        setReceiptLeads([]);
+        setReceiptRunMeta(null);
+        setAuditOpen(false);
+        setSelectedReceiptLeadId(null);
+        setTelemetryGroups([]);
+        setSourceRunId(runId);
+        setReceiptRunIdInput(runId);
+        setSourceWarnings([]);
+        setBackgroundJob(null);
+        setLastErrorMessage(null);
+        setDiagnostics({
+            runId,
+            dryRun,
+            candidateTotal: null,
+            scoredCount: null,
+            filteredOut: null,
+            sourceWithEmail: 0,
+            sourceWithoutEmail: 0,
+            processed: 0,
+            failedLeads: 0,
+            queueLagSeconds: 0,
+            calendarRetries: 0,
+            meetingsScheduled: 0,
+            meetingsDrafted: 0,
+            noSlot: 0,
+            emailsSent: 0,
+            emailsDrafted: 0,
+            noEmail: 0,
+            smsSent: 0,
+            callsPlaced: 0,
+            avatarsQueued: 0,
+            channelFailures: 0,
+        });
+
+        try {
+            addLog(`🔍 Sourcing ${limit} leads for ${targetIndustry || "your ICP"}...`);
+            const sourceHeaders = await buildAuthHeaders(user, {
+                idempotencyKey: runId,
+                correlationId,
+            });
+            const sourceResponse = await fetch("/api/leads/source", {
+                method: "POST",
+                headers: sourceHeaders,
+                body: JSON.stringify({
+                    query: leadQuery.trim() || undefined,
+                    industry: targetIndustry.trim() || undefined,
+                    location: targetLocation.trim() || undefined,
+                    limit,
+                    minScore,
+                    includeEnrichment: true,
+                }),
+            });
+
+            const sourceJson = await readApiJson<{
+                runId?: string;
+                leads?: LeadCandidate[];
+                warnings?: string[];
+                candidateTotal?: number;
+                filteredOut?: number;
+                sourceDiagnostics?: {
+                    withEmail?: number;
+                    withoutEmail?: number;
+                    fetchedTotal?: number;
+                    dedupedTotal?: number;
+                    duplicatesRemoved?: number;
+                    domainClusters?: number;
+                    maxDomainClusterSize?: number;
+                    scoredTotal?: number;
+                    filteredByScore?: number;
+                };
+                error?: string;
+            }>(sourceResponse);
+
+            if (!sourceResponse.ok) {
+                const cid = getResponseCorrelationId(sourceResponse);
+                throw new Error(
+                    sourceJson?.error ||
+                    `Lead sourcing failed (status ${sourceResponse.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+
+            const sourcedLeads = Array.isArray(sourceJson.leads) ? sourceJson.leads : [];
+            setSourceWarnings(Array.isArray(sourceJson.warnings) ? sourceJson.warnings : []);
+            setJourneys(
+                sourcedLeads.map((lead) => ({
+                    leadId: lead.id,
+                    companyName: lead.companyName,
+                    founderName: lead.founderName,
+                    score: lead.score || 0,
+                    source: lead.source,
+                    website: lead.website,
+                    googleMapsUrl: lead.googleMapsUrl,
+                    websiteDomain: lead.websiteDomain,
+                    domainClusterSize: lead.domainClusterSize,
+                    placePhotos: lead.placePhotos,
+                    steps: {
+                        source: "complete",
+                        score: "complete",
+                        enrich: lead.enriched ? "complete" : "skipped",
+                        script: "pending",
+                        outreach: "pending",
+                        followup: "pending",
+                        booking: "pending",
+                    },
+                }))
+            );
+            setDiagnostics((prev) => ({
+                ...prev,
+                candidateTotal:
+                    sourceJson.sourceDiagnostics?.fetchedTotal ??
+                    sourceJson.candidateTotal ??
+                    sourcedLeads.length,
+                filteredOut:
+                    sourceJson.sourceDiagnostics?.filteredByScore ??
+                    sourceJson.filteredOut ??
+                    Math.max(
+                        0,
+                        (sourceJson.sourceDiagnostics?.dedupedTotal ?? sourceJson.candidateTotal ?? sourcedLeads.length) -
+                            sourcedLeads.length
+                    ),
+                scoredCount: sourceJson.sourceDiagnostics?.scoredTotal ?? sourcedLeads.length,
+                sourceWithEmail: sourceJson.sourceDiagnostics?.withEmail ?? 0,
+                sourceWithoutEmail: sourceJson.sourceDiagnostics?.withoutEmail ?? 0,
+            }));
+
+            const jobHeaders = await buildAuthHeaders(user, {
+                correlationId: runId,
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const jobResponse = await fetch(`/api/lead-runs/${runId}/jobs`, {
+                method: "POST",
+                headers: jobHeaders,
+                body: JSON.stringify({
+                    action: "start",
+                    config: {
+                        dryRun,
+                        draftFirst,
+                        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                        businessKey,
+                        useSMS,
+                        useAvatar,
+                        useOutboundCall,
+                    },
+                }),
+            });
+
+            const jobJson = await readApiJson<{ job?: LeadRunJob; error?: string }>(jobResponse);
+            if (!jobResponse.ok || !jobJson.job) {
+                const cid = getResponseCorrelationId(jobResponse);
+                throw new Error(
+                    jobJson?.error ||
+                    `Background start failed (status ${jobResponse.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+
+            setBackgroundJob(jobJson.job);
+            setDiagnostics((prev) => ({
+                ...prev,
+                queueLagSeconds: jobJson.job?.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
+                failedLeads: jobJson.job?.diagnostics?.failedLeads ?? prev.failedLeads ?? 0,
+                calendarRetries:
+                    jobJson.job?.diagnostics?.calendarRetries ?? prev.calendarRetries ?? 0,
+            }));
+            localStorage.setItem("mission_control_last_run_id", runId);
+            addLog("✓ Background run started. Processing continues on the server.");
+            toast.success("Background run started");
+            void loadQuotaSummary();
+            void loadAlerts();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            setLastErrorMessage(message);
+            addLog(`❌ Background run failed to start: ${message}`);
+            toast.error("Could not start background run", { description: message });
+            reportClientError(message, { source: "operations.start_background_run" });
+        } finally {
+            setStartingBackgroundRun(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!user || !sourceRunId) return;
+        if (!backgroundJob) return;
+        if (!(backgroundJob.status === "queued" || backgroundJob.status === "running")) return;
+
+        const interval = window.setInterval(() => {
+            void refreshBackgroundJob(sourceRunId);
+            void loadRunReceipts(sourceRunId);
+        }, 5000);
+
+        return () => window.clearInterval(interval);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.uid, sourceRunId, backgroundJob?.status]);
+
     const handleRun = async () => {
         if (!user) {
             toast.error("You must be logged in to run lead sourcing");
@@ -393,21 +1221,38 @@ export default function OperationsPage() {
         setIsRunning(true);
         setLogs([]);
         setJourneys([]);
+        setReceiptLeads([]);
+        setReceiptRunMeta(null);
+        setAuditOpen(false);
+        setSelectedReceiptLeadId(null);
+        setTelemetryGroups([]);
         setSourceRunId(runId);
+        setReceiptRunIdInput(runId);
         setSourceWarnings([]);
+        setBackgroundJob(null);
+        setLastErrorMessage(null);
         setDiagnostics({
             runId,
             dryRun,
             candidateTotal: null,
             scoredCount: null,
             filteredOut: null,
+            sourceWithEmail: 0,
+            sourceWithoutEmail: 0,
             processed: 0,
+            failedLeads: 0,
+            queueLagSeconds: 0,
+            calendarRetries: 0,
             meetingsScheduled: 0,
             meetingsDrafted: 0,
             noSlot: 0,
             emailsSent: 0,
             emailsDrafted: 0,
             noEmail: 0,
+            smsSent: 0,
+            callsPlaced: 0,
+            avatarsQueued: 0,
+            channelFailures: 0,
         });
 
         try {
@@ -481,6 +1326,17 @@ export default function OperationsPage() {
                 warnings?: string[];
                 candidateTotal?: number;
                 filteredOut?: number;
+                sourceDiagnostics?: {
+                    withEmail?: number;
+                    withoutEmail?: number;
+                    fetchedTotal?: number;
+                    dedupedTotal?: number;
+                    duplicatesRemoved?: number;
+                    domainClusters?: number;
+                    maxDomainClusterSize?: number;
+                    scoredTotal?: number;
+                    filteredByScore?: number;
+                };
                 error?: string;
             }>(sourceResponse);
             if (!sourceResponse.ok) {
@@ -503,16 +1359,43 @@ export default function OperationsPage() {
                 throw new Error("No leads found. Adjust your query or add a Places key.");
             }
 
-            if (typeof sourcePayload.candidateTotal === "number") {
-                const filteredOut = typeof sourcePayload.filteredOut === "number" ? sourcePayload.filteredOut : null;
+            if (
+                typeof sourcePayload.candidateTotal === "number" ||
+                typeof sourcePayload.sourceDiagnostics?.fetchedTotal === "number"
+            ) {
+                const filteredOut =
+                    typeof sourcePayload.sourceDiagnostics?.filteredByScore === "number"
+                        ? sourcePayload.sourceDiagnostics.filteredByScore
+                        : typeof sourcePayload.filteredOut === "number"
+                          ? sourcePayload.filteredOut
+                          : null;
                 const filteredMsg =
                     filteredOut && filteredOut > 0 ? ` (${filteredOut} filtered out below ${minScore})` : "";
-                addLog(`✓ Found ${sourcePayload.candidateTotal} candidates; ${sourcedLeads.length} scored >= ${minScore}${filteredMsg}`);
+                const fetchedTotal =
+                    sourcePayload.sourceDiagnostics?.fetchedTotal ??
+                    sourcePayload.candidateTotal ??
+                    sourcedLeads.length;
+                const dedupedTotal =
+                    sourcePayload.sourceDiagnostics?.dedupedTotal ??
+                    sourcedLeads.length;
+                const duplicatesRemoved = sourcePayload.sourceDiagnostics?.duplicatesRemoved ?? 0;
+                const domainClusters = sourcePayload.sourceDiagnostics?.domainClusters ?? 0;
+                const domainMsg =
+                    duplicatesRemoved > 0 || domainClusters > 0
+                        ? ` (${duplicatesRemoved} dupes removed, ${domainClusters} domain clusters)`
+                        : "";
+                const withEmail = sourcePayload.sourceDiagnostics?.withEmail ?? 0;
+                const withoutEmail = sourcePayload.sourceDiagnostics?.withoutEmail ?? 0;
+                addLog(
+                    `✓ Found ${fetchedTotal} candidates; ${dedupedTotal} after dedupe${domainMsg}; ${sourcedLeads.length} scored >= ${minScore}${filteredMsg} (${withEmail} with email, ${withoutEmail} without email)`
+                );
                 setDiagnostics((prev) => ({
                     ...prev,
-                    candidateTotal: sourcePayload.candidateTotal ?? null,
-                    scoredCount: sourcedLeads.length,
+                    candidateTotal: fetchedTotal,
+                    scoredCount: sourcePayload.sourceDiagnostics?.scoredTotal ?? sourcedLeads.length,
                     filteredOut: filteredOut ?? null,
+                    sourceWithEmail: withEmail,
+                    sourceWithoutEmail: withoutEmail,
                 }));
             } else {
                 addLog(`✓ Scored ${sourcedLeads.length} leads above ${minScore}`);
@@ -521,6 +1404,8 @@ export default function OperationsPage() {
                     candidateTotal: null,
                     scoredCount: sourcedLeads.length,
                     filteredOut: null,
+                    sourceWithEmail: 0,
+                    sourceWithoutEmail: 0,
                 }));
             }
 
@@ -531,6 +1416,10 @@ export default function OperationsPage() {
                     founderName: lead.founderName,
                     score: lead.score || 0,
                     source: lead.source,
+                    website: lead.website,
+                    googleMapsUrl: lead.googleMapsUrl,
+                    websiteDomain: lead.websiteDomain,
+                    domainClusterSize: lead.domainClusterSize,
                     steps: {
                         source: "complete",
                         score: "complete",
@@ -607,17 +1496,16 @@ export default function OperationsPage() {
                     correlationId,
                 });
 
-                const primaryCandidates = buildCandidateMeetingSlots({
-                    now: new Date(),
-                    leadTimeDays: 2,
-                    slotMinutes: 30,
-                    businessStartHour: 9,
-                    businessEndHour: 17,
-                    searchDays: 7,
-                    maxSlots: 40,
-                });
-
-                const scheduleAttempt = async (candidateStarts: Date[]) => {
+                const scheduleAttempt = async (slotSearch: {
+                    timeZone: string;
+                    leadTimeDays: number;
+                    slotMinutes: number;
+                    businessStartHour: number;
+                    businessEndHour: number;
+                    searchDays: number;
+                    maxSlots: number;
+                    anchorHour: number;
+                }) => {
                     const scheduleResponse = await fetch("/api/calendar/schedule", {
                         method: "POST",
                         headers: scheduleHeaders,
@@ -627,7 +1515,7 @@ export default function OperationsPage() {
                             receiptActionId: "calendar.booking",
                             dryRun,
                             durationMinutes: 30,
-                            candidateStarts: candidateStarts.map((d) => d.toISOString()),
+                            slotSearch,
                             event: {
                                 summary: `Discovery Call - ${lead.companyName}`,
                                 description: `Call with ${leadName} from ${lead.companyName}`,
@@ -652,23 +1540,35 @@ export default function OperationsPage() {
                 let scheduleResponse: Response | null = null;
                 let scheduleJson: (CalendarScheduleResponse & { error?: string; details?: unknown }) | null = null;
 
+                const userTimeZone =
+                    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
                 // Primary window: next 7 business days, 9a-5p.
-                ({ scheduleResponse, scheduleJson } = await scheduleAttempt(primaryCandidates));
+                ({ scheduleResponse, scheduleJson } = await scheduleAttempt({
+                    timeZone: userTimeZone,
+                    leadTimeDays: 2,
+                    slotMinutes: 30,
+                    businessStartHour: 9,
+                    businessEndHour: 17,
+                    searchDays: 7,
+                    maxSlots: 40,
+                    anchorHour: 14,
+                }));
 
                 // Secondary window: expand to 14 days and broader hours if needed.
                 if (!scheduleResponse.ok && scheduleResponse.status === 409) {
                     setDiagnostics((prev) => ({ ...prev, noSlot: (prev.noSlot || 0) + 1 }));
                     addLog(`⚠ No slot in primary window. Expanding search window...`);
-                    const secondaryCandidates = buildCandidateMeetingSlots({
-                        now: new Date(),
+                    ({ scheduleResponse, scheduleJson } = await scheduleAttempt({
+                        timeZone: userTimeZone,
                         leadTimeDays: 2,
                         slotMinutes: 30,
                         businessStartHour: 8,
                         businessEndHour: 18,
                         searchDays: 14,
                         maxSlots: 100,
-                    });
-                    ({ scheduleResponse, scheduleJson } = await scheduleAttempt(secondaryCandidates));
+                        anchorHour: 13,
+                    }));
                 }
 
                 if (scheduleResponse.ok && scheduleJson?.scheduledStart && scheduleJson.scheduledEnd) {
@@ -688,15 +1588,10 @@ export default function OperationsPage() {
                     updateJourneyStep(lead.id, "booking", "running");
                     if (leadEmail) {
                         addLog(`✉ No availability found. Drafting an email to request availability...`);
-                        const suggestedTimes = primaryCandidates.slice(0, 3).map((d) => d.toLocaleString());
                         const draftBody = `
                             <h2>Hi ${leadName},</h2>
                             <p>I tried to find a quick 30-minute slot on my calendar, but didn’t see a clean opening this week.</p>
-                            <p>Would any of these times work for a quick discovery call?</p>
-                            <ul>
-                                ${suggestedTimes.map((t) => `<li>${t}</li>`).join("")}
-                            </ul>
-                            <p>If not, reply with 2-3 times that work for you next week and I’ll send an invite.</p>
+                            <p>Could you reply with 2-3 times that work for you next week? I’ll send an invite immediately.</p>
                             <br/>
                             <p>Best regards,</p>
                             <p>${identity.founderName}<br/>${identity.businessName}</p>
@@ -737,8 +1632,8 @@ export default function OperationsPage() {
                             addLog(`⚠ Failed to create draft email`);
                         }
                     } else {
-                        updateJourneyStep(lead.id, "booking", "skipped");
-                        addLog(`⚠ No availability found and no email to draft. Skipping booking.`);
+                        updateJourneyStep(lead.id, "booking", "error");
+                        addLog(`⚠ No availability found and no email available for fallback draft.`);
                     }
                 } else {
                     updateJourneyStep(lead.id, "booking", "error");
@@ -752,7 +1647,7 @@ export default function OperationsPage() {
                 if (leadEmail) {
                     outreachAttempted = true;
                     updateJourneyStep(lead.id, "outreach", "running");
-                    addLog(`Sending personalized email to ${leadName}...`);
+                    addLog(`${draftFirst ? "Drafting" : "Sending"} personalized email to ${leadName}...`);
                     const emailBody = `
                         <h2>Hi ${leadName},</h2>
                         <p>I noticed ${lead.companyName} and thought we could help with ${identity.primaryService}.</p>
@@ -768,17 +1663,21 @@ export default function OperationsPage() {
                       `;
 
                     const emailHeaders = await buildAuthHeaders(user, {
-                        idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "gmail.send" }),
+                        idempotencyKey: buildLeadActionIdempotencyKey({
+                            runId,
+                            leadDocId,
+                            action: draftFirst ? "gmail.outreach-draft" : "gmail.send",
+                        }),
                         correlationId,
                     });
-                    const emailResponse = await fetch("/api/gmail/send", {
+                    const emailResponse = await fetch(draftFirst ? "/api/gmail/draft" : "/api/gmail/send", {
                         method: "POST",
                         headers: emailHeaders,
                         body: JSON.stringify({
                             dryRun,
                             runId,
                             leadDocId,
-                            receiptActionId: "gmail.outreach",
+                            receiptActionId: draftFirst ? "gmail.outreach_draft" : "gmail.outreach",
                             email: {
                                 to: [leadEmail],
                                 subject: `Quick Question - ${lead.companyName}`,
@@ -790,8 +1689,14 @@ export default function OperationsPage() {
 
                     if (emailResponse.ok) {
                         outreachSucceeded = true;
-                        addLog(`✓ Email sent to ${leadEmail}`);
-                        setDiagnostics((prev) => ({ ...prev, emailsSent: (prev.emailsSent || 0) + 1 }));
+                        if (draftFirst) {
+                            const draftJson = await readApiJson<GmailDraftResponse & { error?: string }>(emailResponse);
+                            addLog(`✓ Outreach drafted (Gmail Draft ID: ${draftJson.draftId || "unknown"})`);
+                            setDiagnostics((prev) => ({ ...prev, emailsDrafted: (prev.emailsDrafted || 0) + 1 }));
+                        } else {
+                            addLog(`✓ Email sent to ${leadEmail}`);
+                            setDiagnostics((prev) => ({ ...prev, emailsSent: (prev.emailsSent || 0) + 1 }));
+                        }
 
                         // Sync to CRM
                         try {
@@ -816,7 +1721,7 @@ export default function OperationsPage() {
                             console.error("CRM sync error", e);
                         }
                     } else {
-                        addLog(`⚠ Email failed to send`);
+                        addLog(`⚠ Email ${draftFirst ? "draft" : "send"} failed`);
                     }
                 } else {
                     addLog(`⚠ No email found for ${lead.companyName}, skipping email outreach`);
@@ -890,25 +1795,25 @@ export default function OperationsPage() {
                                 scriptGenerated = true;
                                 addLog(`📝 Script generated: "${callScript.slice(0, 30)}..."`);
 
-                                const audioHeaders = await buildAuthHeaders(user, {
-                                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "elevenlabs.synthesize" }),
+                                const callHeaders = await buildAuthHeaders(user, {
+                                    idempotencyKey: buildLeadActionIdempotencyKey({ runId, leadDocId, action: "twilio.make-call" }),
                                     correlationId,
                                 });
-                                const audioResponse = await fetch('/api/elevenlabs/synthesize', {
+                                const callResponse = await fetch('/api/twilio/make-call', {
                                     method: 'POST',
-                                    headers: audioHeaders,
+                                    headers: callHeaders,
                                     body: JSON.stringify({
-                                        text: callScript
+                                        to: leadPhone,
+                                        text: callScript,
+                                        businessKey,
                                     })
                                 });
-                                if (!audioResponse.ok) {
-                                    throw new Error("Audio synthesis failed");
+                                if (!callResponse.ok) {
+                                    throw new Error("Twilio call failed");
                                 }
 
-                                // In production: upload the synthesized audio to storage and call Twilio with a public URL.
-                                await new Promise(r => setTimeout(r, 1500)); // Simulate call setup
                                 followupSucceeded = true;
-                                addLog(`✓ Call connected & AI message played`);
+                                addLog(`✓ Call connected with ElevenLabs playback voice`);
                             }
                         } catch (e) {
                             updateJourneyStep(lead.id, "script", "error");
@@ -1000,11 +1905,14 @@ export default function OperationsPage() {
                 description: `Processed ${sourcedLeads.length} leads through your outreach stack`,
                 icon: <CheckCircle2 className="h-4 w-4" />,
             });
+            localStorage.setItem("mission_control_last_run_id", runId);
 
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             console.error("Lead run error:", error);
             addLog(`\n❌ Error: ${message}`);
+            setLastErrorMessage(message);
+            reportClientError(message, { source: "operations.handle_run" });
             toast.error("Lead Run Failed", {
                 description: message,
             });
@@ -1012,6 +1920,10 @@ export default function OperationsPage() {
             setIsRunning(false);
         }
     };
+
+    const selectedReceiptLead =
+        receiptLeads.find((lead) => lead.leadDocId === selectedReceiptLeadId || lead.id === selectedReceiptLeadId) ||
+        null;
 
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">
@@ -1169,6 +2081,52 @@ export default function OperationsPage() {
                                         </Dialog>
                                     </div>
 
+                                    <div className="space-y-2 pt-2 border-t border-zinc-800">
+                                        <Label className="text-sm font-medium text-zinc-200">Load Existing Run</Label>
+                                        <div className="flex items-center gap-2">
+                                            <Input
+                                                value={receiptRunIdInput}
+                                                onChange={(e) => setReceiptRunIdInput(e.target.value)}
+                                                placeholder="Paste run ID..."
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => void loadRunReceipts(receiptRunIdInput)}
+                                                disabled={!user || !receiptRunIdInput.trim() || loadingReceipts}
+                                                className="h-11 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            >
+                                                {loadingReceipts ? "Loading..." : "Load"}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={exportReceiptsCsv}
+                                                disabled={receiptLeads.length === 0}
+                                                className="h-11 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                title={receiptLeads.length === 0 ? "Load a run to enable export" : "Export CSV"}
+                                            >
+                                                <Download className="mr-2 h-4 w-4" />
+                                                Export
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => setAuditOpen(true)}
+                                                disabled={receiptLeads.length === 0}
+                                                className="h-11 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                title={receiptLeads.length === 0 ? "Load a run to enable audit view" : "Audit run receipts"}
+                                            >
+                                                <ShieldCheck className="mr-2 h-4 w-4" />
+                                                Audit
+                                            </Button>
+                                        </div>
+                                        <p className="text-xs text-zinc-500">
+                                            Rehydrate receipts + lead journey from a prior run. Persists across refresh.
+                                        </p>
+                                    </div>
+
                                     <div className="space-y-2">
                                         <Label className="text-sm font-medium text-zinc-200">Lead Query</Label>
                                         <Input
@@ -1198,6 +2156,26 @@ export default function OperationsPage() {
                                                 className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                                             />
                                         </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label className="text-sm font-medium text-zinc-200">Business Workspace</Label>
+                                        <Select
+                                            value={businessKey}
+                                            onValueChange={(value) => setBusinessKey(value as "aicf" | "rng" | "rts")}
+                                        >
+                                            <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                                                <SelectItem value="aicf">AI CoFoundry</SelectItem>
+                                                <SelectItem value="rng">Rosser NFT Gallery</SelectItem>
+                                                <SelectItem value="rts">RT Solutions</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-zinc-500">
+                                            Sets the default voice profile for outbound calls and template behavior.
+                                        </p>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-3">
@@ -1241,10 +2219,10 @@ export default function OperationsPage() {
                                     </div>
 
                                      <div className="space-y-3 pt-4 border-t border-zinc-800">
-                                         <div className="space-y-1">
-                                             <h3 className="text-sm font-semibold text-white">Advanced AI Actions ⚡</h3>
-                                             <p className="text-xs text-zinc-400">Context-aware agentic outreach</p>
-                                         </div>
+                                             <div className="space-y-1">
+                                                 <h3 className="text-sm font-semibold text-white">Advanced AI Actions ⚡</h3>
+                                                 <p className="text-xs text-zinc-400">Context-aware agentic outreach</p>
+                                             </div>
 
                                         <div className="space-y-3">
                                             <div className="flex items-start space-x-3">
@@ -1282,27 +2260,45 @@ export default function OperationsPage() {
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-start space-x-3">
-                                                <input
-                                                    type="checkbox"
-                                                    id="useAvatar"
-                                                    checked={useAvatar}
-                                                    onChange={(e) => setUseAvatar(e.target.checked)}
-                                                    disabled={!hasHeyGen}
-                                                    className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-green-600 focus:ring-green-500/20 disabled:opacity-50"
-                                                />
-                                                <div className="grid gap-1.5 leading-none">
-                                                    <label htmlFor="useAvatar" className="text-sm font-medium leading-none text-zinc-200">
-                                                        Context-Aware Avatar Video
-                                                    </label>
-                                                    <p className="text-xs text-zinc-500">
-                                                        Generates script from Knowledge Base
-                                                    </p>
-                                                </div>
-                                            </div>
-                                         </div>
-                                     </div>
-                                 </div>
+                                             <div className="flex items-start space-x-3">
+                                                 <input
+                                                     type="checkbox"
+                                                     id="useAvatar"
+                                                     checked={useAvatar}
+                                                     onChange={(e) => setUseAvatar(e.target.checked)}
+                                                     disabled={!hasHeyGen}
+                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-green-600 focus:ring-green-500/20 disabled:opacity-50"
+                                                 />
+                                                 <div className="grid gap-1.5 leading-none">
+                                                     <label htmlFor="useAvatar" className="text-sm font-medium leading-none text-zinc-200">
+                                                         Context-Aware Avatar Video
+                                                     </label>
+                                                     <p className="text-xs text-zinc-500">
+                                                         Generates script from Knowledge Base
+                                                     </p>
+                                                 </div>
+                                             </div>
+
+                                             <div className="flex items-start space-x-3">
+                                                 <input
+                                                     type="checkbox"
+                                                     id="draftFirst"
+                                                     checked={draftFirst}
+                                                     onChange={(e) => setDraftFirst(e.target.checked)}
+                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20"
+                                                 />
+                                                 <div className="grid gap-1.5 leading-none">
+                                                     <label htmlFor="draftFirst" className="text-sm font-medium leading-none text-zinc-200">
+                                                         Draft-first outreach mode
+                                                     </label>
+                                                     <p className="text-xs text-zinc-500">
+                                                         Save/send as Gmail drafts for review instead of immediate send.
+                                                     </p>
+                                                 </div>
+                                             </div>
+                                          </div>
+                                      </div>
+                                  </div>
 
                                 <div className="pt-4 border-t border-zinc-800">
                                     <div className="flex items-start space-x-3">
@@ -1335,15 +2331,255 @@ export default function OperationsPage() {
                                         Stop Lead Run
                                     </Button>
                                 ) : (
-                                    <Button
-                                        onClick={handleRun}
-                                        disabled={!user}
-                                        className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg hover:shadow-blue-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <Rocket className="mr-2 h-5 w-5" />
-                                        Run Lead Engine
-                                    </Button>
+                                    <div className="space-y-2">
+                                        <Button
+                                            onClick={handleRun}
+                                            disabled={!user}
+                                            className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg hover:shadow-blue-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <AfroGlyph variant="operations" className="mr-2 h-5 w-5" />
+                                            Run Lead Engine
+                                        </Button>
+                                        <Button
+                                            onClick={startBackgroundRun}
+                                            disabled={!user || startingBackgroundRun}
+                                            variant="outline"
+                                            className="w-full h-11 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                        >
+                                            <Clock3 className={startingBackgroundRun ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
+                                            {startingBackgroundRun ? "Starting Background Run..." : "Run In Background"}
+                                        </Button>
+                                    </div>
                                 )}
+
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 text-xs text-zinc-300 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-medium text-zinc-200 flex items-center gap-2">
+                                            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                                            Secrets Health
+                                        </p>
+                                        <Link href="/dashboard/settings?tab=integrations" className="text-blue-400 hover:text-blue-300 inline-flex items-center gap-1">
+                                            API Vault
+                                            <ArrowUpRight className="h-3 w-3" />
+                                        </Link>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                        <p className={googleConnected ? "text-emerald-400" : "text-amber-400"}>
+                                            Google: {googleConnected ? "connected" : "missing"}
+                                        </p>
+                                        <p className={hasTwilio ? "text-emerald-400" : "text-amber-400"}>
+                                            Twilio: {hasTwilio ? "ready" : "missing"}
+                                        </p>
+                                        <p className={hasElevenLabs ? "text-emerald-400" : "text-amber-400"}>
+                                            ElevenLabs: {hasElevenLabs ? "ready" : "missing"}
+                                        </p>
+                                        <p className={hasHeyGen ? "text-emerald-400" : "text-zinc-500"}>
+                                            HeyGen: {hasHeyGen ? "ready" : "optional"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {backgroundJob && (
+                                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">
+                                        <p>
+                                            Background status: <span className="font-semibold text-white">{backgroundJob.status}</span>
+                                            {" "}({Math.min(backgroundJob.nextIndex, backgroundJob.totalLeads)}/{backgroundJob.totalLeads})
+                                        </p>
+                                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                            <p className="text-zinc-500">
+                                                Queue lag: <span className="text-zinc-300">{backgroundJob.queueLagSeconds ?? 0}s</span>
+                                            </p>
+                                            <p className="text-zinc-500">
+                                                Failed leads: <span className="text-zinc-300">{backgroundJob.diagnostics?.failedLeads || 0}</span>
+                                            </p>
+                                            <p className="text-zinc-500">
+                                                Channel failures: <span className="text-zinc-300">{backgroundJob.diagnostics?.channelFailures || 0}</span>
+                                            </p>
+                                            <p className="text-zinc-500">
+                                                Calendar retries: <span className="text-zinc-300">{backgroundJob.diagnostics?.calendarRetries || 0}</span>
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={jobActionLoading || backgroundJob.status === "completed" || backgroundJob.status === "failed"}
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                onClick={() =>
+                                                    void controlBackgroundJob(
+                                                        backgroundJob.status === "paused" ? "resume" : "pause"
+                                                    )
+                                                }
+                                            >
+                                                {backgroundJob.status === "paused" ? (
+                                                    <Play className="mr-1 h-3.5 w-3.5" />
+                                                ) : (
+                                                    <Pause className="mr-1 h-3.5 w-3.5" />
+                                                )}
+                                                {backgroundJob.status === "paused" ? "Resume" : "Pause"}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={jobActionLoading}
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                onClick={() => sourceRunId && void refreshBackgroundJob(sourceRunId)}
+                                            >
+                                                Refresh Status
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 text-xs text-zinc-300 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-medium text-zinc-200 flex items-center gap-2">
+                                            <HardDrive className="h-3.5 w-3.5 text-blue-400" />
+                                            Drive Delta Scan
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={driveDeltaRunning}
+                                            className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            onClick={() => void runDriveDeltaScan()}
+                                        >
+                                            {driveDeltaRunning ? "Running..." : "Run now"}
+                                        </Button>
+                                    </div>
+                                    {driveDeltaLoading ? (
+                                        <p className="text-[11px] text-zinc-500">Loading status...</p>
+                                    ) : driveDelta ? (
+                                        <div className="space-y-1 text-[11px]">
+                                            <p>
+                                                Last run: <span className="text-zinc-200">{driveDelta.lastRunAt ? new Date(driveDelta.lastRunAt).toLocaleString() : "Never"}</span>
+                                            </p>
+                                            <p>
+                                                Last checkpoint: <span className="text-zinc-200">{driveDelta.lastCheckpoint || "Not set"}</span>
+                                            </p>
+                                            <p>
+                                                Files captured: <span className="text-zinc-200">{driveDelta.lastResultCount}</span>
+                                            </p>
+                                            <p className={driveDelta.staleDays !== null && driveDelta.staleDays >= 7 ? "text-amber-400" : "text-zinc-500"}>
+                                                {driveDelta.staleDays !== null ? `Stale after ${driveDelta.staleDays} day(s)` : "No baseline yet"}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <p className="text-[11px] text-zinc-500">No scan history yet. Run once to initialize weekly delta tracking.</p>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-medium text-zinc-200">Daily Quota</p>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={loadingQuota}
+                                            className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            onClick={() => void loadQuotaSummary()}
+                                        >
+                                            {loadingQuota ? "..." : "Refresh"}
+                                        </Button>
+                                    </div>
+                                    {quotaSummary ? (
+                                        <div className="space-y-2">
+                                            <div>
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span>Runs: {quotaSummary.runsUsed}/{quotaSummary.maxRunsPerDay}</span>
+                                                    <span>{quotaSummary.utilization.runsPct}%</span>
+                                                </div>
+                                                <div className="mt-1 h-1.5 rounded bg-zinc-800">
+                                                    <div
+                                                        className="h-1.5 rounded bg-blue-500"
+                                                        style={{ width: `${quotaSummary.utilization.runsPct}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center justify-between text-[11px]">
+                                                    <span>Leads: {quotaSummary.leadsUsed}/{quotaSummary.maxLeadsPerDay}</span>
+                                                    <span>{quotaSummary.utilization.leadsPct}%</span>
+                                                </div>
+                                                <div className="mt-1 h-1.5 rounded bg-zinc-800">
+                                                    <div
+                                                        className="h-1.5 rounded bg-cyan-500"
+                                                        style={{ width: `${quotaSummary.utilization.leadsPct}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] text-zinc-500">
+                                                Remaining today: {quotaSummary.runsRemaining} runs, {quotaSummary.leadsRemaining} leads
+                                            </p>
+                                            <p className="text-[11px] text-zinc-500">
+                                                Active runs: {quotaSummary.activeRuns}/{quotaSummary.maxActiveRuns}
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <p className="text-[11px] text-zinc-500">
+                                            {loadingQuota ? "Loading quota..." : "Quota not loaded yet."}
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-medium text-zinc-200">Run Alerts</p>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={loadingAlerts}
+                                            className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            onClick={() => void loadAlerts()}
+                                        >
+                                            {loadingAlerts ? "..." : "Refresh"}
+                                        </Button>
+                                    </div>
+                                    {alerts.length === 0 ? (
+                                        <p className="text-[11px] text-zinc-500">
+                                            {loadingAlerts ? "Loading alerts..." : "No active alerts."}
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {alerts.map((alert) => (
+                                                <div key={alert.alertId} className="rounded border border-zinc-800 bg-zinc-950/50 px-2 py-2 space-y-1">
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <p className="text-[11px] font-medium text-zinc-200">{alert.title}</p>
+                                                            <p className="text-[11px] text-zinc-500">{alert.message}</p>
+                                                        </div>
+                                                        <span className={`text-[10px] uppercase tracking-wide ${alert.status === "acked" ? "text-zinc-500" : "text-amber-300"}`}>
+                                                            {alert.status}
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] text-zinc-500">
+                                                            Run {alert.runId.slice(0, 8)} • streak {alert.failureStreak}
+                                                            {alert.escalatedAt ? " • escalated" : ""}
+                                                        </span>
+                                                        {alert.status !== "acked" && (
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                disabled={acknowledgingAlertId === alert.alertId}
+                                                                className="h-6 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white text-[10px]"
+                                                                onClick={() => void acknowledgeAlert(alert.alertId)}
+                                                            >
+                                                                {acknowledgingAlertId === alert.alertId ? "Ack..." : "Acknowledge"}
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
 
                                 {!user && (
                                     <p className="text-xs text-red-400 text-center">
@@ -1361,6 +2597,8 @@ export default function OperationsPage() {
                              journeys={journeys}
                              runId={sourceRunId}
                              warnings={sourceWarnings}
+                             selectedLeadId={selectedReceiptLeadId}
+                             onViewDetails={(leadId) => setSelectedReceiptLeadId(leadId)}
                          />
 
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
@@ -1369,6 +2607,24 @@ export default function OperationsPage() {
                                     <Terminal className="h-4 w-4 text-zinc-400" />
                                     <span className="text-sm font-mono text-zinc-400">Live Lead Run Logs</span>
                                 </div>
+                                {lastErrorMessage && (
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                        onClick={() => {
+                                            reportClientError(lastErrorMessage, {
+                                                source: "operations.manual_report",
+                                                runId: sourceRunId || null,
+                                            });
+                                            toast.success("Error reported for triage");
+                                        }}
+                                    >
+                                        <Bug className="mr-1 h-3.5 w-3.5" />
+                                        Report This
+                                    </Button>
+                                )}
                                 {isRunning && (
                                     <div className="flex items-center gap-2">
                                         <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
@@ -1411,9 +2667,81 @@ export default function OperationsPage() {
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {sourceRunId && (
+                            <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
+                                <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+                                    <span className="text-sm font-medium text-zinc-300">Error Triage</span>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                        onClick={() => void loadTelemetryGroups(sourceRunId)}
+                                        disabled={loadingTelemetry}
+                                    >
+                                        {loadingTelemetry ? "Loading..." : "Refresh"}
+                                    </Button>
+                                </div>
+                                <CardContent className="p-4">
+                                    {telemetryGroups.length === 0 ? (
+                                        <p className="text-sm text-zinc-500">
+                                            {loadingTelemetry
+                                                ? "Loading telemetry groups..."
+                                                : "No telemetry groups found for this run yet."}
+                                        </p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {telemetryGroups.map((group) => (
+                                                <div key={group.fingerprint} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                                    <div className="flex items-center justify-between gap-3">
+                                                        <p className="text-sm text-zinc-200">
+                                                            {group.sample?.message || "Telemetry group"}
+                                                        </p>
+                                                        <span className="text-xs text-zinc-500">x{group.count}</span>
+                                                    </div>
+                                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                                        {group.triage?.issueUrl ? (
+                                                            <a
+                                                                href={group.triage.issueUrl}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                                                            >
+                                                                GitHub Issue #{group.triage.issueNumber || "?"}
+                                                            </a>
+                                                        ) : (
+                                                            <span className="text-zinc-400">Issue pending triage</span>
+                                                        )}
+                                                        <span className="text-zinc-500">status: {group.triage?.status || "new"}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
                     </div>
                 </div>
             </div>
+            <LeadReceiptDrawer
+                open={Boolean(selectedReceiptLeadId)}
+                onOpenChange={(open) => {
+                    if (!open) setSelectedReceiptLeadId(null);
+                }}
+                lead={selectedReceiptLead}
+            />
+            <RunAuditDrawer
+                open={auditOpen}
+                onOpenChange={setAuditOpen}
+                run={receiptRunMeta}
+                leads={receiptLeads}
+                onSelectLead={(leadDocId) => {
+                    setSelectedReceiptLeadId(leadDocId);
+                    setAuditOpen(false);
+                }}
+            />
         </div>
     );
 }

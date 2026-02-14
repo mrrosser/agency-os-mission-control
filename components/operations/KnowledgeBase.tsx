@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Loader2, CheckCircle2, HardDrive } from "lucide-react";
+import { Loader2, CheckCircle2 } from "lucide-react";
+import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
@@ -356,7 +357,7 @@ export function KnowledgeBase() {
                 <div className="flex items-center justify-between">
                     <div className="space-y-1">
                         <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-                            <HardDrive className="h-5 w-5 text-blue-500" />
+                            <AfroGlyph variant="drive" className="h-5 w-5 text-blue-500" />
                             Knowledge Base
                         </h3>
                         <p className="text-sm text-zinc-400">

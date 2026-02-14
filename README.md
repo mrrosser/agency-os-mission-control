@@ -20,6 +20,8 @@ copy .env.local.example .env.local
 - Optional: `GOOGLE_PLACES_API_KEY` (for live lead sourcing)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
+- Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
+- Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
 4) Start dev server:
 ```bash
@@ -42,6 +44,11 @@ Notes:
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
+
+Local deploy (recommended: trims SSR bundle by omitting devDependencies during frameworks install):
+```bash
+npm run deploy:firebase -- --project leadflow-review
+```
 
 Required GitHub Actions secrets:
 - `ENV_LOCAL` (full `.env.local` content)
@@ -81,6 +88,26 @@ $env:GITHUB_REPOSITORY="mrrosser/agency-os-mission-control"
 node scripts/telemetry-triage.js
 ```
 
+## Lead Run Queue + Limits (recommended defaults for 5-10 active users)
+- Queue dispatch:
+  - `LEAD_RUNS_TASK_QUEUE=lead-run-worker`
+  - `LEAD_RUNS_TASK_LOCATION=us-central1`
+  - `LEAD_RUNS_TASK_SERVICE_ACCOUNT=<cloud-run-invoker-sa@project.iam.gserviceaccount.com>`
+  - `LEAD_RUNS_TASK_DELAY_SECONDS=0`
+- Daily org limits:
+  - `LEAD_RUNS_MAX_RUNS_PER_DAY=80`
+  - `LEAD_RUNS_MAX_LEADS_PER_DAY=1200`
+  - `LEAD_RUNS_MAX_ACTIVE_RUNS=3`
+  - `LEAD_RUN_FAILURE_ALERT_THRESHOLD=3`
+- Alert escalation + scheduling retry:
+  - `LEAD_RUN_ALERT_ESCALATION_MINUTES=30`
+  - `LEAD_RUNS_CALENDAR_MAX_ATTEMPTS=3`
+  - `LEAD_RUNS_CALENDAR_BACKOFF_MS=1500`
+
+Notes:
+- If queue env vars are not set, worker dispatch falls back to internal HTTP trigger.
+- Alerts are written to `lead_run_alerts`, can be acknowledged in Operations, and escalate to telemetry if left open.
+
 ## Troubleshooting
 - If `/api/*` requests return HTML (e.g. `Unexpected token '<'`) or 403s, the Firebase frameworks SSR service may not be invokable.
 - Ensure the Cloud Run service is public-invoker (the APIs still enforce Firebase ID tokens per-route):
@@ -103,6 +130,12 @@ gcloud run services update ssrleadflowreview \
 ## Tests
 ```bash
 npm test
+```
+
+## RT Loop Gates (Recommended)
+Runs lint + unit + smoke + build + security scans and writes a report to `docs/reports/latest-run.md`:
+```powershell
+.\scripts\loop\run.ps1
 ```
 
 Playwright (live smoke, optional):

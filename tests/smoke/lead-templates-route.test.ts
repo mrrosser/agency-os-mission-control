@@ -34,7 +34,7 @@ describe("lead templates routes", () => {
             name: "Austin HVAC",
             clientName: "Acme",
             params: { query: "HVAC contractors", limit: 10, minScore: 55 },
-            outreach: { useSMS: true },
+            outreach: { useSMS: true, draftFirst: true },
           }),
         },
       ],
@@ -105,7 +105,7 @@ describe("lead templates routes", () => {
       name: "Template 1",
       clientName: "Client A",
       params: { query: "plumbers", location: "Austin, TX", limit: 5, minScore: 60 },
-      outreach: { useSMS: true, useAvatar: false, useOutboundCall: true },
+      outreach: { useSMS: true, useAvatar: false, useOutboundCall: true, draftFirst: true },
     };
 
     const req = new Request("http://localhost/api/leads/templates", {
@@ -158,4 +158,3 @@ describe("lead templates routes", () => {
     expect(deleteMock).toHaveBeenCalledOnce();
   });
 });
-

@@ -14,9 +14,11 @@ type LeadRunTemplate = {
   clientName?: string | null;
   params: LeadSourceRequest;
   outreach?: {
+    businessKey?: "aicf" | "rng" | "rts" | "rt";
     useSMS?: boolean;
     useAvatar?: boolean;
     useOutboundCall?: boolean;
+    draftFirst?: boolean;
   };
 };
 
@@ -35,9 +37,11 @@ const paramsSchema = z.object({
 
 const outreachSchema = z
   .object({
+    businessKey: z.enum(["aicf", "rng", "rts", "rt"]).optional(),
     useSMS: z.boolean().optional(),
     useAvatar: z.boolean().optional(),
     useOutboundCall: z.boolean().optional(),
+    draftFirst: z.boolean().optional(),
   })
   .optional();
 

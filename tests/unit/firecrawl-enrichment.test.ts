@@ -23,7 +23,8 @@ describe("firecrawl enrichment", () => {
         JSON.stringify({
           success: true,
           data: {
-            markdown: "Contact: sales@example.com and support@example.com",
+            markdown: "Contact: sales@example.com and support@example.com. Call (512) 555-0100.",
+            links: ["https://www.linkedin.com/company/acme"],
             metadata: { title: "Acme", description: "Great products", keywords: "widgets,acme" },
           },
         }),
@@ -47,6 +48,10 @@ describe("firecrawl enrichment", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(enriched.email).toBe("sales@example.com");
+    expect(enriched.phone).toBe("5125550100");
+    expect(enriched.phones).toEqual(["5125550100"]);
+    expect(enriched.websiteDomain).toBe("acme.example");
+    expect(enriched.socialLinks).toEqual({ linkedin: "https://www.linkedin.com/company/acme" });
     expect(enriched.websiteTitle).toBe("Acme");
     expect(enriched.websiteDescription).toBe("Great products");
     expect(enriched.websiteEmails).toEqual(["sales@example.com", "support@example.com"]);

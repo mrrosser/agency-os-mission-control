@@ -15,6 +15,7 @@ Contact
 - Address: 2505 N Tonti St, New Orleans, LA 70117
 - Phone: +1 (757) 214-7313
 - Primary email: mrosser@rossernftgallery.com
+- Booking link: https://calendar.app.google/d6WVsrcihD63TZZj8
 - Founder reference: Marcus L. Rosser
 
 Positioning
@@ -102,7 +103,7 @@ AI CoFoundry
 Contact
 - Website: https://aicofoundry.com/
 - Primary email: marcus@aicofoundry.com
-- Booking link: https://calendar.google.com/calendar/appointments/schedules/AcZssZ0munUlFwC2T2cl-K9H69VxW3KoCTaxPB2FdUViPgP-31OV7VMYUULwYe8H2Q2eFDXnkVXkmavG
+- Booking link: https://calendar.app.google/LEk5GQobBpAXTfpR9
 
 Services
 - Discovery → SOP mapping → automation roadmap.

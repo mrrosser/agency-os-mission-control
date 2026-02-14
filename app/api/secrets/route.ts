@@ -12,10 +12,12 @@ const bodySchema = z.object({
       openaiKey: z.string().trim().min(1).optional(),
       twilioSid: z.string().trim().min(1).optional(),
       twilioToken: z.string().trim().min(1).optional(),
+      twilioPhoneNumber: z.string().trim().min(1).optional(),
       elevenLabsKey: z.string().trim().min(1).optional(),
       heyGenKey: z.string().trim().min(1).optional(),
       googlePlacesKey: z.string().trim().min(1).optional(),
       firecrawlKey: z.string().trim().min(1).optional(),
+      googlePickerApiKey: z.string().trim().min(1).optional(),
     })
     .optional(),
   idempotencyKey: z.string().optional(),

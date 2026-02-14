@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const useAllProjects = process.env.PLAYWRIGHT_PROJECTS === "all";
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+const useLocalWebServer = !process.env.PLAYWRIGHT_BASE_URL;
 
 const projects = [
   {
@@ -32,8 +34,16 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: [["list"], ["html", { open: "never" }]],
+  webServer: useLocalWebServer
+    ? {
+        command: "npm run dev -- --port 3000",
+        port: 3000,
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+      }
+    : undefined,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL,
+    baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",

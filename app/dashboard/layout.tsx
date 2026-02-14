@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Rocket, Shield, Key, PenTool, LayoutDashboard, Zap, Mail } from "lucide-react";
+import { AfroGlyph, type AfroGlyphVariant } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
 import { AuthGuard } from "@/components/guards/auth-guard";
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/firebase";
 import { toast } from "sonner";
 import { GridPattern } from "@/components/magicui/grid-pattern";
+import { FirstScanTour } from "@/components/onboarding/FirstScanTour";
 
 export default function DashboardLayout({
     children,
@@ -21,13 +22,13 @@ export default function DashboardLayout({
     const { user } = useAuth();
 
     const links = [
-        { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-        { href: "/dashboard/identity", label: "Identity (The Offer)", icon: PenTool },
-        { href: "/dashboard/operations", label: "Operations", icon: Rocket },
-        { href: "/dashboard/inbox", label: "Inbox", icon: Mail },
-        { href: "/dashboard/calendar", label: "Calendar", icon: LayoutDashboard },
-        { href: "/dashboard/integrations", label: "Integrations", icon: Zap },
-        { href: "/dashboard/settings", label: "API Vault", icon: Key },
+        { href: "/dashboard", label: "Overview", icon: "overview" as AfroGlyphVariant },
+        { href: "/dashboard/identity", label: "Identity (The Offer)", icon: "identity" as AfroGlyphVariant },
+        { href: "/dashboard/operations", label: "Operations", icon: "operations" as AfroGlyphVariant },
+        { href: "/dashboard/inbox", label: "Inbox", icon: "inbox" as AfroGlyphVariant },
+        { href: "/dashboard/calendar", label: "Calendar", icon: "calendar" as AfroGlyphVariant },
+        { href: "/dashboard/integrations", label: "Integrations", icon: "integrations" as AfroGlyphVariant },
+        { href: "/dashboard/settings", label: "API Vault", icon: "vault" as AfroGlyphVariant },
     ];
 
     const handleLogout = async () => {
@@ -52,13 +53,12 @@ export default function DashboardLayout({
                     {/* Sidebar */}
                     <div className="w-64 border-r border-white/10 bg-black/70 backdrop-blur-xl p-4 flex flex-col">
                     <div className="flex items-center gap-2 px-2 py-4 mb-8">
-                        <Shield className="h-6 w-6 text-blue-500" />
+                        <AfroGlyph variant="mission" className="h-6 w-6 text-cyan-300" />
                         <span className="text-lg font-bold">Mission Control</span>
                     </div>
 
                     <nav className="flex-1 space-y-1">
                         {links.map((link) => {
-                            const Icon = link.icon;
                             const isActive = pathname === link.href;
                             return (
                                 <Link
@@ -71,7 +71,7 @@ export default function DashboardLayout({
                                             : "text-zinc-400 hover:bg-zinc-900 hover:text-white"
                                     )}
                                 >
-                                    <Icon className="h-4 w-4" />
+                                    <AfroGlyph variant={link.icon} className="h-4 w-4" />
                                     {link.label}
                                 </Link>
                             );
@@ -97,6 +97,15 @@ export default function DashboardLayout({
                         >
                             Sign Out
                         </Button>
+                        <div className="mt-3 flex items-center justify-center gap-3 text-[11px] text-zinc-500">
+                            <Link className="hover:text-zinc-300" href="/privacy">
+                                Privacy
+                            </Link>
+                            <span className="text-zinc-700">|</span>
+                            <Link className="hover:text-zinc-300" href="/terms">
+                                Terms
+                            </Link>
+                        </div>
                     </div>
                 </div>
 
@@ -106,6 +115,7 @@ export default function DashboardLayout({
                     </div>
                 </div>
             </div>
+            <FirstScanTour />
         </AuthGuard>
     );
 }

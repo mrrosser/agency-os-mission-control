@@ -8,6 +8,7 @@ export interface DriveFile {
     id?: string;
     name: string;
     mimeType: string;
+    modifiedTime?: string;
     parents?: string[];
     description?: string;
     webViewLink?: string;
@@ -153,6 +154,77 @@ export async function listFiles(
     );
 
     return response;
+}
+
+/**
+ * List metadata-only file deltas since a checkpoint.
+ * This intentionally avoids file reads/content export to keep scans low-cost.
+ */
+export async function listMetadataSince(
+    accessToken: string,
+    checkpointIso: string,
+    options?: {
+        folderIds?: string[];
+        maxFiles?: number;
+    },
+    log?: Logger
+): Promise<DriveFile[]> {
+    const folderIds = Array.isArray(options?.folderIds)
+        ? options!.folderIds.filter((id) => typeof id === "string" && id.trim().length > 0)
+        : [];
+    const maxFiles = Math.max(1, Math.min(500, options?.maxFiles || 200));
+    const normalizedCheckpoint = new Date(checkpointIso).toISOString();
+    const baseFields = "files(id,name,mimeType,modifiedTime,parents,webViewLink)";
+
+    async function runQuery(query: string, pageSize: number): Promise<DriveFile[]> {
+        const queryParams = new URLSearchParams({
+            q: query,
+            pageSize: pageSize.toString(),
+            orderBy: "modifiedTime desc",
+            fields: baseFields,
+        });
+        const response = await callGoogleAPI<{ files: DriveFile[] }>(
+            `${DRIVE_API_BASE}/files?${queryParams}`,
+            accessToken,
+            {},
+            log
+        );
+        return Array.isArray(response.files) ? response.files : [];
+    }
+
+    const filesById = new Map<string, DriveFile>();
+    const globalQuery = `trashed=false and modifiedTime > '${normalizedCheckpoint}'`;
+
+    if (folderIds.length === 0) {
+        const files = await runQuery(globalQuery, maxFiles);
+        for (const file of files) {
+            if (!file.id) continue;
+            filesById.set(file.id, file);
+        }
+    } else {
+        const perFolderLimit = Math.max(1, Math.floor(maxFiles / folderIds.length));
+        for (const folderId of folderIds) {
+            const query = `'${folderId}' in parents and trashed=false and modifiedTime > '${normalizedCheckpoint}'`;
+            const files = await runQuery(query, perFolderLimit);
+            for (const file of files) {
+                if (!file.id) continue;
+                const current = filesById.get(file.id);
+                if (!current) {
+                    filesById.set(file.id, file);
+                    continue;
+                }
+                const currentTs = Date.parse(current.modifiedTime || "");
+                const nextTs = Date.parse(file.modifiedTime || "");
+                if (Number.isFinite(nextTs) && (!Number.isFinite(currentTs) || nextTs > currentTs)) {
+                    filesById.set(file.id, file);
+                }
+            }
+        }
+    }
+
+    return Array.from(filesById.values())
+        .sort((a, b) => Date.parse(b.modifiedTime || "") - Date.parse(a.modifiedTime || ""))
+        .slice(0, maxFiles);
 }
 
 /**

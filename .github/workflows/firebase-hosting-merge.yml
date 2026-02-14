@@ -54,6 +54,8 @@ jobs:
         if: ${{ env.FIREBASE_SA_SET == '1' }}
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
+          NPM_CONFIG_PRODUCTION: "true"
+          NODE_ENV: "production"
         run: |
           set -euo pipefail
           npx -y firebase-tools@15.5.1 deploy \

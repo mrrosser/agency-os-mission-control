@@ -1,0 +1,19 @@
+name: openclaw-control-ui-smoke
+timeout_ms: 30000
+viewport:
+  width: 1440
+  height: 900
+vars:
+  # Full local URL including ?token=... (do NOT hardcode tokens in repo).
+  dash_url: env:OPENCLAW_DASH_URL
+steps:
+  - goto:
+      url: "${dash_url}"
+      wait_until: load
+  - expect_text:
+      selector: "body"
+      text: "Snapshot"
+  - screenshot:
+      path: "openclaw-control-ui.png"
+      full_page: true
+

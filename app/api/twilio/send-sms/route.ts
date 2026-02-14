@@ -10,6 +10,7 @@ import { resolveSecret } from "@/lib/api/secrets";
 const bodySchema = z.object({
   twilioSid: z.string().optional(),
   twilioToken: z.string().optional(),
+  twilioPhoneNumber: z.string().optional(),
   to: z.string().min(1),
   from: z.string().optional(),
   message: z.string().min(1),
@@ -24,9 +25,13 @@ export const POST = withApiHandler(
 
     const twilioSid = await resolveSecret(user.uid, "twilioSid", "TWILIO_ACCOUNT_SID");
     const twilioToken = await resolveSecret(user.uid, "twilioToken", "TWILIO_AUTH_TOKEN");
+    const twilioFrom =
+      body.from ||
+      body.twilioPhoneNumber ||
+      (await resolveSecret(user.uid, "twilioPhoneNumber", "TWILIO_PHONE_NUMBER"));
 
-    if (!twilioSid || !twilioToken) {
-      throw new ApiError(400, "Twilio credentials are required");
+    if (!twilioSid || !twilioToken || !twilioFrom) {
+      throw new ApiError(400, "Twilio SID, Token, and Phone Number (from) are required");
     }
 
     const result = await withIdempotency(
@@ -37,7 +42,7 @@ export const POST = withApiHandler(
         const message = await client.messages.create({
           body: body.message,
           to: body.to,
-          from: body.from || undefined,
+          from: twilioFrom,
         });
         return {
           messageSid: message.sid,

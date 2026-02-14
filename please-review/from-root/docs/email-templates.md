@@ -3,6 +3,10 @@
 All templates are drafts only. Do not send without approval.
 Use short sentences. Warm and confident. Avoid hype or guarantees.
 
+Source of truth
+- Runtime-ready template bank: `please-review/from-root/config-templates/email-reply-templates.v1.json`
+- Voice policy uses `voice-pack.marcus.openclaw.v1` traits and per-business tone overlays.
+
 ============================================================
 Rosser NFT Gallery (mrosser@rossernftgallery.com)
 ============================================================

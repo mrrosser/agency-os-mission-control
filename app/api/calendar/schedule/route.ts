@@ -7,6 +7,7 @@ import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { createMeetingWithAvailabilityCheck, listBusyIntervals } from "@/lib/google/calendar";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { pickFirstAvailableStart, type BusyRange } from "@/lib/calendar/availability";
+import { buildCandidateMeetingSlotsInTimeZone } from "@/lib/calendar/slot-search";
 import { sanitizeLogPayload } from "@/lib/api/guardrails";
 import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 
@@ -25,9 +26,23 @@ const eventSchema = z.object({
   conferenceData: z.any().optional(),
 });
 
+const slotSearchSchema = z.object({
+  timeZone: z.string().min(1).max(80),
+  leadTimeDays: z.number().int().min(0).max(30).optional(),
+  slotMinutes: z.number().int().min(10).max(120).optional(),
+  businessStartHour: z.number().int().min(0).max(23).optional(),
+  businessEndHour: z.number().int().min(1).max(24).optional(),
+  searchDays: z.number().int().min(1).max(45).optional(),
+  maxSlots: z.number().int().min(1).max(300).optional(),
+  anchorHour: z.number().int().min(0).max(23).optional(),
+  // For deterministic tests only; omitted in production callers.
+  nowIso: z.string().datetime().optional(),
+});
+
 const bodySchema = z.object({
   event: eventSchema,
-  candidateStarts: z.array(z.string().min(1)).min(1).max(200),
+  candidateStarts: z.array(z.string().min(1)).min(1).max(300).optional(),
+  slotSearch: slotSearchSchema.optional(),
   durationMinutes: z.number().int().min(10).max(120).optional(),
   calendarId: z.string().optional(),
   dryRun: z.boolean().optional(),
@@ -35,6 +50,14 @@ const bodySchema = z.object({
   runId: z.string().min(1).max(128).optional(),
   leadDocId: z.string().min(1).max(120).optional(),
   receiptActionId: z.string().min(1).max(120).optional(),
+}).superRefine((value, ctx) => {
+  if (!value.candidateStarts && !value.slotSearch) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide either candidateStarts or slotSearch.",
+      path: ["candidateStarts"],
+    });
+  }
 });
 
 function parseCandidateStarts(raw: string[]): Date[] {
@@ -62,9 +85,23 @@ export const POST = withApiHandler(
     const idempotencyKey = getIdempotencyKey(request, body);
 
     const durationMinutes = body.durationMinutes ?? 30;
-    const candidates = parseCandidateStarts(body.candidateStarts);
+
+    const candidates = body.candidateStarts
+      ? parseCandidateStarts(body.candidateStarts)
+      : buildCandidateMeetingSlotsInTimeZone({
+          timeZone: body.slotSearch?.timeZone || "UTC",
+          leadTimeDays: body.slotSearch?.leadTimeDays,
+          slotMinutes: body.slotSearch?.slotMinutes,
+          businessStartHour: body.slotSearch?.businessStartHour,
+          businessEndHour: body.slotSearch?.businessEndHour,
+          searchDays: body.slotSearch?.searchDays,
+          maxSlots: body.slotSearch?.maxSlots,
+          anchorHour: body.slotSearch?.anchorHour,
+          now: body.slotSearch?.nowIso ? new Date(body.slotSearch.nowIso) : undefined,
+        });
+
     if (candidates.length === 0) {
-      throw new ApiError(400, "No valid candidateStarts provided.");
+      throw new ApiError(400, "No valid calendar slot candidates provided.");
     }
 
     log.info(
@@ -72,6 +109,16 @@ export const POST = withApiHandler(
       sanitizeLogPayload({
         durationMinutes,
         candidateCount: candidates.length,
+        slotSearch: body.slotSearch
+          ? {
+              timeZone: body.slotSearch.timeZone,
+              leadTimeDays: body.slotSearch.leadTimeDays,
+              slotMinutes: body.slotSearch.slotMinutes,
+              businessStartHour: body.slotSearch.businessStartHour,
+              businessEndHour: body.slotSearch.businessEndHour,
+              searchDays: body.slotSearch.searchDays,
+            }
+          : undefined,
         calendarId: body.calendarId || "primary",
         dryRun: Boolean(body.dryRun),
         correlationId,
@@ -141,7 +188,6 @@ export const POST = withApiHandler(
         let checked = 0;
         for (const start of candidates) {
           checked += 1;
-          const end = new Date(start.getTime() + durationMs);
 
           const picked = pickFirstAvailableStart([start], durationMinutes, busyRanges);
           if (!picked) continue;

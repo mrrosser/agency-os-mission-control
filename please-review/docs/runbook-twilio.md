@@ -1,42 +1,77 @@
-﻿# Runbook: Twilio (Voice + SMS)
+# Runbook: Twilio (Voice + SMS)
 
-PLACEHOLDERS (set these before running commands)
-- TWILIO_ACCOUNT_SID=PLACEHOLDER
-- TWILIO_AUTH_TOKEN=PLACEHOLDER
-- TWILIO_FROM_NUMBER=PLACEHOLDER_E164_NUMBER
-- TWILIO_TO_NUMBER=PLACEHOLDER_E164_NUMBER
-- TWILIO_PUBLIC_WEBHOOK_URL=PLACEHOLDER_PUBLIC_URL
+Placeholders
+- `TWILIO_ACCOUNT_SID=PLACEHOLDER`
+- `TWILIO_AUTH_TOKEN=PLACEHOLDER`
+- `TWILIO_PHONE_NUMBER=PLACEHOLDER_E164_NUMBER`
+- `TEST_TO_NUMBER=PLACEHOLDER_E164_NUMBER`
 
 Goal
-- Enable Twilio voice calls with strict approval gates and minimal privileges.
-- SMS is supported via Twilio API (use MCP/skill or manual approval flow).
+- Enable Twilio SMS + voice in Mission Control (`/api/twilio/send-sms`, `/api/twilio/make-call`).
+- Keep outbound actions approval-gated and idempotent.
 
-Setup (Voice Calls via OpenClaw plugin)
-1) Create a Twilio API key + secret
-- Store in env vars or Secret Manager only.
+UI entry points
+- API Vault: `/dashboard/settings?tab=integrations`
+- Integrations test page: `/dashboard/integrations`
+- Operations control: `/dashboard/operations`
 
-2) Configure voice-call plugin
-- Edit `data/openclaw/openclaw.json`:
-  - `plugins.entries.voice-call.enabled` -> `true`
-  - `plugins.entries.voice-call.config.provider` -> `twilio`
-  - `plugins.entries.voice-call.config.fromNumber` -> your Twilio number
-  - `plugins.entries.voice-call.config.toNumber` -> your number for test calls
-  - `plugins.entries.voice-call.config.twilio.accountSid` -> TWILIO_ACCOUNT_SID
-  - `plugins.entries.voice-call.config.twilio.authToken` -> TWILIO_AUTH_TOKEN
-  - `plugins.entries.voice-call.config.serve.path` -> `/voice/webhook`
-  - Set a public webhook URL using Tailscale Funnel or a reverse proxy
+## Path A: Mission Control app (current production path)
 
-3) Set Twilio webhook
-- In Twilio Console, set the Voice webhook to your public URL + `/voice/webhook`.
+1) Store secrets in Settings
+- Open `Dashboard -> Settings -> API Keys`.
+- Set:
+  - Twilio Account SID
+  - Twilio Auth Token
+  - Twilio Phone Number (E.164 format, example `+15005550006`)
+- Save and verify badges show configured.
 
-4) Restart gateway and verify
-- `docker compose -f docker/docker-compose.yml --env-file docker/.env restart`
+2) Local smoke (code-level)
+- Run:
+  - `npm test -- tests/smoke/twilio-routes.test.ts`
+- Expected:
+  - all tests pass
+  - idempotency + correlation logging is present in test output
 
-SMS (Twilio API)
-- SMS is not a built-in OpenClaw channel.
-- Use a Twilio MCP server or a custom skill that calls the Twilio Messaging API.
-- Keep SMS outbound draft-only and approval-gated.
+3) API smoke (runtime)
+- Trigger from the Operations UI in app (recommended), or call APIs with an authenticated session:
+  - `POST /api/twilio/send-sms`
+  - `POST /api/twilio/make-call`
+- Required payload fields:
+  - SMS: `to`, `message`
+  - Call: `to`, plus either:
+    - `audioUrl` (pre-hosted MP3), or
+    - `text` (auto-synthesize with ElevenLabs, host clip, then Twilio `<Play>`)
+- `from` is optional and falls back to stored `TWILIO_PHONE_NUMBER`.
+
+4) Production verification checklist
+- Verify the target receives:
+  - one SMS
+  - one call with audio playback
+- Confirm no duplicate sends on retry (idempotency key behavior).
+- Confirm logs include:
+  - `twilio.sms.send`
+  - `twilio.call.create`
+
+## Path B: Optional OpenClaw VM voice-call plugin (native gateway)
+
+Use only if you want Twilio webhooks handled directly on the VM.
+
+1) Configure plugin in VM OpenClaw config
+- `plugins.entries.voice-call.enabled=true`
+- `plugins.entries.voice-call.config.provider=twilio`
+- `plugins.entries.voice-call.config.twilio.accountSid=TWILIO_ACCOUNT_SID`
+- `plugins.entries.voice-call.config.twilio.authToken=TWILIO_AUTH_TOKEN`
+- `plugins.entries.voice-call.config.fromNumber=TWILIO_PHONE_NUMBER`
+- `plugins.entries.voice-call.config.serve.path=/voice/webhook`
+
+2) Set webhook in Twilio Console
+- Voice webhook URL: `<public-url>/voice/webhook`
+- Restrict to that single path.
+
+3) Restart and inspect on VM
+- `sudo systemctl restart openclaw-gateway.service`
+- `sudo journalctl -u openclaw-gateway.service -n 200 --no-pager`
 
 Notes
-- Keep inbound webhooks restricted to a single path only.
-- Do not send messages or place calls without explicit approval.
+- Do not hardcode secrets in repo files.
+- Keep outbound SMS/call actions behind explicit approval until confidence is high.

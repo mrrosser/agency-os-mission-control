@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Mail, Users, Rocket, Globe, TrendingUp, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AnimatedList } from "@/components/ui/animated-list";
+import { AfroGlyph, type AfroGlyphVariant } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, where, onSnapshot, doc, limit, orderBy, type Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -155,7 +156,7 @@ export default function DashboardPage() {
             title: "Total Leads",
             value: loading ? "..." : analytics.totalLeads.toLocaleString(),
             change: "+12.3%",
-            icon: Users,
+            icon: "people" as AfroGlyphVariant,
             color: "text-blue-500",
             bgColor: "bg-blue-500/10",
         },
@@ -163,7 +164,7 @@ export default function DashboardPage() {
             title: "Converted",
             value: loading ? "..." : analytics.converted.toLocaleString(),
             change: "+8.1%",
-            icon: Mail,
+            icon: "inbox" as AfroGlyphVariant,
             color: "text-green-500",
             bgColor: "bg-green-500/10",
         },
@@ -171,7 +172,7 @@ export default function DashboardPage() {
             title: "Conversion Rate",
             value: loading ? "..." : `${analytics.conversionRate}%`,
             change: "+2.4%",
-            icon: TrendingUp,
+            icon: "trend" as AfroGlyphVariant,
             color: "text-purple-500",
             bgColor: "bg-purple-500/10",
         },
@@ -225,7 +226,6 @@ export default function DashboardPage() {
                         {/* Stats Grid */}
                         <div className="grid gap-6 md:grid-cols-3">
                             {stats.map((stat, i) => {
-                                const Icon = stat.icon;
                                 return (
                                     <Card key={i} className="bg-zinc-950 border-zinc-800 shadow-lg group hover:border-blue-500/50 transition-all duration-300">
                                         <CardContent className="p-6">
@@ -236,7 +236,7 @@ export default function DashboardPage() {
                                                     <p className="text-xs text-green-500">{stat.change} from last month</p>
                                                 </div>
                                                 <div className={`p-3 rounded-lg ${stat.bgColor}`}>
-                                                    <Icon className={`h-6 w-6 ${stat.color}`} />
+                                                    <AfroGlyph variant={stat.icon} className={`h-6 w-6 ${stat.color}`} />
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -250,7 +250,7 @@ export default function DashboardPage() {
                                 <CardContent className="p-8 text-center space-y-4">
                                     <div className="flex justify-center">
                                         <div className="p-3 rounded-full bg-blue-500/10">
-                                            <Rocket className="h-8 w-8 text-blue-500" />
+                                            <AfroGlyph variant="mission" className="h-8 w-8 text-blue-500" />
                                         </div>
                                     </div>
                                     <div className="space-y-2">
@@ -275,7 +275,7 @@ export default function DashboardPage() {
                                 <CardContent className="p-6">
                                     <div className="flex items-start gap-4">
                                         <div className="p-3 rounded-lg bg-blue-500/10 shrink-0">
-                                            <Rocket className="h-6 w-6 text-blue-500" />
+                                            <AfroGlyph variant="operations" className="h-6 w-6 text-blue-500" />
                                         </div>
                                         <div className="space-y-1">
                                             <h3 className="font-semibold text-white">Active Lead Runs</h3>
@@ -297,7 +297,7 @@ export default function DashboardPage() {
                                 <CardContent className="p-6">
                                     <div className="flex items-start gap-4">
                                         <div className="p-3 rounded-lg bg-purple-500/10 shrink-0">
-                                            <Globe className="h-6 w-6 text-purple-500" />
+                                            <AfroGlyph variant="network" className="h-6 w-6 text-purple-500" />
                                         </div>
                                         <div className="space-y-1">
                                             <h3 className="font-semibold text-white">Platform Status</h3>
@@ -327,7 +327,7 @@ export default function DashboardPage() {
                                     <div className="flex items-start justify-between gap-4">
                                         <div className="flex items-start gap-4">
                                             <div className="p-3 rounded-lg bg-emerald-500/10 shrink-0">
-                                                <Activity className="h-6 w-6 text-emerald-500" />
+                                                <AfroGlyph variant="activity" className="h-6 w-6 text-emerald-500" />
                                             </div>
                                             <div className="space-y-1">
                                                 <h3 className="font-semibold text-white">Agent Routing</h3>
@@ -383,7 +383,7 @@ export default function DashboardPage() {
                                         {activityItems.map((item, i) => (
                                             <div key={i} className="flex items-center justify-between py-3 border-b border-zinc-900 last:border-0 w-full bg-zinc-950/50">
                                                 <div className="flex items-center gap-3">
-                                                    <Activity className={`h-4 w-4 ${item.color}`} />
+                                                    <AfroGlyph variant="activity" className={`h-4 w-4 ${item.color}`} />
                                                     <span className="text-sm text-white">{item.action}</span>
                                                 </div>
                                                 <div className="flex items-center gap-4">

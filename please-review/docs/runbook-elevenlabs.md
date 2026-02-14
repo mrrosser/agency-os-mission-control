@@ -1,29 +1,67 @@
-﻿# Runbook: ElevenLabs (Voice)
+# Runbook: ElevenLabs (Voice)
 
-PLACEHOLDERS (set these before running commands)
-- ELEVENLABS_API_KEY=PLACEHOLDER
-- ELEVENLABS_VOICE_ID=PLACEHOLDER
-- ELEVENLABS_MODEL_ID=PLACEHOLDER
+Placeholders
+- `ELEVENLABS_API_KEY=PLACEHOLDER`
+- `ELEVENLABS_VOICE_ID=PLACEHOLDER`
+- `ELEVENLABS_MODEL_ID=PLACEHOLDER`
 
 Goal
-- Enable voice generation with approval-gated output.
+- Enable approved voice generation via `/api/elevenlabs/synthesize`.
+- Keep generation draft-first and traceable with correlation IDs.
 
-Setup
-1) Create an ElevenLabs API key
-- Store in env vars or Secret Manager only (`ELEVENLABS_API_KEY`).
+UI entry points
+- API Vault: `/dashboard/settings?tab=integrations`
+- Integrations test page: `/dashboard/integrations`
+- Operations control: `/dashboard/operations`
 
-2) Configure OpenClaw TTS
-- Edit `data/openclaw/openclaw.json`:
-  - `messages.tts.provider` -> `elevenlabs`
-  - `messages.tts.auto` -> `tagged` (safe default)
-  - `messages.tts.elevenlabs.voiceId` -> your voice id
-  - `messages.tts.elevenlabs.modelId` -> your model id
-- Do not store the API key in config; OpenClaw reads it from `ELEVENLABS_API_KEY`.
+## Setup (Mission Control app path)
 
-3) Draft-first policy
-- Generate drafts of scripts and audio requests.
-- Require explicit approvals before final audio output or posting.
+1) Store secret in Settings
+- Open `Dashboard -> Settings -> API Keys`.
+- Set `ElevenLabs API Key`.
+- Save and verify configured status.
+
+2) Choose defaults for calls
+- Default voice/model are accepted by the route if omitted:
+  - voice: `21m00Tcm4TlvDq8ikWAM`
+  - model: `eleven_monolingual_v1`
+- For business-specific tone, pass explicit `voiceId`/`modelId` from your voice packs.
+
+3) Run smoke tests
+- `npm test -- tests/smoke/elevenlabs-route.test.ts`
+- Expected:
+  - missing key path returns `400`
+  - success path returns `audioBase64`, `mimeType=audio/mpeg`, and logs activity
+
+4) Runtime verification
+- From authenticated app session, call `POST /api/elevenlabs/synthesize` with:
+  - `text` (required)
+  - `voiceId` (optional)
+  - `modelId` (optional)
+- Confirm response includes:
+  - `success: true`
+  - `audioBase64`
+  - `voiceId`
+
+5) Twilio live-call path (true ElevenLabs playback)
+- `POST /api/twilio/make-call` now supports:
+  - `to` + `text` (+ optional `businessKey`, `voiceId`, `modelId`)
+- Flow:
+  1. synthesize ElevenLabs MP3
+  2. host temporary audio at `/api/public/call-audio/{clipId}`
+  3. call via Twilio `<Play>` using that URL
+- Optional per-business voice defaults via env:
+  - `ELEVENLABS_VOICE_ID_AICF`
+  - `ELEVENLABS_VOICE_ID_RNG`
+  - `ELEVENLABS_VOICE_ID_RTS`
+
+## Optional OpenClaw VM TTS path
+
+If you later route TTS through native OpenClaw on VM:
+- Set `messages.tts.provider=elevenlabs`
+- Keep `messages.tts.auto=tagged` (safe default)
+- Keep API key in env/secret manager, never in checked-in config.
 
 Notes
-- Keep outputs free of sensitive data.
-- Use correlation IDs for every generation request.
+- Do not synthesize or publish without explicit approval.
+- Keep text free of sensitive data and private PII.

@@ -50,6 +50,16 @@ export default function IntegrationsPage() {
                             <p className="text-xs text-red-200/80">
                                 Workarounds: try a personal Gmail account, ask your Workspace admin to allow the app, or wait for Google verification.
                             </p>
+                            <div className="pt-1">
+                                <Link href="/help/google-oauth">
+                                    <Button
+                                        variant="outline"
+                                        className="border-red-500/30 bg-red-500/10 text-red-100 hover:bg-red-500/15"
+                                    >
+                                        Open verification checklist
+                                    </Button>
+                                </Link>
+                            </div>
                         </CardContent>
                     </Card>
                 )}

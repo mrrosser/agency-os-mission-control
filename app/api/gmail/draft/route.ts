@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { withApiHandler } from "@/lib/api/handler";
+import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { createDraftEmail } from "@/lib/google/gmail";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
+import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
+import { findDncMatch } from "@/lib/outreach/dnc";
 
 const emailSchema = z.object({
   to: z.array(z.string().email()).min(1),
@@ -31,6 +33,51 @@ export const POST = withApiHandler(
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
     const idempotencyKey = getIdempotencyKey(request, body);
+
+    const orgId = await resolveLeadRunOrgId(user.uid, log);
+    const recipients = [
+      ...body.email.to,
+      ...(body.email.cc || []),
+      ...(body.email.bcc || []),
+    ];
+
+    for (const recipient of recipients) {
+      const domain = recipient.includes("@") ? recipient.split("@")[1] : null;
+      const dnc = await findDncMatch({ orgId, email: recipient, domain });
+      if (!dnc) continue;
+
+      if (body.runId && body.leadDocId) {
+        await recordLeadActionReceipt(
+          {
+            runId: body.runId,
+            leadDocId: body.leadDocId,
+            actionId: body.receiptActionId || "gmail.draft",
+            uid: user.uid,
+            correlationId,
+            status: "skipped",
+            dryRun: Boolean(body.dryRun),
+            replayed: false,
+            idempotencyKey,
+            data: {
+              reason: "dnc",
+              to: body.email.to,
+              cc: body.email.cc,
+              bcc: body.email.bcc,
+              subject: body.email.subject,
+              blockedRecipient: recipient,
+              dnc: { entryId: dnc.entryId, type: dnc.type, value: dnc.value },
+            },
+          },
+          log
+        );
+      }
+
+      throw new ApiError(409, "Recipient is on the Do Not Contact list.", {
+        entryId: dnc.entryId,
+        type: dnc.type,
+        value: dnc.value,
+      });
+    }
 
     if (body.dryRun) {
       const draftId = `dryrun_${correlationId.slice(0, 8)}`;
@@ -109,4 +156,3 @@ export const POST = withApiHandler(
   },
   { route: "gmail.draft" }
 );
-

@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:ExitCode = 0
 
 function New-RunId {
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -18,17 +19,47 @@ $artifactsDir =
   else { ".tmp/artifacts/rt-loop-$runId" }
 $env:ARTIFACTS_DIR = $artifactsDir
 
-New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out-Null
-New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
+function Acquire-RunLock([string]$Path) {
+  # Prevent concurrent runs from interleaving writes into latest-run.md.
+  # Set RT_LOCK_FORCE=true to delete an existing lock (use only if you're sure it's stale).
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
 
-# "latest" report should reflect only the current run.
-@"
-# RT Loop Report
+  if (Test-Path $Path) {
+    if ($env:RT_LOCK_FORCE -eq "true") {
+      Remove-Item -Force $Path -ErrorAction SilentlyContinue
+    } else {
+      $details = ""
+      try { $details = (Get-Content $Path -Raw -ErrorAction Stop).Trim() } catch { }
+      throw "RT loop already running (lock: $Path). $details"
+    }
+  }
 
-- RUN_ID: $runId
-- Artifacts: $artifactsDir
+  $handle = [System.IO.File]::Open(
+    $Path,
+    [System.IO.FileMode]::CreateNew,
+    [System.IO.FileAccess]::Write,
+    [System.IO.FileShare]::None
+  )
 
-"@ | Set-Content -Path $ReportPath -Encoding utf8
+  $payload = "RUN_ID=$runId`nPID=$PID`nSTARTED=$(Get-Date -Format o)`n"
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+  $handle.Write($bytes, 0, $bytes.Length)
+  $handle.Flush()
+
+  return $handle
+}
+
+function Release-RunLock($Handle, [string]$Path) {
+  if (-not $Handle) {
+    return
+  }
+
+  try { $Handle.Dispose() } catch { }
+  try { if (Test-Path $Path) { Remove-Item -Force $Path -ErrorAction SilentlyContinue } } catch { }
+}
+
+$lockPath = if ($env:RT_LOCK_PATH) { $env:RT_LOCK_PATH } else { ".tmp/rt-loop.lock" }
+$lockHandle = $null
 
 function Log([string]$Message) {
   $ts = (Get-Date).ToString("o")
@@ -45,7 +76,8 @@ function Run-Gate([string]$Name, [string]$Cmd) {
 
   if ($ec -ne 0) {
     Log "gate=$Name result=FAIL exit=$ec"
-    exit $ec
+    $script:ExitCode = $ec
+    throw "gate_failed:$Name"
   }
 
   Log "gate=$Name result=PASS"
@@ -72,7 +104,8 @@ function Run-BuildGate([string]$Cmd, [int]$MaxAttempts = 2) {
 
     if ($attempt -ge $MaxAttempts) {
       Log "gate=build result=FAIL exit=$ec attempts=$attempt"
-      exit $ec
+      $script:ExitCode = $ec
+      throw "gate_failed:build"
     }
 
     Log "gate=build result=RETRY exit=$ec attempt=$attempt reason=clean_retry"
@@ -83,6 +116,20 @@ function Run-BuildGate([string]$Cmd, [int]$MaxAttempts = 2) {
 }
 
 try {
+  $lockHandle = Acquire-RunLock -Path $lockPath
+
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ReportPath) | Out-Null
+  New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
+
+  # "latest" report should reflect only the current run.
+  @"
+# RT Loop Report
+
+- RUN_ID: $runId
+- Artifacts: $artifactsDir
+
+"@ | Set-Content -Path $ReportPath -Encoding utf8
+
   Log "start artifacts_dir=$artifactsDir"
   if (Get-Command node -ErrorAction SilentlyContinue) { Log "tool=node version=""$(node --version)""" }
   if (Get-Command npm -ErrorAction SilentlyContinue) { Log "tool=npm version=""$(npm --version)""" }
@@ -109,8 +156,21 @@ try {
   }
 
   Log "end status=PASS artifacts_dir=$artifactsDir"
-  exit 0
+  $script:ExitCode = 0
 } catch {
-  Log "end status=FAIL error=""$($_.Exception.Message)"" artifacts_dir=$artifactsDir"
-  throw
+  if ($script:ExitCode -eq 0) {
+    $script:ExitCode = 1
+  }
+
+  $err = $_.Exception.Message
+  if ($lockHandle) {
+    Log "end status=FAIL error=""$err"" artifacts_dir=$artifactsDir"
+  } else {
+    $ts = (Get-Date).ToString("o")
+    Write-Error "[$ts] RUN_ID=$runId end status=FAIL error=""$err"" artifacts_dir=$artifactsDir"
+  }
+} finally {
+  Release-RunLock -Handle $lockHandle -Path $lockPath
 }
+
+exit $script:ExitCode

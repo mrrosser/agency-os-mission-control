@@ -10,9 +10,6 @@ import { resolveSecret } from "@/lib/api/secrets";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { createClientFolder } from "@/lib/google/drive";
 import { createDraftEmail, sendEmail } from "@/lib/google/gmail";
-import { createMeetingWithAvailabilityCheck, listBusyIntervals } from "@/lib/google/calendar";
-import { pickFirstAvailableStart, type BusyRange } from "@/lib/calendar/availability";
-import { buildCandidateMeetingSlotsInTimeZone } from "@/lib/calendar/slot-search";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { buildLeadActionIdempotencyKey } from "@/lib/lead-runs/ids";
 import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
@@ -26,7 +23,9 @@ import {
   type LeadRunJobStatus,
 } from "@/lib/lead-runs/jobs";
 import { recordLeadRunOutcome, releaseLeadRunConcurrencySlot } from "@/lib/lead-runs/quotas";
+import { availabilityDraftHtml, runScheduleAttempt, type ScheduleAttemptResult } from "@/lib/lead-runs/worker/scheduling";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
+import { findDncMatch } from "@/lib/outreach/dnc";
 
 const bodySchema = z.object({
   workerToken: z.string().min(1),
@@ -41,22 +40,6 @@ interface LeadDoc {
   industry?: string;
   source?: string;
   score?: number;
-}
-
-interface ScheduleAttemptResult {
-  kind: "scheduled" | "no_slot";
-  scheduledStart?: string;
-  scheduledEnd?: string;
-  meetLink?: string;
-  eventId?: string;
-  htmlLink?: string;
-  replayed?: boolean;
-}
-
-function toBusyRanges(intervals: Array<{ start: string; end: string }>): BusyRange[] {
-  return intervals
-    .map((range) => ({ start: new Date(range.start), end: new Date(range.end) }))
-    .filter((range) => !Number.isNaN(range.start.valueOf()) && !Number.isNaN(range.end.valueOf()));
 }
 
 function mergeDiagnostics(
@@ -139,209 +122,13 @@ async function runChannelWithRetry<T>(
   throw lastError || new Error(`Channel ${channel} failed`);
 }
 
-function availabilityDraftHtml(leadName: string, founderName: string, businessName: string): string {
-  return `
-    <h2>Hi ${leadName},</h2>
-    <p>I tried to find a quick 30-minute slot on my calendar, but didn’t see a clean opening this week.</p>
-    <p>Could you reply with 2-3 times that work for you next week? I’ll send an invite immediately.</p>
-    <br/>
-    <p>Best regards,</p>
-    <p>${founderName}<br/>${businessName}</p>
-  `;
-}
-
-async function runScheduleAttempt(
-  args: {
-    accessToken: string;
-    config: LeadRunJobConfig;
-    runId: string;
-    leadDocId: string;
-    lead: LeadDoc;
-    leadEmail?: string;
-    correlationId: string;
-    uid: string;
-    retryAttempt: number;
-  },
-  log: Logger
-): Promise<ScheduleAttemptResult> {
-  const durationMinutes = 30;
-  const retryShift = Math.max(0, args.retryAttempt - 1);
-  const slotSearches = [
-    {
-      timeZone: args.config.timeZone,
-      leadTimeDays: Math.max(1, 2 - retryShift),
-      slotMinutes: 30,
-      businessStartHour: 9,
-      businessEndHour: 17,
-      searchDays: 7 + retryShift * 3,
-      maxSlots: 40,
-      anchorHour: 14 + retryShift,
-    },
-    {
-      timeZone: args.config.timeZone,
-      leadTimeDays: Math.max(1, 2 - retryShift),
-      slotMinutes: 30,
-      businessStartHour: 8,
-      businessEndHour: 18,
-      searchDays: 14 + retryShift * 4,
-      maxSlots: 100,
-      anchorHour: 13 + retryShift,
-    },
-  ];
-
-  for (const slotSearch of slotSearches) {
-    const candidatesRaw = buildCandidateMeetingSlotsInTimeZone(slotSearch);
-    const rotateBy =
-      candidatesRaw.length > 0 ? (args.retryAttempt - 1) % candidatesRaw.length : 0;
-    const candidates =
-      rotateBy > 0
-        ? [...candidatesRaw.slice(rotateBy), ...candidatesRaw.slice(0, rotateBy)]
-        : candidatesRaw;
-    if (candidates.length === 0) continue;
-
-    if (args.config.dryRun) {
-      const start = candidates[0]!;
-      const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-      await recordLeadActionReceipt(
-        {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          actionId: "calendar.booking",
-          uid: args.uid,
-          correlationId: args.correlationId,
-          status: "simulated",
-          dryRun: true,
-          replayed: false,
-          idempotencyKey: buildLeadActionIdempotencyKey({
-            runId: args.runId,
-            leadDocId: args.leadDocId,
-            action: "calendar.schedule",
-          }),
-          data: {
-            scheduledStart: start.toISOString(),
-            scheduledEnd: end.toISOString(),
-            timeZone: slotSearch.timeZone,
-          },
-        },
-        log
-      );
-      return {
-        kind: "scheduled",
-        scheduledStart: start.toISOString(),
-        scheduledEnd: end.toISOString(),
-      };
-    }
-
-    try {
-      const idempotencyKey = buildLeadActionIdempotencyKey({
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        action: "calendar.schedule",
-      });
-
-      const result = await withIdempotency(
-        { uid: args.uid, route: "calendar.schedule", key: idempotencyKey, log },
-        async () => {
-          const calendarId = "primary";
-          const durationMs = durationMinutes * 60 * 1000;
-          const timeMin = candidates[0]!;
-          const timeMax = new Date(candidates[candidates.length - 1]!.getTime() + durationMs);
-          const busyIntervals = await listBusyIntervals(
-            args.accessToken,
-            timeMin,
-            timeMax,
-            calendarId,
-            log
-          );
-          const busyRanges = toBusyRanges(busyIntervals);
-
-          for (const start of candidates) {
-            const picked = pickFirstAvailableStart([start], durationMinutes, busyRanges);
-            if (!picked) continue;
-
-            const created = await createMeetingWithAvailabilityCheck(
-              args.accessToken,
-              {
-                summary: `Discovery Call - ${args.lead.companyName || "Lead"}`,
-                description: `Call with ${args.lead.founderName || "there"} from ${args.lead.companyName || "lead"}`,
-                attendees: args.leadEmail ? [{ email: args.leadEmail }] : [],
-                start: { dateTime: picked.start.toISOString() },
-                end: { dateTime: picked.end.toISOString() },
-                conferenceData: {
-                  createRequest: {
-                    requestId: crypto.randomUUID(),
-                    conferenceSolutionKey: { type: "hangoutsMeet" },
-                  },
-                },
-              },
-              calendarId,
-              log
-            );
-
-            if (created.success && created.event) {
-              const meetLink =
-                created.event.conferenceData?.entryPoints?.find((entry) => entry.uri)?.uri ||
-                undefined;
-              return {
-                scheduledStart: picked.start.toISOString(),
-                scheduledEnd: picked.end.toISOString(),
-                event: created.event,
-                meetLink,
-              };
-            }
-          }
-
-          throw new ApiError(409, "No available slot found", { checked: candidates.length });
-        }
-      );
-
-      await recordLeadActionReceipt(
-        {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          actionId: "calendar.booking",
-          uid: args.uid,
-          correlationId: args.correlationId,
-          status: "complete",
-          dryRun: false,
-          replayed: result.replayed,
-          idempotencyKey,
-          data: {
-            scheduledStart: result.data.scheduledStart,
-            scheduledEnd: result.data.scheduledEnd,
-            eventId: result.data.event?.id,
-            htmlLink: result.data.event?.htmlLink,
-            meetLink: result.data.meetLink,
-          },
-        },
-        log
-      );
-
-      return {
-        kind: "scheduled",
-        scheduledStart: result.data.scheduledStart,
-        scheduledEnd: result.data.scheduledEnd,
-        eventId: result.data.event?.id,
-        htmlLink: result.data.event?.htmlLink,
-        meetLink: result.data.meetLink,
-        replayed: result.replayed,
-      };
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 409) {
-        throw error;
-      }
-    }
-  }
-
-  return { kind: "no_slot" };
-}
-
 async function processLead(
   args: {
     runId: string;
     leadDocId: string;
     lead: LeadDoc;
     uid: string;
+    orgId: string;
     correlationId: string;
     config: LeadRunJobConfig;
     origin: string;
@@ -349,6 +136,135 @@ async function processLead(
   log: Logger
 ): Promise<Partial<LeadRunJobDiagnostics>> {
   const diag: Partial<LeadRunJobDiagnostics> = { processedLeads: 1 };
+  const leadName = args.lead.founderName || "there";
+  const leadEmail = args.lead.email?.trim();
+  const leadPhone = args.lead.phone?.trim();
+  const leadWebsite = args.lead.website?.trim();
+  const emailDomain =
+    leadEmail && leadEmail.includes("@") ? leadEmail.split("@")[1]?.trim() || null : null;
+
+  // Enforce org-level Do-Not-Contact before we do *any* side-effectful work (Drive/Calendar/Gmail/Twilio/HeyGen).
+  let dnc = await findDncMatch({
+    orgId: args.orgId,
+    email: leadEmail || null,
+    phone: leadPhone || null,
+    domain: emailDomain,
+  });
+  if (!dnc && leadWebsite) {
+    dnc = await findDncMatch({
+      orgId: args.orgId,
+      domain: leadWebsite,
+    });
+  }
+
+  if (dnc) {
+    const dncMeta = { entryId: dnc.entryId, type: dnc.type, value: dnc.value };
+    log.info("lead_runs.dnc.blocked", {
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      orgId: args.orgId,
+      dnc: dncMeta,
+    });
+
+    // Record the “why” on the key outbound action receipts so the UI doesn't show "pending".
+    const receiptBase = {
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      uid: args.uid,
+      correlationId: args.correlationId,
+      status: "skipped" as const,
+      dryRun: args.config.dryRun,
+      replayed: false,
+      data: { reason: "dnc" as const, dnc: dncMeta },
+    };
+
+    await recordLeadActionReceipt(
+      {
+        ...receiptBase,
+        actionId: "calendar.booking",
+        idempotencyKey: buildLeadActionIdempotencyKey({
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          action: "calendar.schedule",
+        }),
+      },
+      log
+    );
+
+    await recordLeadActionReceipt(
+      {
+        ...receiptBase,
+        actionId: args.config.draftFirst ? "gmail.outreach_draft" : "gmail.outreach",
+        idempotencyKey: buildLeadActionIdempotencyKey({
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          action: args.config.draftFirst ? "gmail.outreach-draft" : "gmail.send",
+        }),
+      },
+      log
+    );
+
+    await recordLeadActionReceipt(
+      {
+        ...receiptBase,
+        actionId: "drive.folder",
+        idempotencyKey: buildLeadActionIdempotencyKey({
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          action: "drive.create-folder",
+        }),
+      },
+      log
+    );
+
+    if (args.config.useSMS) {
+      await recordLeadActionReceipt(
+        {
+          ...receiptBase,
+          actionId: "twilio.sms",
+          idempotencyKey: buildLeadActionIdempotencyKey({
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            action: "twilio.send-sms",
+          }),
+        },
+        log
+      );
+    }
+
+    if (args.config.useOutboundCall) {
+      await recordLeadActionReceipt(
+        {
+          ...receiptBase,
+          actionId: "twilio.call",
+          idempotencyKey: buildLeadActionIdempotencyKey({
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            action: "twilio.make-call",
+          }),
+        },
+        log
+      );
+    }
+
+    if (args.config.useAvatar) {
+      await recordLeadActionReceipt(
+        {
+          ...receiptBase,
+          actionId: "heygen.avatar",
+          idempotencyKey: buildLeadActionIdempotencyKey({
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            action: "heygen.create-avatar",
+          }),
+        },
+        log
+      );
+    }
+
+    return diag;
+  }
+
   const accessToken = await getAccessTokenForUser(args.uid, log);
 
   const identitySnap = await getAdminDb().collection("identities").doc(args.uid).get();
@@ -362,9 +278,6 @@ async function processLead(
     string,
     { voiceId?: string; modelId?: string }
   >;
-
-  const leadName = args.lead.founderName || "there";
-  const leadEmail = args.lead.email;
 
   const driveKey = buildLeadActionIdempotencyKey({
     runId: args.runId,
@@ -557,6 +470,25 @@ async function processLead(
 
   if (!leadEmail) {
     diag.noEmail = 1;
+    await recordLeadActionReceipt(
+      {
+        runId: args.runId,
+        leadDocId: args.leadDocId,
+        actionId: args.config.draftFirst ? "gmail.outreach_draft" : "gmail.outreach",
+        uid: args.uid,
+        correlationId: args.correlationId,
+        status: "skipped",
+        dryRun: args.config.dryRun,
+        replayed: false,
+        idempotencyKey: buildLeadActionIdempotencyKey({
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          action: args.config.draftFirst ? "gmail.outreach-draft" : "gmail.send",
+        }),
+        data: { reason: "missing_email" },
+      },
+      log
+    );
   } else if (args.config.draftFirst) {
     const draftKey = buildLeadActionIdempotencyKey({
       runId: args.runId,
@@ -680,7 +612,6 @@ async function processLead(
     diag.emailsSent = 1;
   }
 
-  const leadPhone = args.lead.phone?.trim();
   const twilioSid =
     args.config.useSMS || args.config.useOutboundCall
       ? await resolveSecret(args.uid, "twilioSid", "TWILIO_ACCOUNT_SID")
@@ -731,20 +662,6 @@ async function processLead(
           status: "skipped",
           dryRun: args.config.dryRun,
           data: { reason: "missing_twilio_config" },
-        },
-        log
-      );
-    } else if (!elevenLabsKey) {
-      await recordLeadActionReceipt(
-        {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          actionId: "twilio.call",
-          uid: args.uid,
-          correlationId: args.correlationId,
-          status: "skipped",
-          dryRun: args.config.dryRun,
-          data: { reason: "missing_elevenlabs_key" },
         },
         log
       );
@@ -1291,6 +1208,7 @@ export const POST = withApiHandler(
           leadDocId,
           lead: leadSnap.data() as LeadDoc,
           uid: job.userId,
+          orgId: job.orgId || job.userId,
           correlationId,
           config: job.config,
           origin: request.nextUrl?.origin || new URL(request.url).origin,

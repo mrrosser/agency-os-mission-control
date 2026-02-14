@@ -8,6 +8,8 @@ import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { resolveSecret } from "@/lib/api/secrets";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
+import { findDncMatch } from "@/lib/outreach/dnc";
 
 const bodySchema = z.object({
   twilioSid: z.string().optional(),
@@ -36,6 +38,16 @@ export const POST = withApiHandler(
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
     const idempotencyKey = getIdempotencyKey(request, body);
+
+    const orgId = await resolveLeadRunOrgId(user.uid, log);
+    const dnc = await findDncMatch({ orgId, phone: body.to });
+    if (dnc) {
+      throw new ApiError(409, "Recipient is on the Do Not Contact list.", {
+        entryId: dnc.entryId,
+        type: dnc.type,
+        value: dnc.value,
+      });
+    }
 
     const twilioSid = await resolveSecret(user.uid, "twilioSid", "TWILIO_ACCOUNT_SID");
     const twilioToken = await resolveSecret(user.uid, "twilioToken", "TWILIO_AUTH_TOKEN");

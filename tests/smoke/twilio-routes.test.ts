@@ -5,6 +5,8 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { resolveSecret } from "@/lib/api/secrets";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
+import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
+import { findDncMatch } from "@/lib/outreach/dnc";
 
 const twilioMocks = vi.hoisted(() => {
   const messagesCreate = vi.fn();
@@ -40,10 +42,20 @@ vi.mock("@/lib/voice/call-audio", () => ({
   createHostedCallAudio: vi.fn(),
 }));
 
+vi.mock("@/lib/lead-runs/quotas", () => ({
+  resolveLeadRunOrgId: vi.fn(),
+}));
+
+vi.mock("@/lib/outreach/dnc", () => ({
+  findDncMatch: vi.fn(),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const resolveSecretMock = vi.mocked(resolveSecret);
 const withIdempotencyMock = vi.mocked(withIdempotency);
 const createHostedCallAudioMock = vi.mocked(createHostedCallAudio);
+const resolveOrgMock = vi.mocked(resolveLeadRunOrgId);
+const findDncMock = vi.mocked(findDncMatch);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -63,6 +75,8 @@ describe("twilio routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    resolveOrgMock.mockResolvedValue("org-1");
+    findDncMock.mockResolvedValue(null);
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
       data: await executor(),
       replayed: false,
@@ -141,6 +155,37 @@ describe("twilio routes", () => {
     expect(twilioMocks.messagesCreate).not.toHaveBeenCalled();
   });
 
+  it("send-sms blocks when recipient is on DNC list", async () => {
+    findDncMock.mockResolvedValue({
+      entryId: "dnc1",
+      type: "phone",
+      value: "+15551230000",
+      normalized: "+15551230000",
+      createdBy: "user-1",
+    } as unknown as Awaited<ReturnType<typeof findDncMatch>>);
+
+    const req = new Request("http://localhost/api/twilio/send-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "+15551230000",
+        message: "Should be blocked",
+      }),
+    });
+
+    const res = await sendSmsPost(
+      req as unknown as Parameters<typeof sendSmsPost>[0],
+      createContext() as unknown as Parameters<typeof sendSmsPost>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(data.error)).toMatch(/Do Not Contact/i);
+    expect(resolveSecretMock).not.toHaveBeenCalled();
+    expect(twilioMocks.messagesCreate).not.toHaveBeenCalled();
+    expect(twilioMocks.factory).not.toHaveBeenCalled();
+  });
+
   it("make-call uses stored Twilio phone number when request omits from", async () => {
     twilioMocks.callsCreate.mockResolvedValue({
       sid: "CA123",
@@ -170,6 +215,38 @@ describe("twilio routes", () => {
         from: "+15005550006",
       })
     );
+  });
+
+  it("make-call blocks when recipient is on DNC list", async () => {
+    findDncMock.mockResolvedValue({
+      entryId: "dnc1",
+      type: "phone",
+      value: "+15551230000",
+      normalized: "+15551230000",
+      createdBy: "user-1",
+    } as unknown as Awaited<ReturnType<typeof findDncMatch>>);
+
+    const req = new Request("http://localhost/api/twilio/make-call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "+15551230000",
+        audioUrl: "https://example.com/audio.mp3",
+      }),
+    });
+
+    const res = await makeCallPost(
+      req as unknown as Parameters<typeof makeCallPost>[0],
+      createContext() as unknown as Parameters<typeof makeCallPost>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(String(data.error)).toMatch(/Do Not Contact/i);
+    expect(resolveSecretMock).not.toHaveBeenCalled();
+    expect(createHostedCallAudioMock).not.toHaveBeenCalled();
+    expect(twilioMocks.callsCreate).not.toHaveBeenCalled();
+    expect(twilioMocks.factory).not.toHaveBeenCalled();
   });
 
   it("make-call synthesizes and hosts audio when text is provided", async () => {

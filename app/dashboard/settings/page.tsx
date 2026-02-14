@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
+import { DncList } from "@/components/settings/DncList";
 
 interface IdentityProfile {
     businessName: string;
@@ -459,12 +460,13 @@ export default function SettingsPage() {
 
                     {/* --- Integrations Tab --- */}
                     <TabsContent value="integrations">
-                        <Card className="bg-zinc-950 border-zinc-800">
-                            <CardHeader>
-                                <CardTitle>Outreach API Configuration</CardTitle>
-                                <CardDescription>Your keys are stored securely in Secret Manager.</CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-6">
+                        <div className="space-y-6">
+                            <Card className="bg-zinc-950 border-zinc-800">
+                                <CardHeader>
+                                    <CardTitle>Outreach API Configuration</CardTitle>
+                                    <CardDescription>Your keys are stored securely in Secret Manager.</CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-6">
                                 {/* Google Section */}
                                 <div className="space-y-4 p-4 rounded-lg bg-zinc-900/50 border border-zinc-800">
                                     <div className="flex items-center justify-between">
@@ -810,12 +812,15 @@ export default function SettingsPage() {
                                         onChange={e => setApiKeys({ ...apiKeys, heyGenKey: e.target.value })}
                                     />
                                 </div>
-                                <Button onClick={handleSaveKeys} className="w-full bg-zinc-100 text-black hover:bg-zinc-200">
-                                    <Save className="mr-2 h-4 w-4" />
-                                    Save Keys
-                                </Button>
-                            </CardContent>
-                        </Card>
+                                    <Button onClick={handleSaveKeys} className="w-full bg-zinc-100 text-black hover:bg-zinc-200">
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Save Keys
+                                    </Button>
+                                </CardContent>
+                            </Card>
+
+                            <DncList />
+                        </div>
                     </TabsContent>
 
                     {/* --- Appearance Tab --- */}

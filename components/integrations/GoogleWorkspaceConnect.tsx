@@ -191,6 +191,17 @@ export function GoogleWorkspaceConnect() {
           </div>
         )}
 
+        {connected && (!capabilities.drive || !capabilities.calendar) && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-100/90">
+            If enabling Drive/Calendar shows <span className="text-amber-50">access denied</span>, your OAuth consent screen likely needs
+            verification (or you need to be added as a Test user during verification).
+            <a className="ml-2 underline underline-offset-2 hover:text-amber-50" href="/help/google-oauth">
+              Checklist
+            </a>
+            .
+          </div>
+        )}
+
         {connected ? (
           <>
             {(!capabilities.drive || !capabilities.calendar || !capabilities.gmail) && (

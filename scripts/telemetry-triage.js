@@ -31,6 +31,78 @@ function safeJson(value) {
   }
 }
 
+function isTruthy(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function normalizePath(p) {
+  if (!p) return "";
+  return String(p).replace(/\\/g, "/");
+}
+
+function extractCodePointers(stack) {
+  if (!stack) return [];
+  const lines = String(stack).split(/\r?\n/);
+  const seen = new Set();
+  const pointers = [];
+
+  // Matches:
+  // - at ... (C:\repo\app\api\foo\route.ts:12:34)
+  // - at file:///workspace/app/api/foo/route.ts:12:34
+  // - at /workspace/app/api/foo/route.ts:12:34
+  const re = /(?:\(|\s)([a-zA-Z0-9+._:/\\-]+?\.(?:ts|tsx|js|jsx|mjs|cjs)):(\d+):(\d+)\)?/;
+
+  for (const line of lines) {
+    const match = line.match(re);
+    if (!match) continue;
+
+    const rawPath = normalizePath(match[1]);
+    if (!rawPath) continue;
+    if (rawPath.includes("node_modules/")) continue;
+    if (rawPath.includes("/.next/")) continue;
+
+    // Try to reduce to a repo-relative-ish path when possible.
+    const idx = rawPath.lastIndexOf("/app/");
+    const libIdx = rawPath.lastIndexOf("/lib/");
+    const srcIdx = rawPath.lastIndexOf("/src/");
+    const start = Math.max(idx, libIdx, srcIdx);
+    const rel = start >= 0 ? rawPath.slice(start + 1) : rawPath;
+
+    const pointer = `${rel}:${match[2]}:${match[3]}`;
+    if (seen.has(pointer)) continue;
+    seen.add(pointer);
+    pointers.push(pointer);
+    if (pointers.length >= 6) break;
+  }
+
+  return pointers;
+}
+
+function patchSuggestionsFromSample(sample) {
+  const pointers = extractCodePointers(sample.stack);
+  if (pointers.length === 0) return "";
+
+  const lines = [];
+  lines.push("## Patch Suggestions (Draft)");
+  lines.push("");
+  lines.push("_Auto-generated pointers. Review before applying._");
+  lines.push("");
+  lines.push("Likely files:");
+  for (const p of pointers) {
+    lines.push(`- \`${p}\``);
+  }
+  lines.push("");
+  lines.push("Repro checklist:");
+  lines.push("- [ ] Reproduce locally with the same request shape (see Route/URL below).");
+  lines.push("- [ ] Confirm the backend returns JSON (not an HTML platform error page).");
+  lines.push("- [ ] Add/extend a smoke test to lock the behavior.");
+  lines.push("- [ ] Verify with `npm test` and `npm run build`.");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
 async function initFirestore() {
   if (!admin.apps.length) {
     admin.initializeApp({
@@ -83,6 +155,7 @@ function issueTitleFromGroup(group) {
 
 function issueBodyFromGroup(group) {
   const sample = group.sample || {};
+  const suggestPatch = isTruthy(getEnv("TELEMETRY_TRIAGE_SUGGEST_PATCH", "false"));
   const lines = [];
 
   lines.push("## Telemetry Error Group");
@@ -111,6 +184,14 @@ function issueBodyFromGroup(group) {
     lines.push("```");
     lines.push(clip(String(sample.stack), 12000));
     lines.push("```");
+  }
+
+  if (suggestPatch) {
+    const patchSection = patchSuggestionsFromSample(sample);
+    if (patchSection) {
+      lines.push("");
+      lines.push(patchSection);
+    }
   }
 
   lines.push("");

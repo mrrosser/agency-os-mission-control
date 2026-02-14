@@ -13,21 +13,15 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Activity, AlertCircle, Terminal, CheckCircle2, Bookmark, Save, Trash2, RefreshCcw, Pause, Play, Clock3, Bug, ShieldCheck, HardDrive, ArrowUpRight, Download } from "lucide-react";
+import { Activity, AlertCircle, Terminal, CheckCircle2, Pause, Play, Clock3, Bug, ShieldCheck, HardDrive, ArrowUpRight, Download } from "lucide-react";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { KnowledgeBase } from "@/components/operations/KnowledgeBase";
+import { FollowupSequencingCard } from "@/components/operations/FollowupSequencingCard";
+import { SavedRunTemplates } from "@/components/operations/SavedRunTemplates";
 import { ScriptGenerator } from "@/lib/ai/script-generator";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { dbService } from "@/lib/db-service";
@@ -1432,6 +1426,80 @@ export default function OperationsPage() {
                 }))
             );
 
+            // Step 3.5: Load org-level Do Not Contact list (best-effort). Used to block automated outreach.
+            type DncEntryLite = { entryId: string; type: "email" | "phone" | "domain"; normalized: string; value: string };
+            const dncSets: Record<"email" | "phone" | "domain", Set<string>> = {
+                email: new Set(),
+                phone: new Set(),
+                domain: new Set(),
+            };
+            const dncByKey = new Map<string, DncEntryLite>();
+
+            const normalizeEmail = (v: string) => v.trim().toLowerCase();
+            const normalizePhone = (v: string) => {
+                const trimmed = v.trim();
+                const digits = trimmed.replace(/[^\d+]/g, "");
+                if (digits.startsWith("+")) return `+${digits.slice(1).replace(/[^\d]/g, "")}`;
+                return digits.replace(/[^\d]/g, "");
+            };
+            const normalizeDomain = (v: string) => {
+                const trimmed = v.trim().toLowerCase();
+                if (!trimmed) return "";
+                try {
+                    const url = trimmed.includes("://") ? new URL(trimmed) : new URL(`https://${trimmed}`);
+                    return url.hostname.replace(/^www\./, "");
+                } catch {
+                    return trimmed.replace(/^www\./, "").split("/")[0] || trimmed;
+                }
+            };
+
+            const findDncHit = (lead: { email?: string | null; phone?: string | null; domain?: string | null }) => {
+                const emailNorm = lead.email ? normalizeEmail(lead.email) : "";
+                const emailDomain = emailNorm.includes("@") ? emailNorm.split("@")[1] : "";
+                const phoneNorm = lead.phone ? normalizePhone(lead.phone) : "";
+                const domainNorm = lead.domain ? normalizeDomain(lead.domain) : "";
+
+                if (emailNorm && dncSets.email.has(emailNorm)) {
+                    const key = `email:${emailNorm}`;
+                    return dncByKey.get(key) || { entryId: key, type: "email" as const, normalized: emailNorm, value: lead.email || emailNorm };
+                }
+                if (phoneNorm && dncSets.phone.has(phoneNorm)) {
+                    const key = `phone:${phoneNorm}`;
+                    return dncByKey.get(key) || { entryId: key, type: "phone" as const, normalized: phoneNorm, value: lead.phone || phoneNorm };
+                }
+                if (domainNorm && dncSets.domain.has(domainNorm)) {
+                    const key = `domain:${domainNorm}`;
+                    return dncByKey.get(key) || { entryId: key, type: "domain" as const, normalized: domainNorm, value: lead.domain || domainNorm };
+                }
+                if (emailDomain && dncSets.domain.has(emailDomain)) {
+                    const key = `domain:${emailDomain}`;
+                    return dncByKey.get(key) || { entryId: key, type: "domain" as const, normalized: emailDomain, value: emailDomain };
+                }
+                return null;
+            };
+
+            try {
+                const dncHeaders = await buildAuthHeaders(user, { correlationId });
+                const dncRes = await fetch("/api/outreach/dnc", { method: "GET", headers: dncHeaders });
+                const dncPayload = await readApiJson<{ entries?: DncEntryLite[]; error?: string }>(dncRes);
+                if (!dncRes.ok) {
+                    const cid = getResponseCorrelationId(dncRes);
+                    throw new Error(dncPayload?.error || `Failed to load DNC list (status ${dncRes.status}${cid ? ` cid=${cid}` : ""})`);
+                }
+                const entries = Array.isArray(dncPayload.entries) ? dncPayload.entries : [];
+                for (const entry of entries) {
+                    if (!entry?.type || !entry?.normalized) continue;
+                    dncSets[entry.type].add(entry.normalized);
+                    dncByKey.set(`${entry.type}:${entry.normalized}`, entry);
+                }
+                if (entries.length > 0) {
+                    addLog(`✓ DNC list loaded (${entries.length} entries)`);
+                }
+            } catch (e) {
+                addLog("⚠ Could not load DNC list, proceeding without it...");
+                reportClientError(e instanceof Error ? e.message : String(e), { source: "operations.dnc.load" });
+            }
+
             // Step 4: Process each lead
             for (let i = 0; i < sourcedLeads.length; i++) {
                 if (!isRunningRef.current) {
@@ -1452,6 +1520,20 @@ export default function OperationsPage() {
                 let scriptErrored = false;
                 if (!needsScript) {
                     updateJourneyStep(lead.id, "script", "skipped");
+                }
+
+                const dncHit = findDncHit({
+                    email: leadEmail || null,
+                    phone: leadPhone || null,
+                    domain: lead.websiteDomain || lead.website || null,
+                });
+                if (dncHit) {
+                    addLog(`🚫 DNC match for ${lead.companyName} (${dncHit.type}: ${dncHit.value}). Skipping outreach + booking.`);
+                    if (needsScript) updateJourneyStep(lead.id, "script", "skipped");
+                    updateJourneyStep(lead.id, "booking", "skipped");
+                    updateJourneyStep(lead.id, "outreach", "skipped");
+                    updateJourneyStep(lead.id, "followup", "skipped");
+                    continue;
                 }
 
                 // Create Drive folder (idempotent per run+lead)
@@ -1945,6 +2027,71 @@ export default function OperationsPage() {
     function MainPanel() {
         return (
             <div className="lg:col-span-2 space-y-6">
+                {journeys.length === 0 && logs.length === 0 && !isRunning && (
+                    <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
+                        <CardContent className="p-6 space-y-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                    <p className="text-sm font-semibold text-white">Getting Started</p>
+                                    <p className="text-sm text-zinc-400">
+                                        Fill your offer + sourcing keys, then run your first scan. Google is optional while verification is pending.
+                                    </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <Link href="/dashboard/identity">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                        >
+                                            Identity
+                                        </Button>
+                                    </Link>
+                                    <Link href="/dashboard/settings">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                        >
+                                            API Vault
+                                        </Button>
+                                    </Link>
+                                    <Link href="/dashboard/integrations">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                        >
+                                            Integrations
+                                        </Button>
+                                    </Link>
+                                </div>
+                            </div>
+
+                            <div className="grid gap-2 text-sm text-zinc-300">
+                                <div className="flex items-center gap-2">
+                                    <AfroGlyph variant="identity" className="h-4 w-4 text-zinc-400" />
+                                    <span>Set your Identity (Offer) so outreach copy matches your brand.</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <AfroGlyph variant="source" className="h-4 w-4 text-zinc-400" />
+                                    <span>Add a Google Places key and describe your ICP (query/industry + location).</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <AfroGlyph variant="score" className="h-4 w-4 text-zinc-400" />
+                                    <span>Set Lead Limit + Minimum Score to control quality and volume.</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <AfroGlyph variant="outreach" className="h-4 w-4 text-zinc-400" />
+                                    <span>Click Run. Use Dry Run first to validate receipts without sending.</span>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
                 <RunDiagnostics diagnostics={diagnostics} />
                 <LeadJourney
                     journeys={journeys}
@@ -2091,133 +2238,26 @@ export default function OperationsPage() {
                                 </div>
 
                                 <div className="space-y-4">
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium text-zinc-200">Saved Run Templates</Label>
-                                        <div className="flex items-center gap-2">
-                                            <Select
-                                                value={selectedTemplateId || undefined}
-                                                onValueChange={onSelectTemplate}
-                                                disabled={!user || templatesLoading}
-                                            >
-                                                <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
-                                                    <SelectValue
-                                                        placeholder={templatesLoading ? "Loading templates..." : "Select a template..."}
-                                                    />
-                                                </SelectTrigger>
-                                                <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                                                    {templates.length === 0 ? (
-                                                        <SelectItem value="__empty__" disabled>
-                                                            No saved templates
-                                                        </SelectItem>
-                                                    ) : (
-                                                        templates.map((t) => (
-                                                            <SelectItem key={t.templateId} value={t.templateId}>
-                                                                {t.clientName ? `${t.clientName} - ${t.name}` : t.name}
-                                                            </SelectItem>
-                                                        ))
-                                                    )}
-                                                </SelectContent>
-                                            </Select>
-
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="icon"
-                                                onClick={loadTemplates}
-                                                disabled={!user || templatesLoading}
-                                                className="h-11 w-11 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                                aria-label="Refresh templates"
-                                            >
-                                                <RefreshCcw className={templatesLoading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-                                            </Button>
-                                        </div>
-
-                                        <div className="flex items-center gap-2">
-                                            <Button
-                                                type="button"
-                                                onClick={openTemplateDialog}
-                                                disabled={!user}
-                                                className="h-9 bg-zinc-900 border border-zinc-700 text-white hover:bg-zinc-800"
-                                            >
-                                                <Save className="h-4 w-4" />
-                                                {selectedTemplateId ? "Update Template" : "Save Template"}
-                                            </Button>
-
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                onClick={clearTemplateSelection}
-                                                disabled={!selectedTemplateId}
-                                                className="h-9 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                            >
-                                                <Bookmark className="h-4 w-4" />
-                                                Clear
-                                            </Button>
-
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                onClick={deleteSelectedTemplate}
-                                                disabled={!selectedTemplateId || templateDeleting}
-                                                className="h-9 border-red-900 bg-zinc-900 text-red-400 hover:bg-red-950/40 hover:text-red-200"
-                                            >
-                                                <Trash2 className={templateDeleting ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
-                                                Delete
-                                            </Button>
-                                        </div>
-
-                                        <Dialog open={templateDialogOpen} onOpenChange={setTemplateDialogOpen}>
-                                            <DialogContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                                                <DialogHeader>
-                                                    <DialogTitle className="text-white">Save Lead Run Template</DialogTitle>
-                                                    <DialogDescription className="text-zinc-400">
-                                                        Store your run settings so you can re-run them in one click.
-                                                    </DialogDescription>
-                                                </DialogHeader>
-
-                                                <div className="space-y-4">
-                                                    <div className="space-y-2">
-                                                        <Label className="text-sm font-medium text-zinc-200">Template Name</Label>
-                                                        <Input
-                                                            value={templateName}
-                                                            onChange={(e) => setTemplateName(e.target.value)}
-                                                            placeholder="e.g. Austin HVAC High Intent"
-                                                            className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                                                        />
-                                                    </div>
-
-                                                    <div className="space-y-2">
-                                                        <Label className="text-sm font-medium text-zinc-200">Client / Org (optional)</Label>
-                                                        <Input
-                                                            value={templateClientName}
-                                                            onChange={(e) => setTemplateClientName(e.target.value)}
-                                                            placeholder="e.g. McCullough, Inc."
-                                                            className="h-11 bg-zinc-900 border-zinc-700 text-white placeholder:text-zinc-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <DialogFooter>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        onClick={() => setTemplateDialogOpen(false)}
-                                                        className="border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                                    >
-                                                        Cancel
-                                                    </Button>
-                                                    <Button
-                                                        type="button"
-                                                        onClick={saveTemplate}
-                                                        disabled={templateSaving}
-                                                        className="bg-blue-600 hover:bg-blue-500 text-white"
-                                                    >
-                                                        {templateSaving ? "Saving..." : "Save"}
-                                                    </Button>
-                                                </DialogFooter>
-                                            </DialogContent>
-                                        </Dialog>
-                                    </div>
+                                    <SavedRunTemplates
+                                        user={user}
+                                        templates={templates}
+                                        templatesLoading={templatesLoading}
+                                        selectedTemplateId={selectedTemplateId}
+                                        onSelectTemplate={onSelectTemplate}
+                                        onRefreshTemplates={loadTemplates}
+                                        onOpenDialog={openTemplateDialog}
+                                        onClearSelection={clearTemplateSelection}
+                                        onDeleteSelected={deleteSelectedTemplate}
+                                        deleting={templateDeleting}
+                                        dialogOpen={templateDialogOpen}
+                                        onDialogOpenChange={setTemplateDialogOpen}
+                                        templateName={templateName}
+                                        onTemplateNameChange={setTemplateName}
+                                        templateClientName={templateClientName}
+                                        onTemplateClientNameChange={setTemplateClientName}
+                                        onSaveTemplate={saveTemplate}
+                                        saving={templateSaving}
+                                    />
 
                                     <div className="space-y-2 pt-2 border-t border-zinc-800">
                                         <Label className="text-sm font-medium text-zinc-200">Load Existing Run</Label>
@@ -2354,6 +2394,10 @@ export default function OperationsPage() {
 
                                     <div className="pt-4 border-t border-zinc-800">
                                         <KnowledgeBase />
+                                    </div>
+
+                                    <div className="pt-4 border-t border-zinc-800">
+                                        <FollowupSequencingCard runId={sourceRunId} />
                                     </div>
 
                                      <div className="space-y-3 pt-4 border-t border-zinc-800">

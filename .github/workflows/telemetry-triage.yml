@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install deps
@@ -41,4 +41,3 @@ jobs:
           TELEMETRY_TRIAGE_MIN_COUNT: "3"
           TELEMETRY_TRIAGE_LIMIT: "10"
         run: node scripts/telemetry-triage.js
-

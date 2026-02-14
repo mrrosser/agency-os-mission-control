@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Setup Python
@@ -53,4 +53,3 @@ jobs:
           RT_AUTO_INSTALL_CISCO_SCANNERS: "0"
           RT_SECRETS_CMD: 'gitleaks dir --source . --redact --report-format sarif --report-path "$ARTIFACTS_DIR/gitleaks.sarif"'
         run: bash scripts/loop/run.sh
-

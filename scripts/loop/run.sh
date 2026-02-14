@@ -237,7 +237,7 @@ run "security" "$SECURITY_CMD"
 if [[ -n "${RT_SECRETS_CMD:-}" ]]; then
   run "secrets" "$RT_SECRETS_CMD"
 elif command -v gitleaks >/dev/null 2>&1; then
-  run "secrets" "gitleaks dir --source . --redact --report-format sarif --report-path \"$ARTIFACTS_DIR/gitleaks.sarif\""
+  run "secrets" "gitleaks dir --redact --report-format sarif --report-path \"$ARTIFACTS_DIR/gitleaks.sarif\" ."
 else
   log "gate=secrets result=SKIP reason=gitleaks_not_installed"
 fi

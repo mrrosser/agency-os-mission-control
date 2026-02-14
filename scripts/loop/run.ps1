@@ -102,7 +102,7 @@ try {
   if ($env:RT_SECRETS_CMD) {
     Run-Gate -Name "secrets" -Cmd $env:RT_SECRETS_CMD
   } elseif (Get-Command gitleaks -ErrorAction SilentlyContinue) {
-    Run-Gate -Name "secrets" -Cmd "gitleaks dir --source . --redact --report-format sarif --report-path ""$artifactsDir/gitleaks.sarif"""
+    Run-Gate -Name "secrets" -Cmd "gitleaks dir --redact --report-format sarif --report-path ""$artifactsDir/gitleaks.sarif"" ."
   } else {
     Log "gate=secrets result=SKIP reason=gitleaks_not_installed"
   }

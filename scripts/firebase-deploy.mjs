@@ -13,12 +13,17 @@ const env = {
 };
 
 const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
-const child = spawn(npxCmd, ["-y", "firebase-tools@15.5.1", ...args], {
-  stdio: "inherit",
-  env,
-});
+const child = spawn(
+  process.platform === "win32" ? "cmd.exe" : npxCmd,
+  process.platform === "win32"
+    ? ["/d", "/s", "/c", npxCmd, "-y", "firebase-tools@15.5.1", ...args]
+    : ["-y", "firebase-tools@15.5.1", ...args],
+  {
+    stdio: "inherit",
+    env,
+  }
+);
 
 child.on("exit", (code) => {
   process.exit(code ?? 1);
 });
-

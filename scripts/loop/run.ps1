@@ -33,7 +33,8 @@ New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
 function Log([string]$Message) {
   $ts = (Get-Date).ToString("o")
   $line = "[$ts] RUN_ID=$runId $Message"
-  $line | Tee-Object -FilePath $ReportPath -Append
+  Write-Output $line
+  Add-Content -Path $ReportPath -Value $line -Encoding utf8
 }
 
 function Run-Gate([string]$Name, [string]$Cmd) {

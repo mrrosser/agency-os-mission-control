@@ -20,6 +20,8 @@ type GoogleStatusPayload = {
   error?: string;
 };
 
+const FORCE_REPLAY_KEY = "mission_control.firstScanTour.force";
+
 function emptySignals(): FirstScanTourSignals {
   return {
     hasIdentity: false,
@@ -144,6 +146,13 @@ export function FirstScanTour() {
     const boot = async () => {
       setBooting(true);
       try {
+        let forceReplay = false;
+        try {
+          forceReplay = window.localStorage.getItem(FORCE_REPLAY_KEY) === "true";
+        } catch {
+          forceReplay = false;
+        }
+
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
         const onboarding = userSnap.exists()
@@ -152,7 +161,7 @@ export function FirstScanTour() {
         const tour = onboarding ? (onboarding.firstScanTourV1 as Record<string, unknown> | undefined) : undefined;
         const dismissedAt = tour?.dismissedAt;
         const completedAt = tour?.completedAt;
-        if (dismissedAt || completedAt) {
+        if (!forceReplay && (dismissedAt || completedAt)) {
           setOpen(false);
           return;
         }
@@ -161,7 +170,7 @@ export function FirstScanTour() {
         const leadsSnap = await getDocs(
           query(collection(db, "leads"), where("userId", "==", user.uid), limit(1))
         );
-        if (!leadsSnap.empty) {
+        if (!forceReplay && !leadsSnap.empty) {
           setOpen(false);
           return;
         }
@@ -180,6 +189,13 @@ export function FirstScanTour() {
         await refreshIdentityStatus();
 
         setOpen(true);
+        if (forceReplay) {
+          try {
+            window.localStorage.removeItem(FORCE_REPLAY_KEY);
+          } catch {
+            // ignore
+          }
+        }
       } finally {
         setBooting(false);
       }
@@ -194,7 +210,10 @@ export function FirstScanTour() {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      initializedRef.current = false;
+      return;
+    }
     if (initializedRef.current) return;
     initializedRef.current = true;
     setStepIndex(firstIncompleteStepIndex(steps));

@@ -453,6 +453,29 @@ async function processLead(
     meetLink = scheduleResult.meetLink;
   } else {
     diag.noSlot = 1;
+    const calendarKey = buildLeadActionIdempotencyKey({
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      action: "calendar.schedule",
+    });
+    await recordLeadActionReceipt(
+      {
+        runId: args.runId,
+        leadDocId: args.leadDocId,
+        actionId: "calendar.booking",
+        uid: args.uid,
+        correlationId: args.correlationId,
+        status: "skipped",
+        dryRun: false,
+        replayed: false,
+        idempotencyKey: calendarKey,
+        data: {
+          reason: "no_slot",
+          maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+        },
+      },
+      log
+    );
     if (leadEmail) {
       const draftKey = buildLeadActionIdempotencyKey({
         runId: args.runId,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,7 @@ type MotionSetting = "auto" | "on" | "off";
 
 export default function SettingsPage() {
     const { user } = useAuth();
+    const router = useRouter();
     const searchParams = useSearchParams();
     const [loading, setLoading] = useState(false);
     const [googleStatus, setGoogleStatus] = useState({
@@ -179,6 +180,18 @@ export default function SettingsPage() {
         toast.success("Appearance updated", {
             description: "Motion preference saved for this browser.",
         });
+    };
+
+    const handleReplayFirstScanTour = () => {
+        try {
+            window.localStorage.setItem("mission_control.firstScanTour.force", "true");
+        } catch {
+            // ignore (storage disabled)
+        }
+        toast.success("Replaying tour", {
+            description: "Opening Operations and forcing the First Scan Tour to show.",
+        });
+        router.push("/dashboard/operations");
     };
 
     const handleConnectGoogle = async () => {
@@ -807,32 +820,53 @@ export default function SettingsPage() {
 
                     {/* --- Appearance Tab --- */}
                     <TabsContent value="appearance">
-                        <Card className="bg-zinc-950 border-zinc-800">
-                            <CardHeader>
-                                <CardTitle>Visual Effects</CardTitle>
-                                <CardDescription>
-                                    Control motion and animations. OS Reduce Motion is always respected.
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="space-y-2">
-                                    <Label>Animated backgrounds</Label>
-                                    <Select value={motionSetting} onValueChange={handleMotionSettingChange}>
-                                        <SelectTrigger className="bg-zinc-900 border-zinc-700">
-                                            <SelectValue placeholder="Auto (recommended)" />
-                                        </SelectTrigger>
-                                        <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
-                                            <SelectItem value="auto">Auto (recommended)</SelectItem>
-                                            <SelectItem value="on">On</SelectItem>
-                                            <SelectItem value="off">Off</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                    <p className="text-xs text-zinc-500">
-                                        Applies to the login and landing visuals in this browser via localStorage.
-                                    </p>
-                                </div>
-                            </CardContent>
-                        </Card>
+                        <div className="space-y-6">
+                            <Card className="bg-zinc-950 border-zinc-800">
+                                <CardHeader>
+                                    <CardTitle>Visual Effects</CardTitle>
+                                    <CardDescription>
+                                        Control motion and animations. OS Reduce Motion is always respected.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="space-y-2">
+                                        <Label>Animated backgrounds</Label>
+                                        <Select value={motionSetting} onValueChange={handleMotionSettingChange}>
+                                            <SelectTrigger className="bg-zinc-900 border-zinc-700">
+                                                <SelectValue placeholder="Auto (recommended)" />
+                                            </SelectTrigger>
+                                            <SelectContent className="bg-zinc-950 border-zinc-800 text-white">
+                                                <SelectItem value="auto">Auto (recommended)</SelectItem>
+                                                <SelectItem value="on">On</SelectItem>
+                                                <SelectItem value="off">Off</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-xs text-zinc-500">
+                                            Applies to the login and landing visuals in this browser via localStorage.
+                                        </p>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            <Card className="bg-zinc-950 border-zinc-800">
+                                <CardHeader>
+                                    <CardTitle>Onboarding</CardTitle>
+                                    <CardDescription>
+                                        Replay the First Scan Tour if you need a guided setup refresh.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="w-full border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                        onClick={handleReplayFirstScanTour}
+                                    >
+                                        Replay First Scan Tour
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        </div>
                     </TabsContent>
                 </Tabs>
             </div>

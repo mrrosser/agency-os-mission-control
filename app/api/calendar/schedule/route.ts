@@ -173,56 +173,108 @@ export const POST = withApiHandler(
       return NextResponse.json(payload);
     }
 
-    const result = await withIdempotency(
-      { uid: user.uid, route: "calendar.schedule", key: idempotencyKey, log },
-      async () => {
-        const calendarId = body.calendarId || "primary";
-        const durationMs = durationMinutes * 60 * 1000;
-        const timeMin = candidates[0]!;
-        const timeMax = new Date(candidates[candidates.length - 1]!.getTime() + durationMs);
+    type CalendarEventLite = {
+      id?: string;
+      htmlLink?: string;
+      conferenceData?: { entryPoints?: Array<{ uri?: string }> };
+    };
 
-        const busyIntervals = await listBusyIntervals(accessToken, timeMin, timeMax, calendarId, log);
-        const busyRanges = toBusyRanges(busyIntervals);
+    type ScheduleResultPayload = {
+      scheduledStart: string;
+      scheduledEnd: string;
+      event: CalendarEventLite;
+      meetLink?: string;
+      checked: number;
+      busyCount: number;
+    };
 
-        // Iterate candidates; only attempt creation for slots not overlapping known busy ranges.
-        let checked = 0;
-        for (const start of candidates) {
-          checked += 1;
+    let result: { data: ScheduleResultPayload; replayed: boolean };
 
-          const picked = pickFirstAvailableStart([start], durationMinutes, busyRanges);
-          if (!picked) continue;
+    try {
+      result = await withIdempotency<ScheduleResultPayload>(
+        { uid: user.uid, route: "calendar.schedule", key: idempotencyKey, log },
+        async () => {
+          const calendarId = body.calendarId || "primary";
+          const durationMs = durationMinutes * 60 * 1000;
+          const timeMin = candidates[0]!;
+          const timeMax = new Date(candidates[candidates.length - 1]!.getTime() + durationMs);
 
-          const createResult = await createMeetingWithAvailabilityCheck(
-            accessToken,
+          const busyIntervals = await listBusyIntervals(accessToken, timeMin, timeMax, calendarId, log);
+          const busyRanges = toBusyRanges(busyIntervals);
+
+          // Iterate candidates; only attempt creation for slots not overlapping known busy ranges.
+          let checked = 0;
+          for (const start of candidates) {
+            checked += 1;
+
+            const picked = pickFirstAvailableStart([start], durationMinutes, busyRanges);
+            if (!picked) continue;
+
+            const createResult = await createMeetingWithAvailabilityCheck(
+              accessToken,
+              {
+                ...body.event,
+                start: { dateTime: picked.start.toISOString() },
+                end: { dateTime: picked.end.toISOString() },
+              },
+              calendarId,
+              log
+            );
+
+            if (createResult.success && createResult.event) {
+              const meetLink =
+                createResult.event.conferenceData?.entryPoints?.find((p) => p.uri)?.uri || undefined;
+              return {
+                scheduledStart: picked.start.toISOString(),
+                scheduledEnd: picked.end.toISOString(),
+                event: createResult.event,
+                meetLink,
+                checked,
+                busyCount: busyRanges.length,
+              };
+            }
+          }
+
+          throw new ApiError(409, "No available slot found.", {
+            checked: candidates.length,
+            busyCount: busyRanges.length,
+          });
+        }
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && body.runId && body.leadDocId) {
+        const checked = typeof error.details?.checked === "number" ? error.details.checked : candidates.length;
+        const busyCount = typeof error.details?.busyCount === "number" ? error.details.busyCount : undefined;
+        try {
+          await recordLeadActionReceipt(
             {
-              ...body.event,
-              start: { dateTime: picked.start.toISOString() },
-              end: { dateTime: picked.end.toISOString() },
+              runId: body.runId,
+              leadDocId: body.leadDocId,
+              actionId: body.receiptActionId || "calendar.schedule",
+              uid: user.uid,
+              correlationId,
+              status: "skipped",
+              dryRun: false,
+              replayed: false,
+              idempotencyKey,
+              data: {
+                reason: "no_slot",
+                checked,
+                busyCount,
+              },
             },
-            calendarId,
             log
           );
-
-          if (createResult.success && createResult.event) {
-            const meetLink =
-              createResult.event.conferenceData?.entryPoints?.find((p) => p.uri)?.uri || undefined;
-            return {
-              scheduledStart: picked.start.toISOString(),
-              scheduledEnd: picked.end.toISOString(),
-              event: createResult.event,
-              meetLink,
-              checked,
-              busyCount: busyRanges.length,
-            };
-          }
+        } catch (receiptError: unknown) {
+          log.warn("calendar.schedule.no_slot_receipt_failed", {
+            runId: body.runId,
+            leadDocId: body.leadDocId,
+            reason: receiptError instanceof Error ? receiptError.message : String(receiptError),
+          });
         }
-
-        throw new ApiError(409, "No available slot found.", {
-          checked: candidates.length,
-          busyCount: busyRanges.length,
-        });
       }
-    );
+      throw error;
+    }
 
     const responsePayload = {
       success: true,

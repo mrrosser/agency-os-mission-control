@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/providers/auth-provider";
+import { getPlacesPhotoBlob } from "@/lib/google/places-photo-client";
 import { ExternalLink } from "lucide-react";
 
 export type ReceiptActionStatus = "complete" | "error" | "skipped" | "simulated";
@@ -26,8 +27,10 @@ export interface LeadReceiptLeadView {
   companyName?: string;
   founderName?: string;
   email?: string;
+  emailCandidates?: Array<{ value: string; source: string; confidence: string }>;
   phone?: string;
   phones?: string[];
+  phoneCandidates?: Array<{ value: string; source: string; confidence: string }>;
   website?: string;
   googleMapsUrl?: string;
   placePhotos?: Array<{
@@ -108,6 +111,40 @@ function stripAttributionHtml(value: string): string {
   return value.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 }
 
+function contactCandidatesFromLead(lead: LeadReceiptLeadView | null): {
+  emails: Array<{ value: string; source: string; confidence: string }>;
+  phones: Array<{ value: string; source: string; confidence: string }>;
+} {
+  if (!lead) return { emails: [], phones: [] };
+  const emails =
+    Array.isArray(lead.emailCandidates) && lead.emailCandidates.length > 0
+      ? lead.emailCandidates
+      : lead.email
+        ? [{ value: lead.email, source: lead.source || "unknown", confidence: "unknown" }]
+        : [];
+  const phones =
+    Array.isArray(lead.phoneCandidates) && lead.phoneCandidates.length > 0
+      ? lead.phoneCandidates
+      : lead.phone
+        ? [{ value: lead.phone, source: lead.source || "unknown", confidence: "unknown" }]
+        : Array.isArray(lead.phones)
+          ? lead.phones.map((value) => ({ value, source: lead.source || "unknown", confidence: "unknown" }))
+          : [];
+  return { emails, phones };
+}
+
+function actionReasonText(action: LeadReceiptActionView): string | null {
+  const data = action.data || {};
+  const reason = typeof data.reason === "string" ? data.reason : null;
+  if (!reason) return null;
+  if (reason === "no_slot") {
+    const checked = typeof data.checked === "number" ? data.checked : null;
+    const busyCount = typeof data.busyCount === "number" ? data.busyCount : null;
+    return `No slot found${checked ? ` (checked ${checked})` : ""}${busyCount !== null ? ` • busy ${busyCount}` : ""}`;
+  }
+  return reason;
+}
+
 export function LeadReceiptDrawer(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -120,13 +157,13 @@ export function LeadReceiptDrawer(props: {
   const websiteHref = normalizeHttpUrl(props.lead?.website);
   const socials = props.lead?.socialLinks || {};
   const placePhotos = useMemo(() => props.lead?.placePhotos ?? [], [props.lead?.placePhotos]);
+  const contacts = useMemo(() => contactCandidatesFromLead(props.lead), [props.lead]);
 
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
   const [photoError, setPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const controller = new AbortController();
     const createdUrls: string[] = [];
 
     async function load() {
@@ -144,19 +181,11 @@ export function LeadReceiptDrawer(props: {
       for (const photo of placePhotos.slice(0, 3)) {
         if (cancelled) break;
         const maxWidth = Math.max(240, Math.min(720, photo.width || 512));
-        const res = await fetch(
-          `/api/google/places/photo?ref=${encodeURIComponent(photo.ref)}&maxWidth=${encodeURIComponent(String(maxWidth))}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "X-Correlation-Id": crypto.randomUUID(),
-            },
-            signal: controller.signal,
-          }
-        );
-        if (!res.ok) continue;
-        const blob = await res.blob();
+        const blob = await getPlacesPhotoBlob({
+          photoRef: photo.ref,
+          maxWidth,
+          idToken: token,
+        });
         const url = URL.createObjectURL(blob);
         createdUrls.push(url);
         next[photo.ref] = url;
@@ -172,7 +201,6 @@ export function LeadReceiptDrawer(props: {
 
     return () => {
       cancelled = true;
-      controller.abort();
       createdUrls.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [user, props.open, props.lead?.leadDocId, placePhotos]);
@@ -329,6 +357,56 @@ export function LeadReceiptDrawer(props: {
                   <div className="mt-1 whitespace-pre-line">{props.lead.openingHours.join("\n")}</div>
                 </div>
               )}
+
+              {(contacts.emails.length > 0 || contacts.phones.length > 0) && (
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Emails</div>
+                    {contacts.emails.length === 0 ? (
+                      <div className="text-xs text-zinc-500">No email candidates.</div>
+                    ) : (
+                      contacts.emails.slice(0, 4).map((item) => (
+                        <div key={`email-${item.value}`} className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/30 px-2 py-1 text-xs">
+                          <a className="truncate text-zinc-200 hover:underline" href={`mailto:${item.value}`}>
+                            {item.value}
+                          </a>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
+                              {item.source}
+                            </Badge>
+                            <Badge variant="secondary" className="bg-zinc-900 text-zinc-400">
+                              {item.confidence}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Phones</div>
+                    {contacts.phones.length === 0 ? (
+                      <div className="text-xs text-zinc-500">No phone candidates.</div>
+                    ) : (
+                      contacts.phones.slice(0, 4).map((item) => (
+                        <div key={`phone-${item.value}`} className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/30 px-2 py-1 text-xs">
+                          <a className="truncate text-zinc-200 hover:underline" href={`tel:${item.value}`}>
+                            {item.value}
+                          </a>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
+                              {item.source}
+                            </Badge>
+                            <Badge variant="secondary" className="bg-zinc-900 text-zinc-400">
+                              {item.confidence}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {actions.length === 0 ? (
@@ -352,6 +430,9 @@ export function LeadReceiptDrawer(props: {
                     <div className="mt-2 text-xs text-zinc-500">
                       {action.updatedAt ? `updated ${new Date(action.updatedAt).toLocaleString()}` : "no timestamp"}
                     </div>
+                    {actionReasonText(action) && (
+                      <div className="mt-2 text-xs text-zinc-400">{actionReasonText(action)}</div>
+                    )}
                     {links.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {links.map((link) => (

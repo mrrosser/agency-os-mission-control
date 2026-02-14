@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AfroGlyph, type AfroGlyphVariant } from "@/components/branding/AfroGlyph";
 import { useAuth } from "@/components/providers/auth-provider";
+import { getPlacesPhotoBlob } from "@/lib/google/places-photo-client";
 
 export type LeadJourneyStepKey =
     | "source"
@@ -83,36 +84,53 @@ function PlacesPhotoThumb(props: { photoRef?: string; companyName: string }) {
     const { user } = useAuth();
     const [src, setSrc] = useState<string | null>(null);
     const [failed, setFailed] = useState(false);
+    const [visible, setVisible] = useState(false);
+    const containerRef = useRef<HTMLDivElement | null>(null);
 
     const photoRef = (props.photoRef || "").trim();
 
     useEffect(() => {
+        setSrc(null);
+        setFailed(false);
+        setVisible(false);
+    }, [photoRef]);
+
+    useEffect(() => {
+        if (!photoRef) return;
+        if (visible) return;
+        const el = containerRef.current;
+        if (!el) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) {
+                    setVisible(true);
+                    observer.disconnect();
+                }
+            },
+            { rootMargin: "240px" }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [photoRef, visible]);
+
+    useEffect(() => {
         if (!user) return;
         if (!photoRef) return;
+        if (!visible) return;
         if (failed) return;
 
         const authedUser = user;
         let cancelled = false;
-        const controller = new AbortController();
         let blobUrl: string | null = null;
 
         async function load() {
             const token = await authedUser.getIdToken();
-            const res = await fetch(
-                `/api/google/places/photo?ref=${encodeURIComponent(photoRef)}&maxWidth=240`,
-                {
-                    method: "GET",
-                    headers: {
-                        Authorization: `Bearer ${token}`,
-                        "X-Correlation-Id": crypto.randomUUID(),
-                    },
-                    signal: controller.signal,
-                }
-            );
-            if (!res.ok) {
-                throw new Error(`photo fetch failed (${res.status})`);
-            }
-            const blob = await res.blob();
+            const blob = await getPlacesPhotoBlob({
+                photoRef,
+                maxWidth: 240,
+                idToken: token,
+            });
             blobUrl = URL.createObjectURL(blob);
             if (!cancelled) setSrc(blobUrl);
         }
@@ -123,23 +141,26 @@ function PlacesPhotoThumb(props: { photoRef?: string; companyName: string }) {
 
         return () => {
             cancelled = true;
-            controller.abort();
             if (blobUrl) URL.revokeObjectURL(blobUrl);
         };
-    }, [user, photoRef, failed]);
+    }, [user, photoRef, visible, failed]);
 
     if (!photoRef) return null;
 
-    return src ? (
-        // eslint-disable-next-line @next/next/no-img-element -- blob URL is generated at runtime (Next/Image can't optimize it).
-        <img
-            src={src}
-            alt={`${props.companyName} photo`}
-            className="h-10 w-10 shrink-0 rounded-lg border border-zinc-800 object-cover"
-            loading="lazy"
-        />
-    ) : (
-        <div className="h-10 w-10 shrink-0 animate-pulse rounded-lg border border-zinc-800 bg-zinc-900/50" />
+    return (
+        <div ref={containerRef} className="h-10 w-10 shrink-0">
+            {src ? (
+                // eslint-disable-next-line @next/next/no-img-element -- blob URL is generated at runtime (Next/Image can't optimize it).
+                <img
+                    src={src}
+                    alt={`${props.companyName} photo`}
+                    className="h-full w-full rounded-lg border border-zinc-800 object-cover"
+                    loading="lazy"
+                />
+            ) : (
+                <div className="h-full w-full animate-pulse rounded-lg border border-zinc-800 bg-zinc-900/50" />
+            )}
+        </div>
     );
 }
 

@@ -1,5 +1,13 @@
 import type { Logger } from "@/lib/logging";
-import type { LeadCandidate, LeadScoringCriteria, LeadSource, LeadSourceRequest } from "@/lib/leads/types";
+import type {
+    LeadCandidate,
+    LeadContactCandidate,
+    LeadContactConfidence,
+    LeadContactSource,
+    LeadScoringCriteria,
+    LeadSource,
+    LeadSourceRequest,
+} from "@/lib/leads/types";
 import { scoreLead } from "@/lib/leads/scoring";
 import { fetchGooglePlacesLeads } from "@/lib/leads/providers/google-places";
 import { fetchFirestoreLeads } from "@/lib/leads/providers/firestore";
@@ -49,6 +57,123 @@ function buildDedupeKey(lead: LeadCandidate): string {
     if (name && domain) return `nd:${name}|${domain}`;
     // Last resort: stable source id.
     return `id:${lead.source}:${lead.id}`;
+}
+
+function confidenceRank(value: LeadContactConfidence): number {
+    switch (value) {
+        case "high":
+            return 3;
+        case "medium":
+            return 2;
+        case "low":
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+function normalizeEmail(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+function normalizePhone(value: string): string {
+    return value.trim().replace(/[^\d+]/g, "");
+}
+
+function mergeCandidate(
+    map: Map<string, LeadContactCandidate>,
+    candidate: LeadContactCandidate,
+    key: string
+): void {
+    const existing = map.get(key);
+    if (!existing) {
+        map.set(key, candidate);
+        return;
+    }
+    const a = confidenceRank(existing.confidence);
+    const b = confidenceRank(candidate.confidence);
+    if (b > a) {
+        map.set(key, candidate);
+    }
+}
+
+function buildEmailCandidates(lead: LeadCandidate): LeadContactCandidate[] | undefined {
+    const map = new Map<string, LeadContactCandidate>();
+
+    const primary = (lead.email || "").trim();
+    if (primary) {
+        const source: LeadContactSource = lead.source === "firestore" ? "firestore" : "firecrawl";
+        const confidence: LeadContactConfidence = lead.source === "firestore" ? "high" : "medium";
+        mergeCandidate(
+            map,
+            { value: primary, source, confidence },
+            normalizeEmail(primary)
+        );
+    }
+
+    if (Array.isArray(lead.websiteEmails)) {
+        for (const email of lead.websiteEmails) {
+            const trimmed = (email || "").trim();
+            if (!trimmed) continue;
+            mergeCandidate(
+                map,
+                { value: trimmed, source: "firecrawl", confidence: "medium" },
+                normalizeEmail(trimmed)
+            );
+        }
+    }
+
+    const values = Array.from(map.values());
+    if (values.length === 0) return undefined;
+    values.sort((a, b) => confidenceRank(b.confidence) - confidenceRank(a.confidence));
+    return values;
+}
+
+function buildPhoneCandidates(lead: LeadCandidate): LeadContactCandidate[] | undefined {
+    const map = new Map<string, LeadContactCandidate>();
+
+    const primary = (lead.phone || "").trim();
+    if (primary) {
+        const source: LeadContactSource = lead.source === "googlePlaces" ? "googlePlaces" : "firestore";
+        mergeCandidate(
+            map,
+            { value: primary, source, confidence: "high" },
+            normalizePhone(primary)
+        );
+    }
+
+    if (Array.isArray(lead.phones)) {
+        for (const phone of lead.phones) {
+            const trimmed = (phone || "").trim();
+            if (!trimmed) continue;
+            const source: LeadContactSource =
+                lead.source === "googlePlaces"
+                    ? "firecrawl"
+                    : primary
+                        ? "firestore"
+                        : "firecrawl";
+            const confidence: LeadContactConfidence =
+                source === "firestore" ? "high" : "medium";
+            mergeCandidate(
+                map,
+                { value: trimmed, source, confidence },
+                normalizePhone(trimmed)
+            );
+        }
+    }
+
+    const values = Array.from(map.values());
+    if (values.length === 0) return undefined;
+    values.sort((a, b) => confidenceRank(b.confidence) - confidenceRank(a.confidence));
+    return values;
+}
+
+function withContactCandidates(lead: LeadCandidate): LeadCandidate {
+    return {
+        ...lead,
+        emailCandidates: buildEmailCandidates(lead),
+        phoneCandidates: buildPhoneCandidates(lead),
+    };
 }
 
 export async function sourceLeads(
@@ -136,7 +261,9 @@ export async function sourceLeads(
         location: request.location,
     };
 
-    const scored = enrichedLeads.map((lead) => {
+    const leadsWithCandidates = enrichedLeads.map(withContactCandidates);
+
+    const scored = leadsWithCandidates.map((lead) => {
         const result = scoreLead(lead, criteria);
         return {
             ...lead,

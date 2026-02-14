@@ -1,5 +1,14 @@
 export type LeadSource = "googlePlaces" | "firestore";
 
+export type LeadContactSource = "googlePlaces" | "firecrawl" | "firestore";
+export type LeadContactConfidence = "high" | "medium" | "low";
+
+export interface LeadContactCandidate {
+    value: string;
+    source: LeadContactSource;
+    confidence: LeadContactConfidence;
+}
+
 export interface LeadScoreSignals {
     industryMatch: boolean;
     keywordMatch: boolean;
@@ -23,8 +32,10 @@ export interface LeadCandidate {
     companyName: string;
     founderName?: string;
     email?: string;
+    emailCandidates?: LeadContactCandidate[];
     phone?: string;
     phones?: string[];
+    phoneCandidates?: LeadContactCandidate[];
     website?: string;
     googleMapsUrl?: string;
     placePhotos?: PlacePhotoRef[];

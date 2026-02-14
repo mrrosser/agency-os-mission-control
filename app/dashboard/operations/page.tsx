@@ -1925,26 +1925,164 @@ export default function OperationsPage() {
         receiptLeads.find((lead) => lead.leadDocId === selectedReceiptLeadId || lead.id === selectedReceiptLeadId) ||
         null;
 
-    return (
-        <div className="min-h-screen bg-black p-6 md:p-8">
-            <div className="max-w-7xl mx-auto space-y-6">
-                {/* Header */}
-                <div className="flex items-center justify-between">
-                    <div className="space-y-1">
-                        <h1 className="text-3xl font-bold text-white">Lead Engine</h1>
-                        <p className="text-zinc-400">Source, score, and outreach to your best leads</p>
-                    </div>
-                    <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <Activity className={`h-4 w-4 ${user ? 'text-green-500' : 'text-red-500'}`} />
-                        <span className={`text-sm font-medium ${user ? 'text-green-500' : 'text-red-500'}`}>
-                            {user ? 'Outreach Stack Online' : 'Not Signed In'}
-                        </span>
-                    </div>
+    function Header() {
+        return (
+            <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                    <h1 className="text-3xl font-bold text-white">Lead Engine</h1>
+                    <p className="text-zinc-400">Source, score, and outreach to your best leads</p>
                 </div>
+                <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-950 border border-zinc-800">
+                    <Activity className={`h-4 w-4 ${user ? 'text-green-500' : 'text-red-500'}`} />
+                    <span className={`text-sm font-medium ${user ? 'text-green-500' : 'text-red-500'}`}>
+                        {user ? 'Outreach Stack Online' : 'Not Signed In'}
+                    </span>
+                </div>
+            </div>
+        );
+    }
 
-                <div className="grid gap-6 lg:grid-cols-3">
-                    {/* Control Panel */}
-                    <div className="lg:col-span-1">
+    function MainPanel() {
+        return (
+            <div className="lg:col-span-2 space-y-6">
+                <RunDiagnostics diagnostics={diagnostics} />
+                <LeadJourney
+                    journeys={journeys}
+                    runId={sourceRunId}
+                    warnings={sourceWarnings}
+                    selectedLeadId={selectedReceiptLeadId}
+                    onViewDetails={(leadId) => setSelectedReceiptLeadId(leadId)}
+                />
+
+                <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
+                    <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+                        <div className="flex items-center gap-2">
+                            <Terminal className="h-4 w-4 text-zinc-400" />
+                            <span className="text-sm font-mono text-zinc-400">Live Lead Run Logs</span>
+                        </div>
+                        {lastErrorMessage && (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                onClick={() => {
+                                    reportClientError(lastErrorMessage, {
+                                        source: "operations.manual_report",
+                                        runId: sourceRunId || null,
+                                    });
+                                    toast.success("Error reported for triage");
+                                }}
+                            >
+                                <Bug className="mr-1 h-3.5 w-3.5" />
+                                Report This
+                            </Button>
+                        )}
+                        {isRunning && (
+                            <div className="flex items-center gap-2">
+                                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+                                <span className="text-xs text-green-500 font-mono">RUNNING</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <CardContent className="p-0">
+                        <div className="h-[500px] overflow-y-auto bg-black font-mono text-sm">
+                            <div className="p-6 space-y-2">
+                                {logs.length === 0 ? (
+                                    <div className="flex items-center gap-2 text-zinc-600">
+                                        <AlertCircle className="h-4 w-4" />
+                                        <span>Ready to run. Click &quot;Run Lead Engine&quot; to begin...</span>
+                                    </div>
+                                ) : (
+                                    logs.map((log, i) => (
+                                        <div
+                                            key={i}
+                                            className={`flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${log.includes('✓') ? 'text-green-400' :
+                                                log.includes('⚠') ? 'text-yellow-400' :
+                                                    log.includes('❌') ? 'text-red-400' :
+                                                        log.includes('🎉') ? 'text-blue-400' :
+                                                            'text-zinc-300'
+                                                }`}
+                                        >
+                                            {log.includes('✓') && <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />}
+                                            <span className="flex-1 whitespace-pre-wrap">{log}</span>
+                                        </div>
+                                    ))
+                                )}
+                                {isRunning && (
+                                    <div className="flex items-center gap-2 text-blue-400">
+                                        <div className="h-2 w-2 rounded-full bg-blue-400 animate-pulse"></div>
+                                        <span className="animate-pulse">_</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {sourceRunId && (
+                    <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
+                        <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
+                            <span className="text-sm font-medium text-zinc-300">Error Triage</span>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                onClick={() => void loadTelemetryGroups(sourceRunId)}
+                                disabled={loadingTelemetry}
+                            >
+                                {loadingTelemetry ? "Loading..." : "Refresh"}
+                            </Button>
+                        </div>
+                        <CardContent className="p-4">
+                            {telemetryGroups.length === 0 ? (
+                                <p className="text-sm text-zinc-500">
+                                    {loadingTelemetry
+                                        ? "Loading telemetry groups..."
+                                        : "No telemetry groups found for this run yet."}
+                                </p>
+                            ) : (
+                                <div className="space-y-2">
+                                    {telemetryGroups.map((group) => (
+                                        <div key={group.fingerprint} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <p className="text-sm text-zinc-200">
+                                                    {group.sample?.message || "Telemetry group"}
+                                                </p>
+                                                <span className="text-xs text-zinc-500">x{group.count}</span>
+                                            </div>
+                                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                                {group.triage?.issueUrl ? (
+                                                    <a
+                                                        href={group.triage.issueUrl}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                                                    >
+                                                        GitHub Issue #{group.triage.issueNumber || "?"}
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-zinc-400">Issue pending triage</span>
+                                                )}
+                                                <span className="text-zinc-500">status: {group.triage?.status || "new"}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+        );
+    }
+
+    
+
+    function ControlPanel() {
+        return (
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
                             <CardContent className="p-6 space-y-6">
                                 <div className="space-y-2">
@@ -2588,141 +2726,21 @@ export default function OperationsPage() {
                                 )}
                             </CardContent>
                         </Card>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-black p-6 md:p-8">
+            <div className="max-w-7xl mx-auto space-y-6">
+                <Header />
+
+                <div className="grid gap-6 lg:grid-cols-3">
+                    {/* Control Panel */}
+                    <div className="lg:col-span-1">
+                        <ControlPanel />
                     </div>
 
-                     {/* Lead Journey + Terminal */}
-                     <div className="lg:col-span-2 space-y-6">
-                        <RunDiagnostics diagnostics={diagnostics} />
-                         <LeadJourney
-                             journeys={journeys}
-                             runId={sourceRunId}
-                             warnings={sourceWarnings}
-                             selectedLeadId={selectedReceiptLeadId}
-                             onViewDetails={(leadId) => setSelectedReceiptLeadId(leadId)}
-                         />
-
-                        <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
-                            <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
-                                <div className="flex items-center gap-2">
-                                    <Terminal className="h-4 w-4 text-zinc-400" />
-                                    <span className="text-sm font-mono text-zinc-400">Live Lead Run Logs</span>
-                                </div>
-                                {lastErrorMessage && (
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                        onClick={() => {
-                                            reportClientError(lastErrorMessage, {
-                                                source: "operations.manual_report",
-                                                runId: sourceRunId || null,
-                                            });
-                                            toast.success("Error reported for triage");
-                                        }}
-                                    >
-                                        <Bug className="mr-1 h-3.5 w-3.5" />
-                                        Report This
-                                    </Button>
-                                )}
-                                {isRunning && (
-                                    <div className="flex items-center gap-2">
-                                        <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
-                                        <span className="text-xs text-green-500 font-mono">RUNNING</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            <CardContent className="p-0">
-                                <div className="h-[500px] overflow-y-auto bg-black font-mono text-sm">
-                                    <div className="p-6 space-y-2">
-                                        {logs.length === 0 ? (
-                                            <div className="flex items-center gap-2 text-zinc-600">
-                                                <AlertCircle className="h-4 w-4" />
-                                                <span>Ready to run. Click &quot;Run Lead Engine&quot; to begin...</span>
-                                            </div>
-                                        ) : (
-                                            logs.map((log, i) => (
-                                                <div
-                                                    key={i}
-                                                    className={`flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-300 ${log.includes('✓') ? 'text-green-400' :
-                                                        log.includes('⚠') ? 'text-yellow-400' :
-                                                            log.includes('❌') ? 'text-red-400' :
-                                                                log.includes('🎉') ? 'text-blue-400' :
-                                                                    'text-zinc-300'
-                                                        }`}
-                                                >
-                                                    {log.includes('✓') && <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />}
-                                                    <span className="flex-1 whitespace-pre-wrap">{log}</span>
-                                                </div>
-                                            ))
-                                        )}
-                                        {isRunning && (
-                                            <div className="flex items-center gap-2 text-blue-400">
-                                                <div className="h-2 w-2 rounded-full bg-blue-400 animate-pulse"></div>
-                                                <span className="animate-pulse">_</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {sourceRunId && (
-                            <Card className="bg-zinc-950 border-zinc-800 shadow-lg overflow-hidden">
-                                <div className="flex items-center justify-between p-4 border-b border-zinc-800 bg-zinc-900/50">
-                                    <span className="text-sm font-medium text-zinc-300">Error Triage</span>
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-8 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                        onClick={() => void loadTelemetryGroups(sourceRunId)}
-                                        disabled={loadingTelemetry}
-                                    >
-                                        {loadingTelemetry ? "Loading..." : "Refresh"}
-                                    </Button>
-                                </div>
-                                <CardContent className="p-4">
-                                    {telemetryGroups.length === 0 ? (
-                                        <p className="text-sm text-zinc-500">
-                                            {loadingTelemetry
-                                                ? "Loading telemetry groups..."
-                                                : "No telemetry groups found for this run yet."}
-                                        </p>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {telemetryGroups.map((group) => (
-                                                <div key={group.fingerprint} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-                                                    <div className="flex items-center justify-between gap-3">
-                                                        <p className="text-sm text-zinc-200">
-                                                            {group.sample?.message || "Telemetry group"}
-                                                        </p>
-                                                        <span className="text-xs text-zinc-500">x{group.count}</span>
-                                                    </div>
-                                                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                                                        {group.triage?.issueUrl ? (
-                                                            <a
-                                                                href={group.triage.issueUrl}
-                                                                target="_blank"
-                                                                rel="noreferrer"
-                                                                className="text-blue-300 hover:text-blue-200 underline underline-offset-2"
-                                                            >
-                                                                GitHub Issue #{group.triage.issueNumber || "?"}
-                                                            </a>
-                                                        ) : (
-                                                            <span className="text-zinc-400">Issue pending triage</span>
-                                                        )}
-                                                        <span className="text-zinc-500">status: {group.triage?.status || "new"}</span>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        )}
-                    </div>
+                    <MainPanel />
                 </div>
             </div>
             <LeadReceiptDrawer

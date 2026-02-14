@@ -1,9 +1,9 @@
 # Full Audit Report (2026-02-13)
 
 ## Baseline Evidence
-- RT loop: see `docs/reports/latest-run.md`
-- Security scan: see `.security/reports/npm-audit.txt`
-- Playwright: `npm run test:pw` passes (local dev server)
+- RT loop: PASS (RUN_ID=20260213-204013-2117). See `docs/reports/latest-run.md`.
+- Security scan: `npm audit` clean. See `.security/reports/npm-audit.txt`. (Local secrets scan requires `gitleaks`.)
+- Playwright (optional): run `npm run test:pw` (requires Playwright browsers installed).
 
 ## Current Product Surface (High Level)
 - Auth: Google + Apple sign-in
@@ -12,9 +12,12 @@
 - Ops: telemetry groups + lead run receipts/audit drawers + quota alerts
 
 ## Changes Shipped In This Audit Sprint
-- Removed all current eslint warnings (hooks deps, unused vars, `any` types) and documented blob-image exceptions.
+- RT loop harness + CI gate: `scripts/loop/run.ps1`, `scripts/loop/run.sh`, `.github/workflows/rt-loop.yml`.
+- Dependency/security cleanup: `npm audit --audit-level=high` now clean.
+- Removed eslint warnings (hooks deps, unused vars, `any` types) and documented blob-image exceptions.
 - Optimized onboarding tour mounting to avoid secrets-status auto-fetch unless the tour is eligible to show.
 - Normalized Playwright local base URL to `http://localhost:3000` to avoid Next.js dev cross-origin warnings.
+- Repo hygiene: ignore scratch artifacts (`tmp_*`).
 
 ## Findings (Prioritized)
 
@@ -38,13 +41,13 @@
   - Practical response: keep Places for business discovery but add stronger on-page enrichment + contact extraction + verification.
 - Clay (workflow enrichment)
   - Gap: flexible multi-provider enrichment pipelines + table-first UX for bulk ops.
-  - Practical response: keep current “run” model but add enrichment stages (Places details -> Firecrawl -> optional verifier) with receipts + replay.
+  - Practical response: keep current "run" model but add enrichment stages (Places details -> Firecrawl -> optional verifier) with receipts + replay.
 - Instantly / Smartlead / Lemlist (cold outreach)
   - Gap: sequencing, deliverability tooling, unsubscribe handling, inbox rotation.
   - Practical response: start with follow-up scheduling + queued drafts (Gmail) before building a full sequencer.
 - Outreach / Salesloft (engagement + team workflow)
   - Gap: team assignment, tasks, SLAs, call logging, analytics dashboards.
-  - Practical response: focus on org-level templates, quotas, and auditability first; add “handoff to human” steps.
+  - Practical response: focus on org-level templates, quotas, and auditability first; add "handoff to human" steps.
 - HubSpot / Pipedrive (CRM)
   - Gap: canonical pipeline + dedupe + lifecycle + reporting.
   - Practical response: implement stable lead IDs, domain-based dedupe, and one-click export (CSV + webhook) before deep CRM integrations.
@@ -64,7 +67,7 @@
    - Break `app/dashboard/operations/page.tsx` into smaller components (query panel, templates, journey list, receipts/audit drawers).
 8) Add rate limiting for high-cost endpoints (Places + Firecrawl) keyed by uid/org + correlationId for tracing.
 9) Expand smoke tests for the top user flows (login -> first scan -> template save -> run receipts -> drawer opens).
-10) Add a lightweight in-app changelog banner after deploys to reduce "I don’t see the change" reports (ties to runId/buildId).
+10) Add a lightweight in-app changelog banner after deploys to reduce "I don't see the change" reports (ties to runId/buildId).
 
 ## Notes / Assumptions
 - OAuth verification blocks Drive scopes for external users until verified; app should degrade gracefully with Places-only sourcing and local uploads.

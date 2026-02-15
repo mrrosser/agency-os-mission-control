@@ -121,7 +121,8 @@ Notes:
   - `FOLLOWUPS_DRAIN_DELAY_SECONDS=30`
 
 Notes:
-- If follow-up queue env vars are not set, the worker will only trigger immediate runs (no future scheduling) to keep local dev safe.
+- If `FOLLOWUPS_TASK_QUEUE` is not set, the follow-up worker reuses the lead-run queue env vars (`LEAD_RUNS_TASK_QUEUE`, etc.).
+- If no queue env vars are set, the worker will only trigger immediate runs (no future scheduling) to keep local dev safe.
 - Org-level controls live at Settings -> Integrations -> Follow-up Automation.
 
 ## Troubleshooting

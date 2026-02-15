@@ -91,11 +91,15 @@ export async function triggerFollowupsWorker(args: {
   log?: Logger;
 }): Promise<"cloud_tasks" | "http" | "skipped"> {
   const projectId = projectIdFromEnv();
-  const queueId = process.env.FOLLOWUPS_TASK_QUEUE;
-  const queueLocation = process.env.FOLLOWUPS_TASK_LOCATION;
-  const serviceAccount = process.env.FOLLOWUPS_TASK_SERVICE_ACCOUNT;
+  // Allow follow-ups to reuse the lead-run queue when dedicated FOLLOWUPS_* env vars aren't set.
+  const queueId = process.env.FOLLOWUPS_TASK_QUEUE || process.env.LEAD_RUNS_TASK_QUEUE;
+  const queueLocation = process.env.FOLLOWUPS_TASK_LOCATION || process.env.LEAD_RUNS_TASK_LOCATION;
+  const serviceAccount = process.env.FOLLOWUPS_TASK_SERVICE_ACCOUNT || process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT;
 
-  const delaySeconds = Number.parseInt(process.env.FOLLOWUPS_TASK_DELAY_SECONDS || "0", 10);
+  const delaySeconds = Number.parseInt(
+    process.env.FOLLOWUPS_TASK_DELAY_SECONDS || process.env.LEAD_RUNS_TASK_DELAY_SECONDS || "0",
+    10
+  );
   const nowMs = Date.now();
   const scheduleAtMs =
     typeof args.scheduleAtMs === "number" && Number.isFinite(args.scheduleAtMs) ? args.scheduleAtMs : nowMs + Math.max(0, delaySeconds) * 1000;
@@ -187,4 +191,3 @@ export async function triggerFollowupsWorker(args: {
     return "skipped";
   }
 }
-

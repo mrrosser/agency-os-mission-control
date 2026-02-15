@@ -21,6 +21,7 @@ copy .env.local.example .env.local
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
+- Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
 4) Start dev server:
@@ -107,6 +108,21 @@ node scripts/telemetry-triage.js
 Notes:
 - If queue env vars are not set, worker dispatch falls back to internal HTTP trigger.
 - Alerts are written to `lead_run_alerts`, can be acknowledged in Operations, and escalate to telemetry if left open.
+
+## Follow-up Draft Queue + Limits (recommended defaults for 5-10 active users)
+- Queue dispatch:
+  - `FOLLOWUPS_TASK_QUEUE=followups-worker`
+  - `FOLLOWUPS_TASK_LOCATION=us-central1`
+  - `FOLLOWUPS_TASK_SERVICE_ACCOUNT=<cloud-run-invoker-sa@project.iam.gserviceaccount.com>`
+  - `FOLLOWUPS_TASK_DELAY_SECONDS=0`
+- Defaults (org settings override these):
+  - `FOLLOWUPS_AUTO_ENABLED=true`
+  - `FOLLOWUPS_MAX_TASKS_PER_INVOCATION=5`
+  - `FOLLOWUPS_DRAIN_DELAY_SECONDS=30`
+
+Notes:
+- If follow-up queue env vars are not set, the worker will only trigger immediate runs (no future scheduling) to keep local dev safe.
+- Org-level controls live at Settings -> Integrations -> Follow-up Automation.
 
 ## Troubleshooting
 - If `/api/*` requests return HTML (e.g. `Unexpected token '<'`) or 403s, the Firebase frameworks SSR service may not be invokable.

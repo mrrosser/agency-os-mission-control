@@ -24,6 +24,7 @@ import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/a
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { DncList } from "@/components/settings/DncList";
+import { FollowupAutomationSettings } from "@/components/settings/FollowupAutomationSettings";
 
 interface IdentityProfile {
     businessName: string;
@@ -820,6 +821,7 @@ export default function SettingsPage() {
                             </Card>
 
                             <DncList />
+                            <FollowupAutomationSettings />
                         </div>
                     </TabsContent>
 

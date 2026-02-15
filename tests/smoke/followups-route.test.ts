@@ -4,6 +4,7 @@ import { POST as WORKER_POST } from "@/app/api/outreach/followups/worker/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
 import { listFollowupTasks, queueFollowupDraftTasksForRun, processDueFollowupDraftTasks } from "@/lib/outreach/followups";
+import { getFollowupsOrgSettings } from "@/lib/outreach/followups-settings";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -19,11 +20,16 @@ vi.mock("@/lib/outreach/followups", () => ({
   processDueFollowupDraftTasks: vi.fn(),
 }));
 
+vi.mock("@/lib/outreach/followups-settings", () => ({
+  getFollowupsOrgSettings: vi.fn(),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const resolveOrgMock = vi.mocked(resolveLeadRunOrgId);
 const listMock = vi.mocked(listFollowupTasks);
 const queueMock = vi.mocked(queueFollowupDraftTasksForRun);
 const processMock = vi.mocked(processDueFollowupDraftTasks);
+const getFollowupsOrgSettingsMock = vi.mocked(getFollowupsOrgSettings);
 
 function createContext(params: Record<string, string> = {}) {
   return { params: Promise.resolve(params) };
@@ -34,6 +40,13 @@ describe("follow-up sequencing routes", () => {
     vi.restoreAllMocks();
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
     resolveOrgMock.mockResolvedValue("org-1");
+    // Keep these route tests focused on the API contract; scheduler behavior is covered separately.
+    getFollowupsOrgSettingsMock.mockResolvedValue({
+      orgId: "org-1",
+      autoEnabled: false,
+      maxTasksPerInvocation: 5,
+      drainDelaySeconds: 30,
+    });
   });
 
   it("lists tasks for a run", async () => {
@@ -118,4 +131,3 @@ describe("follow-up sequencing routes", () => {
     expect(processMock).toHaveBeenCalledOnce();
   });
 });
-

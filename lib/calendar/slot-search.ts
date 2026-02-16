@@ -8,6 +8,7 @@ export interface SlotSearchOptions {
   searchDays?: number;
   maxSlots?: number;
   anchorHour?: number;
+  includeWeekends?: boolean;
 }
 
 interface DateParts {
@@ -127,6 +128,7 @@ export function buildCandidateMeetingSlotsInTimeZone(
   const searchDays = options.searchDays ?? 7;
   const maxSlots = options.maxSlots ?? 40;
   const anchorHour = options.anchorHour ?? 14;
+  const includeWeekends = options.includeWeekends ?? false;
 
   // Validate timezone up-front with Intl.
   // Throws a RangeError for invalid IANA values.
@@ -134,7 +136,7 @@ export function buildCandidateMeetingSlotsInTimeZone(
 
   const nowParts = getTimeZoneDateParts(now, timeZone);
   let anchor = addDays(nowParts.year, nowParts.month, nowParts.day, leadTimeDays);
-  while (isWeekend(anchor.year, anchor.month, anchor.day)) {
+  while (!includeWeekends && isWeekend(anchor.year, anchor.month, anchor.day)) {
     anchor = addDays(anchor.year, anchor.month, anchor.day, 1);
   }
 
@@ -145,7 +147,7 @@ export function buildCandidateMeetingSlotsInTimeZone(
 
   for (let dayOffset = 0; dayOffset <= searchDays && slots.length < maxSlots; dayOffset++) {
     const ymd = addDays(anchor.year, anchor.month, anchor.day, dayOffset);
-    if (isWeekend(ymd.year, ymd.month, ymd.day)) continue;
+    if (!includeWeekends && isWeekend(ymd.year, ymd.month, ymd.day)) continue;
 
     let firstMinute = startMinuteBase;
     if (dayOffset === 0) {

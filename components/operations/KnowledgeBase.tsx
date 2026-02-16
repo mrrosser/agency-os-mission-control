@@ -19,6 +19,8 @@ interface DriveFile {
     webViewLink: string;
 }
 
+type DriveAccessIssue = "none" | "not_connected" | "verification_blocked" | "scope_missing" | "unknown";
+
 declare global {
     interface Window {
         gapi?: {
@@ -67,6 +69,27 @@ function mergeFiles(existing: DriveFile[], incoming: DriveFile[]): DriveFile[] {
     return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function classifyDriveAccessIssue(message: string): DriveAccessIssue {
+    const normalized = message.toLowerCase();
+    if (normalized.includes("not connected")) return "not_connected";
+    if (
+        normalized.includes("access blocked") ||
+        normalized.includes("unverified app") ||
+        normalized.includes("has not completed the google verification process") ||
+        normalized.includes("app is blocked")
+    ) {
+        return "verification_blocked";
+    }
+    if (
+        normalized.includes("insufficient authentication scopes") ||
+        normalized.includes("insufficient permissions") ||
+        normalized.includes("missing drive scope")
+    ) {
+        return "scope_missing";
+    }
+    return "unknown";
+}
+
 async function loadGoogleApiScript(): Promise<void> {
     if (typeof window === "undefined") return;
     if (window.gapi?.load) return;
@@ -113,6 +136,7 @@ export function KnowledgeBase() {
     const [pickerLoading, setPickerLoading] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [notConnected, setNotConnected] = useState(false);
+    const [accessIssue, setAccessIssue] = useState<DriveAccessIssue>("none");
     const [lastError, setLastError] = useState<string | null>(null);
     const [filter, setFilter] = useState("");
 
@@ -120,6 +144,7 @@ export function KnowledgeBase() {
         if (!user) return;
         setLoading(true);
         setNotConnected(false);
+        setAccessIssue("none");
         setLastError(null);
         try {
             const headers = await buildAuthHeaders(user);
@@ -140,8 +165,9 @@ export function KnowledgeBase() {
                 // 403 can be "not connected" OR "insufficient scopes" OR "API disabled". Only treat explicit
                 // "not connected" cases as disconnected so we don't mislead users.
                 if (response.status === 401 || response.status === 403) {
-                    const normalized = baseMessage.toLowerCase();
-                    if (normalized.includes("not connected")) {
+                    const issue = classifyDriveAccessIssue(baseMessage);
+                    setAccessIssue(issue);
+                    if (issue === "not_connected") {
                         setNotConnected(true);
                     }
                 }
@@ -164,6 +190,12 @@ export function KnowledgeBase() {
             const message = error instanceof Error ? error.message : String(error);
             console.error("Failed to fetch drive files", error);
             setLastError(message);
+            setAccessIssue((prev) => {
+                if (prev !== "none") return prev;
+                const issue = classifyDriveAccessIssue(message);
+                if (issue === "not_connected") setNotConnected(true);
+                return issue;
+            });
 
             // Best-effort client telemetry for caught UI errors.
             try {
@@ -199,6 +231,7 @@ export function KnowledgeBase() {
     const openPicker = useCallback(async () => {
         if (!user) return;
         setPickerLoading(true);
+        setAccessIssue("none");
         setLastError(null);
         try {
             const headers = await buildAuthHeaders(user);
@@ -223,8 +256,9 @@ export function KnowledgeBase() {
                 setLastError(message);
 
                 if (response.status === 401 || response.status === 403) {
-                    const normalized = baseMessage.toLowerCase();
-                    if (normalized.includes("not connected")) {
+                    const issue = classifyDriveAccessIssue(baseMessage);
+                    setAccessIssue(issue);
+                    if (issue === "not_connected") {
                         setNotConnected(true);
                     }
                 }
@@ -307,6 +341,12 @@ export function KnowledgeBase() {
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
             setLastError(message);
+            setAccessIssue((prev) => {
+                if (prev !== "none") return prev;
+                const issue = classifyDriveAccessIssue(message);
+                if (issue === "not_connected") setNotConnected(true);
+                return issue;
+            });
             console.error("Drive picker error", error);
 
             try {
@@ -389,6 +429,28 @@ export function KnowledgeBase() {
                     Use <span className="text-zinc-300">Browse Drive</span> for Google-native folder browsing + search.
                 </div>
 
+                {accessIssue === "verification_blocked" && (
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                        Google Drive access is blocked because the OAuth app is not fully verified for your account type.
+                        <a href="/help/google-oauth" className="ml-2 underline underline-offset-2 hover:text-amber-50">
+                            Open verification checklist
+                        </a>
+                    </div>
+                )}
+
+                {accessIssue === "scope_missing" && (
+                    <div className="rounded-md border border-zinc-700 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-300">
+                        Drive scope is missing on this Google connection.
+                        <Button
+                            variant="link"
+                            onClick={() => router.push("/dashboard/integrations")}
+                            className="ml-1 h-auto px-1 py-0 text-blue-400"
+                        >
+                            Reconnect with Drive + Calendar
+                        </Button>
+                    </div>
+                )}
+
                 <Input
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
@@ -411,6 +473,20 @@ export function KnowledgeBase() {
                                         className="text-blue-500"
                                     >
                                         Go to Integrations
+                                    </Button>
+                                </>
+                            ) : accessIssue === "verification_blocked" ? (
+                                <>
+                                    <p>Google blocked this Drive request until OAuth verification is complete.</p>
+                                    {lastError ? (
+                                        <p className="mt-2 text-xs text-zinc-600">{lastError}</p>
+                                    ) : null}
+                                    <Button
+                                        variant="link"
+                                        onClick={() => router.push("/help/google-oauth")}
+                                        className="text-blue-500"
+                                    >
+                                        View verification checklist
                                     </Button>
                                 </>
                             ) : lastError ? (

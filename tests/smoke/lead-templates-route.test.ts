@@ -181,6 +181,86 @@ describe("lead templates routes", () => {
     expect(txSet).toHaveBeenCalledOnce();
   });
 
+  it("coerces and clamps loose template payloads instead of rejecting", async () => {
+    const docRef = { id: "t-coerce" };
+
+    const templatesCollection = {
+      doc: vi.fn(() => docRef),
+    };
+
+    const identityDoc = {
+      collection: vi.fn(() => templatesCollection),
+    };
+
+    const identitiesCollection = {
+      doc: vi.fn(() => identityDoc),
+    };
+
+    const txGet = vi.fn(async () => ({ exists: false }));
+    const txSet = vi.fn();
+
+    const runTransaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      return fn({ get: txGet, set: txSet });
+    });
+
+    getAdminDbMock.mockReturnValue({
+      collection: vi.fn(() => identitiesCollection),
+      runTransaction,
+    } as unknown as ReturnType<typeof getAdminDb>);
+
+    const body = {
+      templateId: " t-coerce ",
+      name: "  Multi Channel New Orleans Search  ",
+      clientName: "  ACME Client  ",
+      params: {
+        query: "q".repeat(620),
+        industry: "Art Buyers ".repeat(20),
+        location: "New Orleans, Louisiana, United States".repeat(8),
+        limit: "99",
+        minScore: "-5",
+        includeEnrichment: "true",
+        sources: ["googlePlaces", "badSource", "firestore"],
+      },
+      outreach: {
+        businessKey: "RNG",
+        useSMS: "1",
+        useAvatar: "0",
+        useOutboundCall: "true",
+        draftFirst: "false",
+      },
+    };
+
+    const req = new Request("http://localhost/api/leads/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.template.templateId).toBe("t-coerce");
+    expect(data.template.name).toBe("Multi Channel New Orleans Search");
+    expect(data.template.clientName).toBe("ACME Client");
+    expect(data.template.params.limit).toBe(25);
+    expect(data.template.params.minScore).toBe(0);
+    expect(data.template.params.query.length).toBe(500);
+    expect(data.template.params.industry.length).toBe(80);
+    expect(data.template.params.location.length).toBe(120);
+    expect(data.template.params.includeEnrichment).toBe(true);
+    expect(data.template.params.sources).toEqual(["googlePlaces", "firestore"]);
+    expect(data.template.outreach.businessKey).toBe("rng");
+    expect(data.template.outreach.useSMS).toBe(true);
+    expect(data.template.outreach.useAvatar).toBe(false);
+    expect(data.template.outreach.useOutboundCall).toBe(true);
+    expect(data.template.outreach.draftFirst).toBe(false);
+    expect(txSet).toHaveBeenCalledOnce();
+  });
+
   it("deletes a template", async () => {
     const deleteMock = vi.fn(async () => undefined);
     const templateDoc = { delete: deleteMock };

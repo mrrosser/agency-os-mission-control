@@ -140,7 +140,8 @@ function actionReasonText(action: LeadReceiptActionView): string | null {
   if (reason === "no_slot") {
     const checked = typeof data.checked === "number" ? data.checked : null;
     const busyCount = typeof data.busyCount === "number" ? data.busyCount : null;
-    return `No slot found${checked ? ` (checked ${checked})` : ""}${busyCount !== null ? ` • busy ${busyCount}` : ""}`;
+    const windowsTried = typeof data.windowsTried === "number" ? data.windowsTried : null;
+    return `No slot found${checked ? ` (checked ${checked})` : ""}${busyCount !== null ? ` • busy ${busyCount}` : ""}${windowsTried !== null ? ` • windows ${windowsTried}` : ""}`;
   }
   return reason;
 }

@@ -24,6 +24,8 @@ export interface LeadJourneyEntry {
     leadId: string;
     companyName: string;
     founderName?: string;
+    email?: string;
+    phone?: string;
     score?: number;
     source?: string;
     website?: string;
@@ -78,6 +80,12 @@ function normalizeHttpUrl(value?: string): string | null {
     if (!trimmed) return null;
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
     return `https://${trimmed}`;
+}
+
+function normalizePhoneHref(value?: string): string | null {
+    const normalized = (value || "").trim().replace(/[^\d+]/g, "");
+    if (!normalized) return null;
+    return `tel:${normalized}`;
 }
 
 function PlacesPhotoThumb(props: { photoRef?: string; companyName: string }) {
@@ -212,32 +220,46 @@ export function LeadJourney({ journeys, runId, warnings, selectedLeadId, onViewD
                             >
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-start gap-3">
-                                        <PlacesPhotoThumb
-                                            photoRef={journey.placePhotos?.[0]?.ref}
-                                            companyName={journey.companyName}
-                                        />
-                                        <div>
-                                            {(() => {
-                                                const href = normalizeHttpUrl(journey.website) || normalizeHttpUrl(journey.googleMapsUrl);
-                                                if (!href) {
-                                                    return <p className="text-sm font-semibold text-white">{journey.companyName}</p>;
-                                                }
-                                                return (
-                                                    <a
-                                                        href={href}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="text-sm font-semibold text-white hover:underline underline-offset-4"
-                                                        title="Open lead website"
-                                                    >
-                                                        {journey.companyName}
-                                                    </a>
-                                                );
-                                            })()}
-                                            <p className="text-xs text-zinc-500">
-                                                {journey.founderName || "Lead"} • {journey.source || "source"} • Score {journey.score ?? 0}
-                                            </p>
-                                        </div>
+                                        {(() => {
+                                            const href = normalizeHttpUrl(journey.website) || normalizeHttpUrl(journey.googleMapsUrl);
+                                            const content = (
+                                                <>
+                                                    <PlacesPhotoThumb
+                                                        photoRef={journey.placePhotos?.[0]?.ref}
+                                                        companyName={journey.companyName}
+                                                    />
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-white group-hover:underline group-hover:underline-offset-4">
+                                                            {journey.companyName}
+                                                        </p>
+                                                        <p className="text-xs text-zinc-500">
+                                                            {journey.founderName || "Lead"} • {journey.source || "source"} • Score {journey.score ?? 0}
+                                                        </p>
+                                                        {(journey.email || journey.phone) && (
+                                                            <p className="text-[11px] text-zinc-500">
+                                                                {[journey.email, journey.phone].filter(Boolean).join(" • ")}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                </>
+                                            );
+
+                                            if (!href) {
+                                                return <div className="flex items-start gap-3">{content}</div>;
+                                            }
+
+                                            return (
+                                                <a
+                                                    href={href}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="group flex items-start gap-3 rounded-md px-1 py-0.5 transition-colors hover:bg-zinc-900/60"
+                                                    title="Open lead website"
+                                                >
+                                                    {content}
+                                                </a>
+                                            );
+                                        })()}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
@@ -271,6 +293,19 @@ export function LeadJourney({ journeys, runId, warnings, selectedLeadId, onViewD
                                                 <a href={normalizeHttpUrl(journey.googleMapsUrl) as string} target="_blank" rel="noreferrer">
                                                     <AfroGlyph variant="trend" className="mr-1 h-3.5 w-3.5" />
                                                     Maps
+                                                </a>
+                                            </Button>
+                                        )}
+                                        {normalizePhoneHref(journey.phone) && (
+                                            <Button
+                                                asChild
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                            >
+                                                <a href={normalizePhoneHref(journey.phone) as string}>
+                                                    <AfroGlyph variant="followup" className="mr-1 h-3.5 w-3.5" />
+                                                    Call
                                                 </a>
                                             </Button>
                                         )}

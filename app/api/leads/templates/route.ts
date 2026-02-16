@@ -22,35 +22,83 @@ type LeadRunTemplate = {
   };
 };
 
-const sourcesSchema = z.array(z.enum(["googlePlaces", "firestore"] satisfies LeadSource[]));
+function optionalTrimmedString(maxLength: number) {
+  return z.preprocess((value) => {
+    if (value == null) return undefined;
+    const normalized = String(value).trim();
+    if (!normalized) return undefined;
+    return normalized.slice(0, maxLength);
+  }, z.string().min(1).max(maxLength).optional());
+}
+
+function optionalBoundedInt(min: number, max: number) {
+  return z.preprocess((value) => {
+    if (value == null || value === "") return undefined;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return undefined;
+    const rounded = Math.round(parsed);
+    return Math.min(max, Math.max(min, rounded));
+  }, z.number().int().min(min).max(max).optional());
+}
+
+function optionalBooleanLike() {
+  return z.preprocess((value) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+      if (["false", "0", "no", "n", "off"].includes(normalized)) return false;
+    }
+    return undefined;
+  }, z.boolean().optional());
+}
+
+const sourcesSchema = z
+  .preprocess((value) => {
+    if (!Array.isArray(value)) return undefined;
+    return value
+      .map((source) => (typeof source === "string" ? source.trim() : ""))
+      .filter((source): source is LeadSource => source === "googlePlaces" || source === "firestore");
+  }, z.array(z.enum(["googlePlaces", "firestore"] satisfies LeadSource[])).optional())
+  .transform((sources) => (sources && sources.length > 0 ? sources : undefined));
+
+const templateNameSchema = z.preprocess(
+  (value) => String(value ?? "").trim().slice(0, 120),
+  z.string().min(1).max(120)
+);
 
 const paramsSchema = z.object({
   // Allow longer natural-language descriptions; downstream providers may further truncate.
-  query: z.string().min(1).max(500).optional(),
-  industry: z.string().min(1).max(80).optional(),
-  location: z.string().min(1).max(120).optional(),
+  query: optionalTrimmedString(500),
+  industry: optionalTrimmedString(80),
+  location: optionalTrimmedString(120),
   // Be tolerant to number-like strings coming from clients.
-  limit: z.coerce.number().int().min(1).max(25).optional(),
-  minScore: z.coerce.number().int().min(0).max(100).optional(),
+  limit: optionalBoundedInt(1, 25),
+  minScore: optionalBoundedInt(0, 100),
   sources: sourcesSchema.optional(),
-  includeEnrichment: z.boolean().optional(),
+  includeEnrichment: optionalBooleanLike(),
 });
 
 const outreachSchema = z
   .object({
-    businessKey: z.enum(["aicf", "rng", "rts", "rt"]).optional(),
-    useSMS: z.boolean().optional(),
-    useAvatar: z.boolean().optional(),
-    useOutboundCall: z.boolean().optional(),
-    draftFirst: z.boolean().optional(),
+    businessKey: z
+      .preprocess(
+        (value) => (typeof value === "string" ? value.trim().toLowerCase() : undefined),
+        z.enum(["aicf", "rng", "rts", "rt"]).optional()
+      )
+      .optional(),
+    useSMS: optionalBooleanLike(),
+    useAvatar: optionalBooleanLike(),
+    useOutboundCall: optionalBooleanLike(),
+    draftFirst: optionalBooleanLike(),
   })
   .optional();
 
 const bodySchema = z.object({
-  templateId: z.string().min(1).max(120).optional(),
+  templateId: optionalTrimmedString(120),
   // Allow slightly longer names since users often paste their ICP / query as the template label.
-  name: z.string().trim().min(1).max(120),
-  clientName: z.string().trim().min(1).max(120).optional(),
+  name: templateNameSchema,
+  clientName: optionalTrimmedString(120),
   params: paramsSchema,
   outreach: outreachSchema,
 });

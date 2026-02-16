@@ -366,6 +366,14 @@ async function processLead(
     meetLink = scheduleResult.meetLink;
   } else {
     diag.noSlot = 1;
+    log.warn("lead_runs.calendar.no_slot", {
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+      checkedCandidates: scheduleResult.checkedCandidates ?? 0,
+      busyCount: scheduleResult.busyCount ?? 0,
+      windowsTried: scheduleResult.windowsTried ?? 0,
+    });
     const calendarKey = buildLeadActionIdempotencyKey({
       runId: args.runId,
       leadDocId: args.leadDocId,
@@ -385,6 +393,9 @@ async function processLead(
         data: {
           reason: "no_slot",
           maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+          checked: scheduleResult.checkedCandidates,
+          busyCount: scheduleResult.busyCount,
+          windowsTried: scheduleResult.windowsTried,
         },
       },
       log

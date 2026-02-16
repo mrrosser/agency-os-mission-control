@@ -35,6 +35,7 @@ const slotSearchSchema = z.object({
   searchDays: z.number().int().min(1).max(45).optional(),
   maxSlots: z.number().int().min(1).max(300).optional(),
   anchorHour: z.number().int().min(0).max(23).optional(),
+  includeWeekends: z.boolean().optional(),
   // For deterministic tests only; omitted in production callers.
   nowIso: z.string().datetime().optional(),
 });
@@ -97,6 +98,7 @@ export const POST = withApiHandler(
           searchDays: body.slotSearch?.searchDays,
           maxSlots: body.slotSearch?.maxSlots,
           anchorHour: body.slotSearch?.anchorHour,
+          includeWeekends: body.slotSearch?.includeWeekends,
           now: body.slotSearch?.nowIso ? new Date(body.slotSearch.nowIso) : undefined,
         });
 
@@ -117,6 +119,7 @@ export const POST = withApiHandler(
               businessStartHour: body.slotSearch.businessStartHour,
               businessEndHour: body.slotSearch.businessEndHour,
               searchDays: body.slotSearch.searchDays,
+              includeWeekends: body.slotSearch.includeWeekends,
             }
           : undefined,
         calendarId: body.calendarId || "primary",

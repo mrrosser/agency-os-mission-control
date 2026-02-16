@@ -23,6 +23,19 @@ function uniq(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
+function hasSocialLinks(value: LeadCandidate["socialLinks"] | undefined): boolean {
+  return Boolean(value && Object.keys(value).length > 0);
+}
+
+function mergeSocialLinks(
+  base: LeadCandidate["socialLinks"] | undefined,
+  incoming: LeadCandidate["socialLinks"] | undefined
+): LeadCandidate["socialLinks"] | undefined {
+  if (!base && !incoming) return undefined;
+  const merged = { ...(base || {}), ...(incoming || {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function extractEmails(text: string): string[] {
   const matches = text.match(EMAIL_REGEX) || [];
   const normalized = matches
@@ -149,13 +162,11 @@ export async function enrichLeadWithFirecrawl(
   const domain = extractDomain(lead.website);
   const needsEmail = !lead.email;
   const needsPhone = !lead.phone;
-  const needsSocial = !lead.socialLinks || Object.keys(lead.socialLinks).length === 0;
+  const needsSocial = !hasSocialLinks(lead.socialLinks);
   const needsMetadata = !lead.websiteTitle || !lead.websiteDescription;
 
   // Still populate websiteDomain without spending credits.
   const base: LeadCandidate = domain && lead.websiteDomain !== domain ? { ...lead, websiteDomain: domain } : lead;
-  if (base.email) return base;
-
   if (!needsEmail && !needsPhone && !needsSocial && !needsMetadata) return base;
 
   log?.info("lead.enrich.firecrawl.start", { leadId: lead.id, website: lead.website });
@@ -175,12 +186,13 @@ export async function enrichLeadWithFirecrawl(
     const primaryPhone = phones[0];
     const links = Array.isArray(scrape.links) ? scrape.links : [];
     const socials = domain ? extractSocialLinks(links, domain) : undefined;
+    const emailResolved = Boolean(base.email || primaryEmail);
+    const phoneResolved = Boolean(base.phone || primaryPhone);
+    const socialResolved = hasSocialLinks(base.socialLinks) || hasSocialLinks(socials);
 
     let contactMarkdown = "";
-    const emailResolved = Boolean(base.email || primaryEmail);
-    // Only spend an extra scrape when we still haven't found an email.
-    // (Phone is usually already provided by Places; this keeps Firecrawl costs predictable.)
-    const shouldTryContact = Boolean(domain) && !emailResolved && (needsEmail || needsPhone || needsSocial);
+    // Only spend an extra scrape for the contact page when core contact fields are still incomplete.
+    const shouldTryContact = Boolean(domain) && (!emailResolved || !phoneResolved || !socialResolved);
 
     if (domain && shouldTryContact) {
       const contactUrl = pickContactPage(links, base.website as string, domain);
@@ -202,17 +214,24 @@ export async function enrichLeadWithFirecrawl(
     const mergedPhones = uniq([...(phones || []), ...(contactPhones || [])]).slice(0, 5);
     const bestEmail = base.email || mergedEmails[0];
     const bestPhone = base.phone || mergedPhones[0];
+    const mergedWebsiteEmails = uniq([...(base.websiteEmails || []), ...mergedEmails]).slice(0, 10);
+    const mergedPhonesAll = uniq([
+      ...(base.phones || []),
+      ...(base.phone ? [base.phone] : []),
+      ...mergedPhones,
+    ]).slice(0, 5);
+    const mergedSocials = mergeSocialLinks(base.socialLinks, socials);
 
     const next: LeadCandidate = {
       ...base,
       email: bestEmail,
       phone: bestPhone,
-      phones: base.phones || (mergedPhones.length > 0 ? mergedPhones : undefined),
+      phones: mergedPhonesAll.length > 0 ? mergedPhonesAll : undefined,
       websiteTitle: base.websiteTitle || (scrape.metadata?.title as string | undefined),
       websiteDescription: base.websiteDescription || (scrape.metadata?.description as string | undefined),
       websiteKeywords: base.websiteKeywords || (scrape.metadata?.keywords as string | undefined),
-      websiteEmails: base.websiteEmails || (mergedEmails.length > 0 ? mergedEmails : undefined),
-      socialLinks: base.socialLinks || socials,
+      websiteEmails: mergedWebsiteEmails.length > 0 ? mergedWebsiteEmails : undefined,
+      socialLinks: mergedSocials,
       enriched:
         base.enriched ||
         Boolean(primaryEmail) ||
@@ -251,7 +270,14 @@ export async function enrichLeadsWithFirecrawl(
   const concurrency = options.concurrency ?? 2;
 
   const candidates = leads
-    .filter((lead) => Boolean(lead.website) && !lead.email)
+    .filter((lead) => {
+      if (!lead.website) return false;
+      const missingEmail = !lead.email && (!Array.isArray(lead.websiteEmails) || lead.websiteEmails.length === 0);
+      const missingPhone = !lead.phone && (!Array.isArray(lead.phones) || lead.phones.length === 0);
+      const missingSocial = !hasSocialLinks(lead.socialLinks);
+      const missingMetadata = !lead.websiteTitle || !lead.websiteDescription;
+      return missingEmail || missingPhone || missingSocial || missingMetadata;
+    })
     .slice(0, maxLeads);
 
   if (candidates.length === 0) return leads;

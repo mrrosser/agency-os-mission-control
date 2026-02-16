@@ -212,6 +212,16 @@ type ApiErrorDetails = { issues?: ApiErrorIssue[] };
 
 const TEMPLATE_NAME_MAX = 120;
 const TEMPLATE_CLIENT_NAME_MAX = 120;
+const TEMPLATE_QUERY_MAX = 500;
+const TEMPLATE_INDUSTRY_MAX = 80;
+const TEMPLATE_LOCATION_MAX = 120;
+
+function sanitizeTemplateText(value: string, maxLength: number): string | undefined {
+    const normalized = value.trim();
+    if (!normalized) return undefined;
+    if (normalized.length <= maxLength) return normalized;
+    return normalized.slice(0, maxLength).trimEnd() || undefined;
+}
 
 function formatApiIssues(details?: ApiErrorDetails): string | null {
     const first = details?.issues?.[0];
@@ -241,6 +251,8 @@ function mapReceiptLeadToJourney(lead: LeadReceiptEntry): LeadJourneyEntry {
         leadId: lead.leadDocId || lead.id,
         companyName: lead.companyName,
         founderName: lead.founderName,
+        email: lead.email,
+        phone: lead.phone,
         score: lead.score || 0,
         source: lead.source,
         website: lead.website,
@@ -804,9 +816,9 @@ export default function OperationsPage() {
                     name,
                     clientName: clientName || undefined,
                     params: {
-                        query: leadQuery.trim() || undefined,
-                        industry: targetIndustry.trim() || undefined,
-                        location: targetLocation.trim() || undefined,
+                        query: sanitizeTemplateText(leadQuery, TEMPLATE_QUERY_MAX),
+                        industry: sanitizeTemplateText(targetIndustry, TEMPLATE_INDUSTRY_MAX),
+                        location: sanitizeTemplateText(targetLocation, TEMPLATE_LOCATION_MAX),
                         limit,
                         minScore,
                     },
@@ -1085,6 +1097,8 @@ export default function OperationsPage() {
                     leadId: lead.id,
                     companyName: lead.companyName,
                     founderName: lead.founderName,
+                    email: lead.email,
+                    phone: lead.phone,
                     score: lead.score || 0,
                     source: lead.source,
                     website: lead.website,
@@ -1399,12 +1413,15 @@ export default function OperationsPage() {
                     leadId: lead.id,
                     companyName: lead.companyName,
                     founderName: lead.founderName,
+                    email: lead.email,
+                    phone: lead.phone,
                     score: lead.score || 0,
                     source: lead.source,
                     website: lead.website,
                     googleMapsUrl: lead.googleMapsUrl,
                     websiteDomain: lead.websiteDomain,
                     domainClusterSize: lead.domainClusterSize,
+                    placePhotos: lead.placePhotos,
                     steps: {
                         source: "complete",
                         score: "complete",
@@ -1578,6 +1595,7 @@ export default function OperationsPage() {
                     searchDays: number;
                     maxSlots: number;
                     anchorHour: number;
+                    includeWeekends?: boolean;
                 }) => {
                     const scheduleResponse = await fetch("/api/calendar/schedule", {
                         method: "POST",
@@ -1630,7 +1648,7 @@ export default function OperationsPage() {
 
                 // Secondary window: expand to 14 days and broader hours if needed.
                 if (!scheduleResponse.ok && scheduleResponse.status === 409) {
-                    setDiagnostics((prev) => ({ ...prev, noSlot: (prev.noSlot || 0) + 1 }));
+                    setDiagnostics((prev) => ({ ...prev, calendarRetries: (prev.calendarRetries || 0) + 1 }));
                     addLog(`⚠ No slot in primary window. Expanding search window...`);
                     ({ scheduleResponse, scheduleJson } = await scheduleAttempt({
                         timeZone: userTimeZone,
@@ -1641,6 +1659,23 @@ export default function OperationsPage() {
                         searchDays: 14,
                         maxSlots: 100,
                         anchorHour: 13,
+                    }));
+                }
+
+                // Final window: include evenings and weekends before falling back to email draft.
+                if (!scheduleResponse.ok && scheduleResponse.status === 409) {
+                    setDiagnostics((prev) => ({ ...prev, calendarRetries: (prev.calendarRetries || 0) + 1 }));
+                    addLog(`⚠ Still no slot. Trying evening/weekend availability...`);
+                    ({ scheduleResponse, scheduleJson } = await scheduleAttempt({
+                        timeZone: userTimeZone,
+                        leadTimeDays: 0,
+                        slotMinutes: 30,
+                        businessStartHour: 8,
+                        businessEndHour: 20,
+                        searchDays: 21,
+                        maxSlots: 140,
+                        anchorHour: 11,
+                        includeWeekends: true,
                     }));
                 }
 
@@ -1658,6 +1693,7 @@ export default function OperationsPage() {
                     }
                 } else if (scheduleResponse.status === 409) {
                     // Fallback: draft an email requesting availability (no silent skip).
+                    setDiagnostics((prev) => ({ ...prev, noSlot: (prev.noSlot || 0) + 1 }));
                     updateJourneyStep(lead.id, "booking", "running");
                     if (leadEmail) {
                         addLog(`✉ No availability found. Drafting an email to request availability...`);
@@ -1705,8 +1741,8 @@ export default function OperationsPage() {
                             addLog(`⚠ Failed to create draft email`);
                         }
                     } else {
-                        updateJourneyStep(lead.id, "booking", "error");
-                        addLog(`⚠ No availability found and no email available for fallback draft.`);
+                        updateJourneyStep(lead.id, "booking", "skipped");
+                        addLog(`⚠ No availability found and no email available for fallback draft; booking step skipped.`);
                     }
                 } else {
                     updateJourneyStep(lead.id, "booking", "error");

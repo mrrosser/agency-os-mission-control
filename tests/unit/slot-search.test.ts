@@ -56,5 +56,24 @@ describe("buildCandidateMeetingSlotsInTimeZone", () => {
       })
     ).toThrow();
   });
-});
 
+  it("can include weekend slots when explicitly enabled", () => {
+    const timeZone = "America/Chicago";
+    const slots = buildCandidateMeetingSlotsInTimeZone({
+      now: new Date("2026-03-06T16:00:00Z"), // Friday morning local
+      timeZone,
+      leadTimeDays: 1,
+      slotMinutes: 30,
+      businessStartHour: 9,
+      businessEndHour: 17,
+      searchDays: 2,
+      maxSlots: 12,
+      anchorHour: 10,
+      includeWeekends: true,
+    });
+
+    expect(slots.length).toBeGreaterThan(0);
+    const weekdays = new Set(slots.map((slot) => getLocalParts(slot, timeZone).weekday));
+    expect(weekdays.has("Sat") || weekdays.has("Sun")).toBe(true);
+  });
+});

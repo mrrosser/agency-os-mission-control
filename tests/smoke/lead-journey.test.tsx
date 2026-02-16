@@ -11,8 +11,11 @@ describe("LeadJourney", () => {
             leadId: "lead-1",
             companyName: "Nova Electric",
             founderName: "Sam",
+            email: "sam@nova.example",
+            phone: "+15125550100",
             score: 78,
             source: "googlePlaces",
+            website: "https://nova.example",
             steps: {
               source: "complete",
               score: "complete",
@@ -29,5 +32,6 @@ describe("LeadJourney", () => {
 
     expect(markup).toContain("Lead Journey");
     expect(markup).toContain("Nova Electric");
+    expect(markup).toContain("Call");
   });
 });

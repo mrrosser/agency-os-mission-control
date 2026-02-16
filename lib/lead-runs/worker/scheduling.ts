@@ -23,6 +23,9 @@ export interface ScheduleAttemptResult {
   eventId?: string;
   htmlLink?: string;
   replayed?: boolean;
+  checkedCandidates?: number;
+  busyCount?: number;
+  windowsTried?: number;
 }
 
 function toBusyRanges(intervals: Array<{ start: string; end: string }>): BusyRange[] {
@@ -61,7 +64,7 @@ export async function runScheduleAttempt(
   const slotSearches = [
     {
       timeZone: args.config.timeZone,
-      leadTimeDays: Math.max(1, 2 - retryShift),
+      leadTimeDays: Math.max(0, 2 - retryShift),
       slotMinutes: 30,
       businessStartHour: 9,
       businessEndHour: 17,
@@ -71,7 +74,7 @@ export async function runScheduleAttempt(
     },
     {
       timeZone: args.config.timeZone,
-      leadTimeDays: Math.max(1, 2 - retryShift),
+      leadTimeDays: Math.max(0, 2 - retryShift),
       slotMinutes: 30,
       businessStartHour: 8,
       businessEndHour: 18,
@@ -79,9 +82,25 @@ export async function runScheduleAttempt(
       maxSlots: 100,
       anchorHour: 13 + retryShift,
     },
+    {
+      timeZone: args.config.timeZone,
+      leadTimeDays: 0,
+      slotMinutes: 30,
+      businessStartHour: 8,
+      businessEndHour: 20,
+      searchDays: 21 + retryShift * 4,
+      maxSlots: 160,
+      anchorHour: 11,
+      includeWeekends: true,
+    },
   ];
 
+  let windowsTried = 0;
+  let checkedCandidates = 0;
+  let maxBusyCount = 0;
+
   for (const slotSearch of slotSearches) {
+    windowsTried += 1;
     const candidatesRaw = buildCandidateMeetingSlotsInTimeZone(slotSearch);
     const rotateBy = candidatesRaw.length > 0 ? (args.retryAttempt - 1) % candidatesRaw.length : 0;
     const candidates =
@@ -181,7 +200,10 @@ export async function runScheduleAttempt(
             }
           }
 
-          throw new ApiError(409, "No available slot found", { checked: candidates.length });
+          throw new ApiError(409, "No available slot found", {
+            checked: candidates.length,
+            busyCount: busyRanges.length,
+          });
         }
       );
 
@@ -217,12 +239,25 @@ export async function runScheduleAttempt(
         replayed: result.replayed,
       };
     } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 409) {
-        throw error;
+      if (error instanceof ApiError && error.status === 409) {
+        const checked =
+          typeof error.details?.checked === "number" ? error.details.checked : candidates.length;
+        const busyCount =
+          typeof error.details?.busyCount === "number" ? error.details.busyCount : 0;
+        checkedCandidates += checked;
+        if (busyCount > maxBusyCount) {
+          maxBusyCount = busyCount;
+        }
+        continue;
       }
+      throw error;
     }
   }
 
-  return { kind: "no_slot" };
+  return {
+    kind: "no_slot",
+    checkedCandidates,
+    busyCount: maxBusyCount,
+    windowsTried,
+  };
 }
-

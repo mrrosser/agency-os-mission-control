@@ -63,6 +63,14 @@ npm run dev
   - Twilio: Usage Records (ThisMonth, total price category)
   - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
 
+## Competitor Monitor Dashboard
+- UI: `/dashboard/competitors`
+- APIs:
+  - `GET/POST /api/competitors/monitor`
+  - `POST /api/competitors/monitor/worker-task`
+  - `GET /api/competitors/monitor/:monitorId/reports`
+- Monitor runs produce Markdown + HTML report artifacts per monitor.
+
 ## Twilio Inbound Voice Webhook (Scaffold)
 - Endpoint: `POST /api/twilio/voice-webhook`
 - Twilio Console Voice webhook URL example:
@@ -170,6 +178,7 @@ node scripts/telemetry-triage.js
 Notes:
 - If queue env vars are not set, worker dispatch falls back to internal HTTP trigger.
 - Alerts are written to `lead_run_alerts`, can be acknowledged in Operations, and escalate to telemetry if left open.
+- Runtime config preflight (auth required): `GET /api/runtime/preflight` (also shown in Settings -> API Access).
 
 ## Follow-up Draft Queue + Limits (recommended defaults for 5-10 active users)
 - Queue dispatch:
@@ -221,6 +230,17 @@ Playwright (live smoke, optional):
 ```powershell
 $env:PLAYWRIGHT_BASE_URL="https://leadflow-review.web.app"
 npm run test:pw
+```
+
+Post-deploy production smoke (auth + worker path):
+```powershell
+$env:SMOKE_BASE_URL="https://leadflow-review.web.app"
+npm run test:postdeploy
+```
+
+Google OAuth verification readiness quick check:
+```powershell
+npm run check:oauth-readiness -- https://leadflow-review.web.app
 ```
 
 ## Repo Notes

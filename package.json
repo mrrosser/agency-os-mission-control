@@ -17,6 +17,8 @@
     "test:pw": "playwright test",
     "test:pw:ui": "playwright test --ui",
     "test:pw:install": "playwright install",
+    "test:postdeploy": "node scripts/post-deploy-smoke.mjs",
+    "check:oauth-readiness": "node scripts/google-verification-readiness.mjs",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",
     "pw:helper": "node please-review/scripts/playwright-helper.mjs",
     "pw:shortcuts": "node please-review/scripts/playwright-shortcuts.mjs"

@@ -18,7 +18,7 @@ import {
 import { toast } from "sonner";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Save, Key, Building2, User, Loader2, CheckCircle2, Power } from "lucide-react";
+import { Save, Key, Building2, User, Loader2, CheckCircle2, Power, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
@@ -34,6 +34,20 @@ interface IdentityProfile {
     coreValue: string;
     keyBenefit: string;
     voiceProfiles?: Record<string, { voiceId?: string; modelId?: string }>;
+}
+
+interface RuntimePreflightCheck {
+    id: string;
+    label: string;
+    level: "required" | "recommended";
+    state: "ok" | "missing" | "warning";
+    detail: string;
+}
+
+interface RuntimePreflightReport {
+    status: "ok" | "warn" | "fail";
+    checks: RuntimePreflightCheck[];
+    generatedAt: string;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -53,6 +67,8 @@ export default function SettingsPage() {
         capabilities: { drive: false, gmail: false, calendar: false },
     });
     const { status: secretStatus, loading: secretsLoading, refresh: refreshSecrets } = useSecretsStatus();
+    const [runtimePreflight, setRuntimePreflight] = useState<RuntimePreflightReport | null>(null);
+    const [runtimePreflightLoading, setRuntimePreflightLoading] = useState(false);
     const [activeTab, setActiveTab] = useState("identity");
     const [motionSetting, setMotionSetting] = useState<MotionSetting>("auto");
 
@@ -144,9 +160,25 @@ export default function SettingsPage() {
                         calendar: Boolean(status?.capabilities?.calendar),
                     },
                 });
+
+                setRuntimePreflightLoading(true);
+                try {
+                    const preflightRes = await fetch("/api/runtime/preflight", { headers });
+                    const preflightPayload = await readApiJson<RuntimePreflightReport & { error?: string }>(preflightRes);
+                    if (!preflightRes.ok) {
+                        throw new Error(preflightPayload?.error || "Failed to load runtime preflight");
+                    }
+                    setRuntimePreflight(preflightPayload);
+                } catch (preflightError) {
+                    console.error("Runtime preflight check failed", preflightError);
+                    setRuntimePreflight(null);
+                } finally {
+                    setRuntimePreflightLoading(false);
+                }
             } catch (e) {
                 console.error("Error loading settings", e);
                 setGoogleStatus(prev => ({ ...prev, loading: false }));
+                setRuntimePreflightLoading(false);
             }
         };
 
@@ -386,6 +418,28 @@ export default function SettingsPage() {
         );
     };
 
+    const renderPreflightBadge = (check: RuntimePreflightCheck) => {
+        if (check.state === "ok") {
+            return (
+                <Badge variant="secondary" className="bg-green-500/10 text-green-500 border-green-500/20">
+                    OK
+                </Badge>
+            );
+        }
+        if (check.state === "warning") {
+            return (
+                <Badge variant="secondary" className="bg-amber-500/10 text-amber-400 border-amber-500/20">
+                    Warning
+                </Badge>
+            );
+        }
+        return (
+            <Badge variant="secondary" className="bg-red-500/10 text-red-400 border-red-500/20">
+                Missing
+            </Badge>
+        );
+    };
+
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">
             <div className="max-w-4xl mx-auto space-y-8">
@@ -462,6 +516,83 @@ export default function SettingsPage() {
                     {/* --- Integrations Tab --- */}
                     <TabsContent value="integrations">
                         <div className="space-y-6">
+                            <Card className="bg-zinc-950 border-zinc-800">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Power className="h-4 w-4" />
+                                        Runtime Config Preflight
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Production checks for worker queues, lead source providers, and budget guardrails.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-3">
+                                    {runtimePreflightLoading ? (
+                                        <div className="flex items-center text-sm text-zinc-400">
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Checking runtime config...
+                                        </div>
+                                    ) : runtimePreflight ? (
+                                        <>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Badge
+                                                    variant="secondary"
+                                                    className={
+                                                        runtimePreflight.status === "ok"
+                                                            ? "bg-green-500/10 text-green-500 border-green-500/20"
+                                                            : runtimePreflight.status === "warn"
+                                                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                                                : "bg-red-500/10 text-red-400 border-red-500/20"
+                                                    }
+                                                >
+                                                    {runtimePreflight.status === "ok"
+                                                        ? "Healthy"
+                                                        : runtimePreflight.status === "warn"
+                                                            ? "Warnings"
+                                                            : "Action Required"}
+                                                </Badge>
+                                                <span className="text-xs text-zinc-500">
+                                                    Last check: {new Date(runtimePreflight.generatedAt).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-2">
+                                                {runtimePreflight.checks.map((check) => (
+                                                    <div
+                                                        key={check.id}
+                                                        className="flex flex-col gap-1 rounded-md border border-zinc-800 bg-zinc-900/40 p-3"
+                                                    >
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div className="flex items-center gap-2">
+                                                                {check.state === "ok" ? (
+                                                                    <CheckCircle2 className="h-4 w-4 text-green-400" />
+                                                                ) : (
+                                                                    <AlertTriangle className="h-4 w-4 text-amber-400" />
+                                                                )}
+                                                                <span className="text-sm text-zinc-100">{check.label}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <Badge
+                                                                    variant="secondary"
+                                                                    className="bg-zinc-800 text-zinc-300 border-zinc-700"
+                                                                >
+                                                                    {check.level}
+                                                                </Badge>
+                                                                {renderPreflightBadge(check)}
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-xs text-zinc-400">{check.detail}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <p className="text-sm text-zinc-500">
+                                            Unable to load runtime preflight status.
+                                        </p>
+                                    )}
+                                </CardContent>
+                            </Card>
+
                             <Card className="bg-zinc-950 border-zinc-800">
                                 <CardHeader>
                                     <CardTitle>Outreach API Configuration</CardTitle>

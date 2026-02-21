@@ -25,6 +25,8 @@ export default function DashboardLayout({
         { href: "/dashboard", label: "Overview", icon: "overview" as AfroGlyphVariant },
         { href: "/dashboard/identity", label: "Identity (The Offer)", icon: "identity" as AfroGlyphVariant },
         { href: "/dashboard/operations", label: "Operations", icon: "operations" as AfroGlyphVariant },
+        { href: "/dashboard/competitors", label: "Competitors", icon: "trend" as AfroGlyphVariant },
+        { href: "/dashboard/agents", label: "Agent Nexus", icon: "network" as AfroGlyphVariant },
         { href: "/dashboard/inbox", label: "Inbox", icon: "inbox" as AfroGlyphVariant },
         { href: "/dashboard/calendar", label: "Calendar", icon: "calendar" as AfroGlyphVariant },
         { href: "/dashboard/integrations", label: "Integrations", icon: "integrations" as AfroGlyphVariant },

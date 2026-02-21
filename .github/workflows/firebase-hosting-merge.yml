@@ -72,6 +72,12 @@ jobs:
             --region us-central1 \
             --memory 512Mi \
             --quiet
+      - name: Post-deploy production smoke
+        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        env:
+          SMOKE_BASE_URL: https://leadflow-review.web.app
+          SMOKE_TEST_UID: ci-smoke-user
+        run: npm run test:postdeploy
       - name: Firebase deploy skipped (missing secret)
         if: ${{ env.FIREBASE_SA_SET != '1' }}
         run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; deploy skipped."

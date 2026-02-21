@@ -22,6 +22,11 @@ import {
   type LeadRunJobDoc,
   type LeadRunJobStatus,
 } from "@/lib/lead-runs/jobs";
+import {
+  buildInitialLeadStageProgress,
+  updateLeadStageProgress,
+  type LeadRunStageProgress,
+} from "@/lib/lead-runs/stages";
 import { recordLeadRunOutcome, releaseLeadRunConcurrencySlot } from "@/lib/lead-runs/quotas";
 import { availabilityDraftHtml, runScheduleAttempt, type ScheduleAttemptResult } from "@/lib/lead-runs/worker/scheduling";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
@@ -40,6 +45,7 @@ interface LeadDoc {
   industry?: string;
   source?: string;
   score?: number;
+  stageProgress?: LeadRunStageProgress;
 }
 
 function mergeDiagnostics(
@@ -1202,9 +1208,22 @@ export const POST = withApiHandler(
       throw new ApiError(404, `Lead not found: ${leadDocId}`);
     }
 
+    const leadData = leadSnap.data() as LeadDoc;
+    const stageBase =
+      leadData.stageProgress ||
+      buildInitialLeadStageProgress({
+        includeEnrichment: true,
+      });
+    const stageRunning = updateLeadStageProgress(
+      updateLeadStageProgress(stageBase, "booking", "running"),
+      "outreach",
+      "pending"
+    );
+
     await leadRef.set(
       {
         jobStatus: "running",
+        stageProgress: stageRunning,
         jobUpdatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
@@ -1217,7 +1236,7 @@ export const POST = withApiHandler(
         {
           runId,
           leadDocId,
-          lead: leadSnap.data() as LeadDoc,
+          lead: leadData,
           uid: job.userId,
           orgId: job.orgId || job.userId,
           correlationId,
@@ -1229,6 +1248,11 @@ export const POST = withApiHandler(
       await leadRef.set(
         {
           jobStatus: "complete",
+          stageProgress: updateLeadStageProgress(
+            updateLeadStageProgress(stageRunning, "booking", "complete"),
+            "outreach",
+            "complete"
+          ),
           jobUpdatedAt: FieldValue.serverTimestamp(),
           jobLastError: FieldValue.delete(),
         },
@@ -1239,6 +1263,12 @@ export const POST = withApiHandler(
       await leadRef.set(
         {
           jobStatus: "error",
+          stageProgress: updateLeadStageProgress(
+            stageRunning,
+            stageRunning.currentStage === "complete" ? "outreach" : stageRunning.currentStage,
+            "error",
+            processError.message
+          ),
           jobUpdatedAt: FieldValue.serverTimestamp(),
           jobLastError: processError.message,
         },

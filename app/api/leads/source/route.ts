@@ -11,6 +11,7 @@ import { sourceLeads } from "@/lib/leads/sourcing";
 import type { LeadSourceRequest } from "@/lib/leads/types";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { buildLeadDocId } from "@/lib/lead-runs/ids";
+import { buildInitialLeadStageProgress } from "@/lib/lead-runs/stages";
 
 const bodySchema = z.object({
   // Allow longer natural-language descriptions; downstream providers may further truncate.
@@ -163,6 +164,9 @@ export const POST = withApiHandler(
           ...lead,
           userId: user.uid,
           runId,
+          stageProgress: buildInitialLeadStageProgress({
+            includeEnrichment: requestPayload.includeEnrichment ?? true,
+          }),
           createdAt: FieldValue.serverTimestamp(),
         }) as Record<string, unknown>,
         { merge: true }

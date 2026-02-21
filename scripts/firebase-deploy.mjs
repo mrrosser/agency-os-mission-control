@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
+import { normalizeFirebaseDeployArgs } from "./firebase-deploy-args.mjs";
 
 const argv = process.argv.slice(2);
-const args = argv.length > 0 ? argv : ["deploy", "--only", "hosting"];
+const args = normalizeFirebaseDeployArgs(argv);
 
 // Firebase frameworks deploy may run an npm install for the generated SSR backend.
 // Force production-only installs so devDependencies (e.g. Playwright) don't bloat the bundle.

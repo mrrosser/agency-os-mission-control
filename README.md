@@ -106,7 +106,11 @@ The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `
 
 Local deploy (recommended: trims SSR bundle by omitting devDependencies during frameworks install):
 ```bash
-npm run deploy:firebase -- --project leadflow-review
+npm run deploy:firebase -- leadflow-review
+```
+If your npm version rewrites flags, this direct form always works:
+```bash
+node scripts/firebase-deploy.mjs deploy --only hosting --project leadflow-review
 ```
 
 Required GitHub Actions secrets:

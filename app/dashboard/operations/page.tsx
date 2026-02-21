@@ -215,6 +215,10 @@ const TEMPLATE_CLIENT_NAME_MAX = 120;
 const TEMPLATE_QUERY_MAX = 500;
 const TEMPLATE_INDUSTRY_MAX = 80;
 const TEMPLATE_LOCATION_MAX = 120;
+const LEAD_LIMIT_MAX = 100;
+const SOURCE_BUDGET_MAX_PAGES = 20;
+const SOURCE_BUDGET_MAX_RUNTIME_SEC = 180;
+const SOURCE_BUDGET_MAX_COST_USD = 100;
 
 function sanitizeTemplateText(value: string, maxLength: number): string | undefined {
     const normalized = value.trim();
@@ -286,6 +290,9 @@ export default function OperationsPage() {
     const { status: secretStatus } = useSecretsStatus();
     const [limit, setLimit] = useState(10);
     const [minScore, setMinScore] = useState(55);
+    const [maxSourcePages, setMaxSourcePages] = useState(4);
+    const [maxRuntimeSec, setMaxRuntimeSec] = useState(50);
+    const [maxCostUsd, setMaxCostUsd] = useState(2);
     const [leadQuery, setLeadQuery] = useState("");
     const [targetIndustry, setTargetIndustry] = useState("");
     const [targetLocation, setTargetLocation] = useState("");
@@ -711,8 +718,20 @@ export default function OperationsPage() {
         setLeadQuery(p.query || "");
         setTargetIndustry(p.industry || "");
         setTargetLocation(p.location || "");
-        if (typeof p.limit === "number" && Number.isFinite(p.limit)) setLimit(p.limit);
+        if (typeof p.limit === "number" && Number.isFinite(p.limit)) {
+            setLimit(Math.max(1, Math.min(LEAD_LIMIT_MAX, Math.round(p.limit))));
+        }
         if (typeof p.minScore === "number" && Number.isFinite(p.minScore)) setMinScore(p.minScore);
+        if (typeof p.budget?.maxPages === "number" && Number.isFinite(p.budget.maxPages)) {
+            setMaxSourcePages(Math.max(1, Math.min(SOURCE_BUDGET_MAX_PAGES, Math.round(p.budget.maxPages))));
+        }
+        if (typeof p.budget?.maxRuntimeSec === "number" && Number.isFinite(p.budget.maxRuntimeSec)) {
+            setMaxRuntimeSec(Math.max(5, Math.min(SOURCE_BUDGET_MAX_RUNTIME_SEC, Math.round(p.budget.maxRuntimeSec))));
+        }
+        if (typeof p.budget?.maxCostUsd === "number" && Number.isFinite(p.budget.maxCostUsd)) {
+            const next = Math.round(p.budget.maxCostUsd * 100) / 100;
+            setMaxCostUsd(Math.max(0.05, Math.min(SOURCE_BUDGET_MAX_COST_USD, next)));
+        }
 
         const outreach = template.outreach || {};
         const templateBusinessKey = outreach.businessKey;
@@ -793,12 +812,24 @@ export default function OperationsPage() {
             return;
         }
 
-        if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
-            toast.error("Lead Limit must be an integer between 1 and 25");
+        if (!Number.isInteger(limit) || limit < 1 || limit > LEAD_LIMIT_MAX) {
+            toast.error(`Lead Limit must be an integer between 1 and ${LEAD_LIMIT_MAX}`);
             return;
         }
         if (!Number.isInteger(minScore) || minScore < 0 || minScore > 100) {
             toast.error("Minimum Score must be an integer between 0 and 100");
+            return;
+        }
+        if (!Number.isInteger(maxSourcePages) || maxSourcePages < 1 || maxSourcePages > SOURCE_BUDGET_MAX_PAGES) {
+            toast.error(`Source Max Pages must be between 1 and ${SOURCE_BUDGET_MAX_PAGES}`);
+            return;
+        }
+        if (!Number.isInteger(maxRuntimeSec) || maxRuntimeSec < 5 || maxRuntimeSec > SOURCE_BUDGET_MAX_RUNTIME_SEC) {
+            toast.error(`Source Max Runtime must be between 5 and ${SOURCE_BUDGET_MAX_RUNTIME_SEC} seconds`);
+            return;
+        }
+        if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0.05 || maxCostUsd > SOURCE_BUDGET_MAX_COST_USD) {
+            toast.error(`Source Max Cost must be between 0.05 and ${SOURCE_BUDGET_MAX_COST_USD}`);
             return;
         }
 
@@ -821,6 +852,11 @@ export default function OperationsPage() {
                         location: sanitizeTemplateText(targetLocation, TEMPLATE_LOCATION_MAX),
                         limit,
                         minScore,
+                        budget: {
+                            maxPages: maxSourcePages,
+                            maxRuntimeSec,
+                            maxCostUsd,
+                        },
                     },
                     outreach: {
                         businessKey,
@@ -1059,6 +1095,11 @@ export default function OperationsPage() {
                     limit,
                     minScore,
                     includeEnrichment: true,
+                    budget: {
+                        maxPages: maxSourcePages,
+                        maxRuntimeSec,
+                        maxCostUsd,
+                    },
                 }),
             });
 
@@ -1205,6 +1246,13 @@ export default function OperationsPage() {
     }, [user?.uid, sourceRunId, backgroundJob?.status]);
 
     const handleRun = async () => {
+        const legacyInlineEnabled = process.env.NEXT_PUBLIC_ENABLE_LEGACY_INLINE_RUN === "true";
+        if (!legacyInlineEnabled) {
+            addLog("ℹ Worker mode enabled: starting background run.");
+            await startBackgroundRun();
+            return;
+        }
+
         if (!user) {
             toast.error("You must be logged in to run lead sourcing");
             return;
@@ -1316,6 +1364,11 @@ export default function OperationsPage() {
                     limit,
                     minScore,
                     includeEnrichment: true,
+                    budget: {
+                        maxPages: maxSourcePages,
+                        maxRuntimeSec,
+                        maxCostUsd,
+                    },
                      sources: hasGooglePlaces ? ["googlePlaces"] : ["firestore"],
                  }),
              });
@@ -2441,7 +2494,14 @@ export default function OperationsPage() {
                                             <Input
                                                 type="number"
                                                 value={limit}
-                                                onChange={(e) => setLimit(Number(e.target.value))}
+                                                onChange={(e) =>
+                                                    setLimit(
+                                                        Math.max(
+                                                            1,
+                                                            Math.min(LEAD_LIMIT_MAX, Number(e.target.value) || 1)
+                                                        )
+                                                    )
+                                                }
                                                 className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                                             />
                                         </div>
@@ -2455,6 +2515,59 @@ export default function OperationsPage() {
                                             />
                                         </div>
                                     </div>
+                                    <div className="grid grid-cols-3 gap-3">
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Source Max Pages</Label>
+                                            <Input
+                                                type="number"
+                                                value={maxSourcePages}
+                                                onChange={(e) =>
+                                                    setMaxSourcePages(
+                                                        Math.max(
+                                                            1,
+                                                            Math.min(SOURCE_BUDGET_MAX_PAGES, Number(e.target.value) || 1)
+                                                        )
+                                                    )
+                                                }
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Source Max Runtime (s)</Label>
+                                            <Input
+                                                type="number"
+                                                value={maxRuntimeSec}
+                                                onChange={(e) =>
+                                                    setMaxRuntimeSec(
+                                                        Math.max(
+                                                            5,
+                                                            Math.min(
+                                                                SOURCE_BUDGET_MAX_RUNTIME_SEC,
+                                                                Number(e.target.value) || 5
+                                                            )
+                                                        )
+                                                    )
+                                                }
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Source Max Cost (USD)</Label>
+                                            <Input
+                                                type="number"
+                                                step="0.05"
+                                                value={maxCostUsd}
+                                                onChange={(e) => {
+                                                    const next = Number(e.target.value);
+                                                    if (!Number.isFinite(next)) return;
+                                                    setMaxCostUsd(
+                                                        Math.max(0.05, Math.min(SOURCE_BUDGET_MAX_COST_USD, next))
+                                                    );
+                                                }}
+                                                className="h-11 bg-zinc-900 border-zinc-700 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                                 <p className="text-xs text-zinc-500">
                                     {hasGooglePlaces
@@ -2463,6 +2576,7 @@ export default function OperationsPage() {
                                     {hasFirecrawl
                                         ? " Firecrawl enrichment is enabled for website signals (emails, metadata)."
                                         : " Add a Firecrawl key to enrich lead websites and improve scoring."}
+                                    {" "}Budget guardrails stop long/expensive source runs automatically.
                                 </p>
 
                                 <div className="pt-4 border-t border-zinc-800 space-y-3">
@@ -2592,25 +2706,18 @@ export default function OperationsPage() {
                                         Stop Lead Run
                                     </Button>
                                 ) : (
-                                    <div className="space-y-2">
-                                        <Button
-                                            onClick={handleRun}
-                                            disabled={!user}
-                                            className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg hover:shadow-blue-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
+                                    <Button
+                                        onClick={handleRun}
+                                        disabled={!user || startingBackgroundRun}
+                                        className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg hover:shadow-blue-500/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {startingBackgroundRun ? (
+                                            <Clock3 className="mr-2 h-4 w-4 animate-spin" />
+                                        ) : (
                                             <AfroGlyph variant="operations" className="mr-2 h-5 w-5" />
-                                            Run Lead Engine
-                                        </Button>
-                                        <Button
-                                            onClick={startBackgroundRun}
-                                            disabled={!user || startingBackgroundRun}
-                                            variant="outline"
-                                            className="w-full h-11 border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
-                                        >
-                                            <Clock3 className={startingBackgroundRun ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
-                                            {startingBackgroundRun ? "Starting Background Run..." : "Run In Background"}
-                                        </Button>
-                                    </div>
+                                        )}
+                                        {startingBackgroundRun ? "Starting Worker Run..." : "Run Lead Engine"}
+                                    </Button>
                                 )}
 
                                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 text-xs text-zinc-300 space-y-2">

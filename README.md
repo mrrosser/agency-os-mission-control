@@ -18,10 +18,15 @@ copy .env.local.example .env.local
 - Optional: `GOOGLE_PICKER_API_KEY` (browser key; enables Google Drive Picker UI in Knowledge Base)
 - Optional: `GOOGLE_DRIVE_APP_ID` (Drive Picker app id; set to your GCP project number for Shared Drives support)
 - Optional: `GOOGLE_PLACES_API_KEY` (for live lead sourcing)
+- Optional: `APIFY_TOKEN` + `APIFY_GOOGLE_MAPS_ACTOR_ID` (enables Apify Maps fallback/provider)
+- Optional: `APIFY_EST_COST_PER_1K_RESULTS_USD` (used for estimated Apify source cost in diagnostics)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
+- Optional (recommended for live OpenAI billing pulls): `OPENAI_ADMIN_API_KEY`
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
+- Optional (lead source budget defaults): `LEAD_SOURCE_BUDGET_MAX_COST_USD`, `LEAD_SOURCE_BUDGET_MAX_PAGES`, `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC`
+- Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
 4) Start dev server:
@@ -32,8 +37,61 @@ npm run dev
 ## Lead Sourcing + Scoring
 - The Lead Engine lives in `app/dashboard/operations`.
 - If `GOOGLE_PLACES_API_KEY` (or a user-scoped secret `googlePlacesKey`) is set, live lead sourcing is enabled.
+- If Google Places is not configured but `APIFY_TOKEN` is set, sourcing can use `apifyMaps`.
 - If `FIRECRAWL_API_KEY` (or a user-scoped secret `firecrawlKey`) is set, website enrichment can extract emails/signals to improve scoring.
 - Without a Places key, the Lead Engine pulls from existing CRM leads.
+- Source diagnostics include per-run budget usage (cost/pages/runtime) and stop reasons.
+
+## Competitor Monitor (Scheduled Reports)
+- Upsert/list monitors: `POST/GET /api/competitors/monitor`
+- Worker execution endpoint: `POST /api/competitors/monitor/worker-task`
+- Report retrieval: `GET /api/competitors/monitor/:monitorId/reports`
+- Worker dispatch uses Cloud Tasks when queue env vars are configured; otherwise immediate internal HTTP trigger is used.
+- Reports are stored per monitor as both Markdown and HTML artifacts.
+
+## Agent Nexus Dashboard
+- New control-plane dashboard: `app/dashboard/agents` (`/dashboard/agents` in the UI).
+- Backend snapshot API: `GET /api/agents/control-plane`.
+- Includes:
+  - agent runtime states (active/idle/degraded/inactive),
+  - service/tool/skill health,
+  - open alerts + top telemetry bug groups,
+  - daily quota posture,
+  - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability).
+- Billing sources:
+  - OpenAI: `GET /v1/organization/costs` (org admin key required for live pulls)
+  - Twilio: Usage Records (ThisMonth, total price category)
+  - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
+
+## Twilio Inbound Voice Webhook (Scaffold)
+- Endpoint: `POST /api/twilio/voice-webhook`
+- Twilio Console Voice webhook URL example:
+  - `https://<your-domain>/api/twilio/voice-webhook?uid=<firebase_uid>`
+  - optional hardening token: `https://<your-domain>/api/twilio/voice-webhook?uid=<firebase_uid>&token=<TWILIO_VOICE_WEBHOOK_TOKEN>`
+- Optional env for webhook hardening:
+  - `TWILIO_VOICE_WEBHOOK_TOKEN` (if set, webhook requires matching `?token=...`)
+- Current behavior:
+  - answers inbound calls with `<Gather>` speech loop,
+  - detects action intents (`calendar.createMeet`, `gmail.createDraft`, `crm.upsertLead`),
+  - writes idempotent action requests to Firestore `voice_action_requests` (queued for review),
+  - stores call session state in `voice_call_sessions`.
+
+## Voice Action Worker (Auto-execution)
+- Endpoint: `POST /api/twilio/voice-actions/worker-task`
+- Auth: body must include `workerToken` that matches `VOICE_ACTIONS_WORKER_TOKEN`.
+- Recommended env:
+  - `VOICE_ACTIONS_WORKER_TOKEN` (required)
+  - `VOICE_ACTIONS_DEFAULT_UID` (optional fallback if webhook URL does not include `uid`)
+  - `VOICE_ACTIONS_DEFAULT_TIMEZONE` (optional, default `America/Chicago`)
+  - `VOICE_ACTIONS_TASK_QUEUE`, `VOICE_ACTIONS_TASK_LOCATION`, `VOICE_ACTIONS_TASK_SERVICE_ACCOUNT` (optional Cloud Tasks dispatch; falls back to internal HTTP trigger when absent)
+- Request shape:
+  - `{ "workerToken": "...", "maxTasks": 10, "dryRun": false }`
+- Processing behavior:
+  - Claims queued records from `voice_action_requests`.
+  - Executes `gmail.createDraft` and `calendar.createMeet` with DNC checks.
+  - Upserts `crm.upsertLead` into `voice_crm_leads`.
+  - Marks each request as `complete`, `needs_input`, or `error`.
+  - `POST /api/twilio/voice-webhook` now triggers this worker immediately after queueing a write action.
 
 ## Google OAuth Redirect URIs (recommended)
 - Local: `http://localhost:3000/api/google/callback`

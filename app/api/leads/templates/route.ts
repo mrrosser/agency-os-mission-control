@@ -58,8 +58,11 @@ const sourcesSchema = z
     if (!Array.isArray(value)) return undefined;
     return value
       .map((source) => (typeof source === "string" ? source.trim() : ""))
-      .filter((source): source is LeadSource => source === "googlePlaces" || source === "firestore");
-  }, z.array(z.enum(["googlePlaces", "firestore"] satisfies LeadSource[])).optional())
+      .filter(
+        (source): source is LeadSource =>
+          source === "googlePlaces" || source === "firestore" || source === "apifyMaps"
+      );
+  }, z.array(z.enum(["googlePlaces", "firestore", "apifyMaps"] satisfies LeadSource[])).optional())
   .transform((sources) => (sources && sources.length > 0 ? sources : undefined));
 
 const templateNameSchema = z.preprocess(
@@ -73,10 +76,22 @@ const paramsSchema = z.object({
   industry: optionalTrimmedString(80),
   location: optionalTrimmedString(120),
   // Be tolerant to number-like strings coming from clients.
-  limit: optionalBoundedInt(1, 25),
+  limit: optionalBoundedInt(1, 100),
   minScore: optionalBoundedInt(0, 100),
   sources: sourcesSchema.optional(),
   includeEnrichment: optionalBooleanLike(),
+  budget: z
+    .object({
+      maxCostUsd: z.preprocess((value) => {
+        if (value == null || value === "") return undefined;
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return undefined;
+        return Math.min(100, Math.max(0.05, parsed));
+      }, z.number().positive().max(100).optional()),
+      maxPages: optionalBoundedInt(1, 20),
+      maxRuntimeSec: optionalBoundedInt(5, 180),
+    })
+    .optional(),
 });
 
 const outreachSchema = z

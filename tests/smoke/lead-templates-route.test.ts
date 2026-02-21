@@ -216,10 +216,15 @@ describe("lead templates routes", () => {
         query: "q".repeat(620),
         industry: "Art Buyers ".repeat(20),
         location: "New Orleans, Louisiana, United States".repeat(8),
-        limit: "99",
+        limit: "155",
         minScore: "-5",
         includeEnrichment: "true",
         sources: ["googlePlaces", "badSource", "firestore"],
+        budget: {
+          maxCostUsd: "999",
+          maxPages: "99",
+          maxRuntimeSec: "999",
+        },
       },
       outreach: {
         businessKey: "RNG",
@@ -246,13 +251,16 @@ describe("lead templates routes", () => {
     expect(data.template.templateId).toBe("t-coerce");
     expect(data.template.name).toBe("Multi Channel New Orleans Search");
     expect(data.template.clientName).toBe("ACME Client");
-    expect(data.template.params.limit).toBe(25);
+    expect(data.template.params.limit).toBe(100);
     expect(data.template.params.minScore).toBe(0);
     expect(data.template.params.query.length).toBe(500);
     expect(data.template.params.industry.length).toBe(80);
     expect(data.template.params.location.length).toBe(120);
     expect(data.template.params.includeEnrichment).toBe(true);
     expect(data.template.params.sources).toEqual(["googlePlaces", "firestore"]);
+    expect(data.template.params.budget.maxCostUsd).toBe(100);
+    expect(data.template.params.budget.maxPages).toBe(20);
+    expect(data.template.params.budget.maxRuntimeSec).toBe(180);
     expect(data.template.outreach.businessKey).toBe("rng");
     expect(data.template.outreach.useSMS).toBe(true);
     expect(data.template.outreach.useAvatar).toBe(false);

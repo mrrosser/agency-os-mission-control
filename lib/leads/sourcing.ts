@@ -9,14 +9,14 @@ import type {
     LeadSourceRequest,
 } from "@/lib/leads/types";
 import { scoreLead } from "@/lib/leads/scoring";
-import { fetchGooglePlacesLeads } from "@/lib/leads/providers/google-places";
-import { fetchFirestoreLeads } from "@/lib/leads/providers/firestore";
 import { enrichLeadsWithFirecrawl } from "@/lib/leads/providers/firecrawl";
+import { resolveLeadProviders } from "@/lib/leads/providers/registry";
 
 interface SourceContext {
     uid: string;
     googlePlacesKey?: string;
     firecrawlKey?: string;
+    apifyToken?: string;
     log?: Logger;
 }
 
@@ -30,6 +30,65 @@ interface SourceResult {
         duplicatesRemoved: number;
         domainClusters: number;
         maxDomainClusterSize: number;
+        budget: {
+            maxCostUsd: number;
+            maxPages: number;
+            maxRuntimeSec: number;
+            costUsedUsd: number;
+            pagesUsed: number;
+            runtimeSec: number;
+            stopped: boolean;
+            stopReason?: string;
+            stopProvider?: LeadSource;
+        };
+    };
+}
+
+interface NormalizedBudget {
+    maxCostUsd: number;
+    maxPages: number;
+    maxRuntimeSec: number;
+}
+
+interface BudgetUsage {
+    costUsedUsd: number;
+    pagesUsed: number;
+    stopped: boolean;
+    stopReason?: string;
+    stopProvider?: LeadSource;
+}
+
+function readPositiveFloat(value: string | undefined, fallback: number): number {
+    const parsed = Number.parseFloat(value || "");
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+}
+
+function readPositiveInt(value: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(value || "", 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+}
+
+function normalizeBudget(request: LeadSourceRequest): NormalizedBudget {
+    const defaultCost = readPositiveFloat(process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD, 2);
+    const defaultPages = readPositiveInt(process.env.LEAD_SOURCE_BUDGET_MAX_PAGES, 4);
+    const defaultRuntimeSec = readPositiveInt(process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC, 50);
+
+    const maxCostUsd = Number.isFinite(Number(request.budget?.maxCostUsd))
+        ? Math.min(100, Math.max(0.05, Number(request.budget?.maxCostUsd)))
+        : defaultCost;
+    const maxPages = Number.isFinite(Number(request.budget?.maxPages))
+        ? Math.min(20, Math.max(1, Math.round(Number(request.budget?.maxPages))))
+        : defaultPages;
+    const maxRuntimeSec = Number.isFinite(Number(request.budget?.maxRuntimeSec))
+        ? Math.min(180, Math.max(5, Math.round(Number(request.budget?.maxRuntimeSec))))
+        : defaultRuntimeSec;
+
+    return {
+        maxCostUsd,
+        maxPages,
+        maxRuntimeSec,
     };
 }
 
@@ -180,42 +239,104 @@ export async function sourceLeads(
     request: LeadSourceRequest,
     context: SourceContext
 ): Promise<SourceResult> {
-    const { uid, googlePlacesKey, firecrawlKey, log } = context;
+    const { uid, googlePlacesKey, firecrawlKey, apifyToken, log } = context;
     const warnings: string[] = [];
     const sourcesRequested = request.sources ?? [];
-    const includeGooglePlaces = sourcesRequested.includes("googlePlaces") || sourcesRequested.length === 0;
-    const includeFirestore = sourcesRequested.includes("firestore") || sourcesRequested.length === 0;
+    const defaultSources: LeadSource[] = ["googlePlaces", "firestore"];
+    let sources = (sourcesRequested.length > 0 ? sourcesRequested : defaultSources)
+        .filter((source, index, arr) => arr.indexOf(source) === index);
+    // Optional provider fallback: if Places is requested but key is unavailable, use Apify Maps when configured.
+    if (
+        !googlePlacesKey &&
+        apifyToken &&
+        sources.includes("googlePlaces") &&
+        !sources.includes("apifyMaps")
+    ) {
+        sources = sources.map((source) => (source === "googlePlaces" ? "apifyMaps" : source));
+        warnings.push("Google Places key missing; using Apify Maps fallback.");
+    }
+    const providers = resolveLeadProviders(sources);
+    const budget = normalizeBudget(request);
+    const usage: BudgetUsage = {
+        costUsedUsd: 0,
+        pagesUsed: 0,
+        stopped: false,
+    };
+    const startedAtMs = Date.now();
 
     const leads: LeadCandidate[] = [];
     const sourcesUsed: LeadSource[] = [];
+    for (const provider of providers) {
+        const elapsedSec = Math.floor((Date.now() - startedAtMs) / 1000);
+        if (elapsedSec >= budget.maxRuntimeSec) {
+            usage.stopped = true;
+            usage.stopReason = "runtime_limit";
+            usage.stopProvider = provider.source;
+            warnings.push("Sourcing stopped because runtime budget was reached.");
+            break;
+        }
+        if (usage.pagesUsed >= budget.maxPages) {
+            usage.stopped = true;
+            usage.stopReason = "page_limit";
+            usage.stopProvider = provider.source;
+            warnings.push("Sourcing stopped because page budget was reached.");
+            break;
+        }
+        if (usage.costUsedUsd >= budget.maxCostUsd) {
+            usage.stopped = true;
+            usage.stopReason = "cost_limit";
+            usage.stopProvider = provider.source;
+            warnings.push("Sourcing stopped because cost budget was reached.");
+            break;
+        }
 
-    if (includeGooglePlaces) {
-        if (!googlePlacesKey) {
-            warnings.push("Google Places key missing; skipping Google Places sourcing.");
-        } else {
-            const query = request.query || request.industry || "business";
-            const googleLeads = await fetchGooglePlacesLeads({
-                apiKey: googlePlacesKey,
-                query,
-                location: request.location,
-                limit: request.limit || 10,
-                includeEnrichment: request.includeEnrichment,
-                log,
-            });
-            leads.push(...googleLeads);
-            sourcesUsed.push("googlePlaces");
+        const result = await provider.run({
+            request,
+            uid,
+            googlePlacesKey,
+            apifyToken,
+            budget: {
+                remainingPages: Math.max(1, budget.maxPages - usage.pagesUsed),
+                remainingRuntimeSec: Math.max(5, budget.maxRuntimeSec - elapsedSec),
+            },
+            log,
+        });
+
+        if (result.leads.length > 0) {
+            leads.push(...result.leads);
+            sourcesUsed.push(result.source);
+        }
+        if (result.warnings.length > 0) {
+            warnings.push(...result.warnings);
+        }
+        usage.pagesUsed += Math.max(0, result.pagesUsed);
+        usage.costUsedUsd += Math.max(0, result.estimatedCostUsd);
+        if (!usage.stopped && usage.pagesUsed >= budget.maxPages) {
+            usage.stopped = true;
+            usage.stopReason = "page_limit";
+            usage.stopProvider = provider.source;
+        }
+        if (!usage.stopped && usage.costUsedUsd >= budget.maxCostUsd) {
+            usage.stopped = true;
+            usage.stopReason = "cost_limit";
+            usage.stopProvider = provider.source;
         }
     }
 
-    if (includeFirestore) {
-        const firestoreLeads = await fetchFirestoreLeads({
-            uid,
-            limit: request.limit || 10,
-            log,
-        });
-        if (firestoreLeads.length > 0) {
-            leads.push(...firestoreLeads);
-            sourcesUsed.push("firestore");
+    usage.costUsedUsd = Number(usage.costUsedUsd.toFixed(4));
+    if (usage.stopped) {
+        if (usage.stopReason === "cost_limit") {
+            warnings.push(
+                `Budget guardrail: max cost $${budget.maxCostUsd.toFixed(2)} reached.`
+            );
+        } else if (usage.stopReason === "page_limit") {
+            warnings.push(
+                `Budget guardrail: max pages ${budget.maxPages} reached.`
+            );
+        } else if (usage.stopReason === "runtime_limit") {
+            warnings.push(
+                `Budget guardrail: max runtime ${budget.maxRuntimeSec}s reached.`
+            );
         }
     }
 
@@ -297,6 +418,8 @@ export async function sourceLeads(
         warnings.push(`Detected ${domainClusters} domain cluster(s) (max size ${maxDomainClusterSize}).`);
     }
 
+    const runtimeSec = Math.floor((Date.now() - startedAtMs) / 1000);
+
     return {
         leads: deduped,
         sourcesUsed,
@@ -307,6 +430,17 @@ export async function sourceLeads(
             duplicatesRemoved,
             domainClusters,
             maxDomainClusterSize,
+            budget: {
+                maxCostUsd: budget.maxCostUsd,
+                maxPages: budget.maxPages,
+                maxRuntimeSec: budget.maxRuntimeSec,
+                costUsedUsd: usage.costUsedUsd,
+                pagesUsed: usage.pagesUsed,
+                runtimeSec,
+                stopped: usage.stopped,
+                stopReason: usage.stopReason,
+                stopProvider: usage.stopProvider,
+            },
         },
     };
 }

@@ -1,4 +1,4 @@
-export type LeadSource = "googlePlaces" | "firestore";
+export type LeadSource = "googlePlaces" | "firestore" | "apifyMaps";
 
 export type LeadContactSource = "googlePlaces" | "firecrawl" | "firestore";
 export type LeadContactConfidence = "high" | "medium" | "low";
@@ -83,6 +83,11 @@ export interface LeadSourceRequest {
     minScore?: number;
     sources?: LeadSource[];
     includeEnrichment?: boolean;
+    budget?: {
+        maxCostUsd?: number;
+        maxPages?: number;
+        maxRuntimeSec?: number;
+    };
 }
 
 export interface LeadSourceResponse {

@@ -17,10 +17,17 @@ const bodySchema = z.object({
   query: z.string().min(1).max(500).optional(),
   industry: z.string().min(1).max(80).optional(),
   location: z.string().min(1).max(120).optional(),
-  limit: z.number().int().min(1).max(25).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
   minScore: z.number().int().min(0).max(100).optional(),
-  sources: z.array(z.enum(["googlePlaces", "firestore"])).optional(),
+  sources: z.array(z.enum(["googlePlaces", "firestore", "apifyMaps"])).optional(),
   includeEnrichment: z.boolean().optional(),
+  budget: z
+    .object({
+      maxCostUsd: z.number().positive().max(100).optional(),
+      maxPages: z.number().int().positive().max(20).optional(),
+      maxRuntimeSec: z.number().int().positive().max(180).optional(),
+    })
+    .optional(),
 });
 
 interface LeadSourceDiagnostics {
@@ -34,6 +41,17 @@ interface LeadSourceDiagnostics {
   filteredByScore: number;
   withEmail: number;
   withoutEmail: number;
+  budget: {
+    maxCostUsd: number;
+    maxPages: number;
+    maxRuntimeSec: number;
+    costUsedUsd: number;
+    pagesUsed: number;
+    runtimeSec: number;
+    stopped: boolean;
+    stopReason?: string;
+    stopProvider?: string;
+  };
 }
 
 export const POST = withApiHandler(
@@ -68,6 +86,7 @@ export const POST = withApiHandler(
       minScore: body.minScore,
       sources: body.sources,
       includeEnrichment: body.includeEnrichment ?? true,
+      budget: body.budget,
     };
 
     if (!requestPayload.query && !requestPayload.industry && !(requestPayload.sources || []).includes("firestore")) {
@@ -91,11 +110,13 @@ export const POST = withApiHandler(
       "firecrawlKey",
       "FIRECRAWL_API_KEY"
     );
+    const apifyToken = process.env.APIFY_TOKEN;
 
     const { leads, sourcesUsed, warnings, diagnostics } = await sourceLeads(requestPayload, {
       uid: user.uid,
       googlePlacesKey,
       firecrawlKey,
+      apifyToken,
       log,
     });
 
@@ -121,6 +142,15 @@ export const POST = withApiHandler(
       filteredByScore: filteredOut,
       withEmail,
       withoutEmail: Math.max(0, scored.length - withEmail),
+      budget: diagnostics?.budget || {
+        maxCostUsd: Number(requestPayload.budget?.maxCostUsd || 0),
+        maxPages: Number(requestPayload.budget?.maxPages || 0),
+        maxRuntimeSec: Number(requestPayload.budget?.maxRuntimeSec || 0),
+        costUsedUsd: 0,
+        pagesUsed: 0,
+        runtimeSec: 0,
+        stopped: false,
+      },
     };
 
     const batch = getAdminDb().batch();

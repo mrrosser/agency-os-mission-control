@@ -30,6 +30,87 @@ describe("openclaw business pack v2", () => {
     expect(ids.length).toBe(3);
   });
 
+  it("defines orchestrator + sub-agents with deterministic handoff triggers", () => {
+    const pack = readJson([
+      "please-review",
+      "from-root",
+      "config-templates",
+      "knowledge-pack.v2.json",
+    ]);
+
+    const globalPolicies = pack.globalPolicies as Record<string, unknown>;
+    const topology = globalPolicies.agentTopology as Record<string, unknown>;
+    expect(String(topology.masterAgentId)).toBe("orchestrator");
+    expect(Boolean(topology.handoffEnabled)).toBe(true);
+
+    const agents = topology.agents as Array<Record<string, unknown>>;
+    const ids = agents.map((agent) => String(agent.id));
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "orchestrator",
+        "biz_aicf",
+        "biz_rng",
+        "biz_rts",
+        "fn_marketing",
+        "fn_research",
+        "fn_actions",
+      ])
+    );
+
+    const actionAgent = agents.find((agent) => String(agent.id) === "fn_actions");
+    expect(Boolean(actionAgent?.canExecuteExternalWrites)).toBe(true);
+    expect(actionAgent?.writeTools).toEqual(
+      expect.arrayContaining(["gmail.createDraft", "calendar.createEvent", "crm.upsertLead"])
+    );
+
+    const handoffTriggers = topology.handoffTriggers as Array<Record<string, unknown>>;
+    const handoffTargets = handoffTriggers.map((trigger) => String(trigger.handoffTo));
+    expect(handoffTargets).toEqual(
+      expect.arrayContaining(["biz_aicf", "biz_rng", "biz_rts", "fn_marketing", "fn_research", "fn_actions"])
+    );
+  });
+
+  it("includes knowledge ingestion and voice action policies for call workflows", () => {
+    const pack = readJson([
+      "please-review",
+      "from-root",
+      "config-templates",
+      "knowledge-pack.v2.json",
+    ]);
+
+    const globalPolicies = pack.globalPolicies as Record<string, unknown>;
+    const ingestion = globalPolicies.knowledgeIngestionPolicy as Record<string, unknown>;
+    expect(Boolean(ingestion.enabled)).toBe(true);
+    expect(String(ingestion.scanMode)).toBe("metadata_delta_weekly");
+    expect(String(ingestion.readMode)).toBe("metadata_plus_excerpt");
+
+    const sources = ingestion.sources as Record<string, Record<string, unknown>>;
+    const drive = sources.googleDrive as Record<string, unknown>;
+    expect(Boolean(drive.enabled)).toBe(true);
+    expect(Boolean(drive.allowSharedDrives)).toBe(true);
+
+    const driveRoots = drive.rootsByAccount as Array<Record<string, unknown>>;
+    const aicfRoots = driveRoots.find((entry) => String(entry.businessId) === "ai_cofoundry");
+    const rngRoots = driveRoots.find((entry) => String(entry.businessId) === "rosser_nft_gallery");
+    expect(aicfRoots?.roots).toEqual(expect.arrayContaining(["AICoFoundry_Doc_Pack_v1", "Meet Recordings"]));
+    expect(rngRoots?.roots).toEqual(
+      expect.arrayContaining(["NOTCF_Prepared_Documents_PACKET", "IG-Auto", "Meet Recordings"])
+    );
+
+    const voiceOps = globalPolicies.voiceOpsPolicy as Record<string, unknown>;
+    expect(Boolean(voiceOps.enabled)).toBe(true);
+    expect(String(voiceOps.entryAgentId)).toBe("orchestrator");
+    expect(Boolean(voiceOps.requireBusinessContextBeforeWrite)).toBe(true);
+    expect(Boolean(voiceOps.requireThreadLookupBeforeEmailDraft)).toBe(true);
+    expect(voiceOps.allowActions).toEqual(
+      expect.arrayContaining(["gmail.createDraft", "calendar.createEvent", "calendar.createMeet", "crm.upsertLead"])
+    );
+
+    const actionPolicies = voiceOps.actionPolicies as Record<string, Record<string, unknown>>;
+    expect(Boolean(actionPolicies.gmail?.autoSend)).toBe(false);
+    expect(Boolean(actionPolicies.calendar?.requireGoogleMeet)).toBe(true);
+  });
+
   it("uses suppression-aware triage and strict calendar policy", () => {
     const pack = readJson([
       "please-review",
@@ -71,6 +152,50 @@ describe("openclaw business pack v2", () => {
     expect(String(aicfProfile?.bookingLink)).toBe("https://calendar.app.google/LEk5GQobBpAXTfpR9");
     expect(Boolean(rngProfile?.attachGoogleMeet)).toBe(true);
     expect(Boolean(aicfProfile?.attachGoogleMeet)).toBe(true);
+  });
+});
+
+describe("openclaw config templates", () => {
+  it("define sub-agent routing and voice runtime action guardrails", () => {
+    const template = readJson([
+      "please-review",
+      "from-root",
+      "config-templates",
+      "openclaw.json.template",
+    ]);
+
+    const agents = template.agents as Record<string, unknown>;
+    const list = agents.list as Array<Record<string, unknown>>;
+    expect(list.map((entry) => String(entry.id))).toEqual(
+      expect.arrayContaining([
+        "orchestrator",
+        "biz-aicf",
+        "biz-rng",
+        "biz-rts",
+        "fn-marketing",
+        "fn-research",
+        "fn-actions",
+      ])
+    );
+
+    const routing = agents.routing as Record<string, unknown>;
+    expect(String(routing.default)).toBe("orchestrator");
+    expect((routing.triggers as Array<Record<string, unknown>>).length).toBeGreaterThanOrEqual(6);
+
+    const voiceRuntime = (
+      ((template.plugins as Record<string, unknown>).entries as Record<string, unknown>)["voice-call"] as Record<
+        string,
+        unknown
+      >
+    ).config as Record<string, unknown>;
+    const runtime = voiceRuntime.runtime as Record<string, unknown>;
+    expect(String(runtime.conversationMode)).toBe("agentic");
+    expect(String(runtime.entryAgentId)).toBe("orchestrator");
+
+    const actionTools = runtime.actionTools as Record<string, unknown>;
+    expect(String(actionTools.writeAgentId)).toBe("fn-actions");
+    expect(Boolean(actionTools.emailDraftOnly)).toBe(true);
+    expect(Boolean(actionTools.calendarRequireGoogleMeet)).toBe(true);
   });
 });
 

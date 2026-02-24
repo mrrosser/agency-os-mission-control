@@ -1,0 +1,14 @@
+[Unit]
+Description=Reassert Tailscale Serve for OpenClaw Control UI
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=/home/marcu/ai-hell-mary/scripts/tailscale_serve_setup.sh
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /home/marcu/ai-hell-mary/scripts/tailscale_serve_setup.sh
+RemainAfterExit=yes
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

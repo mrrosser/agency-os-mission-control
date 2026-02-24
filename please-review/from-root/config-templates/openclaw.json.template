@@ -28,6 +28,108 @@
           "alias": "gemini-lite"
         }
       }
+    },
+    "list": [
+      {
+        "id": "orchestrator",
+        "workspace": "/home/openclaw/.openclaw/workspace",
+        "description": "Master router for voice/chat. Delegates to business and functional specialists."
+      },
+      {
+        "id": "biz-aicf",
+        "workspace": "/home/openclaw/.openclaw/workspace-aicf",
+        "description": "AI CoFoundry specialist"
+      },
+      {
+        "id": "biz-rng",
+        "workspace": "/home/openclaw/.openclaw/workspace-rng",
+        "description": "Rosser NFT Gallery specialist"
+      },
+      {
+        "id": "biz-rts",
+        "workspace": "/home/openclaw/.openclaw/workspace-rts",
+        "description": "RT Solutions specialist"
+      },
+      {
+        "id": "fn-marketing",
+        "workspace": "/home/openclaw/.openclaw/workspace-marketing",
+        "description": "Marketing and social planning specialist"
+      },
+      {
+        "id": "fn-research",
+        "workspace": "/home/openclaw/.openclaw/workspace-research",
+        "description": "Research specialist"
+      },
+      {
+        "id": "fn-actions",
+        "workspace": "/home/openclaw/.openclaw/workspace-actions",
+        "description": "Single write agent for draft email + calendar actions"
+      }
+    ],
+    "routing": {
+      "default": "orchestrator",
+      "triggers": [
+        {
+          "id": "biz_aicf",
+          "matchAny": [
+            "aicf",
+            "ai cofoundry",
+            "pilot",
+            "managed ai ops"
+          ],
+          "agent": "biz-aicf"
+        },
+        {
+          "id": "biz_rng",
+          "matchAny": [
+            "rng",
+            "gallery",
+            "commission",
+            "exhibition",
+            "event booking"
+          ],
+          "agent": "biz-rng"
+        },
+        {
+          "id": "biz_rts",
+          "matchAny": [
+            "rt solutions",
+            "school",
+            "district",
+            "workshop",
+            "after-school"
+          ],
+          "agent": "biz-rts"
+        },
+        {
+          "id": "fn_marketing",
+          "intentAny": [
+            "social_post",
+            "campaign",
+            "content_plan"
+          ],
+          "agent": "fn-marketing"
+        },
+        {
+          "id": "fn_research",
+          "intentAny": [
+            "research",
+            "market_intel",
+            "competitor_scan"
+          ],
+          "agent": "fn-research"
+        },
+        {
+          "id": "fn_actions",
+          "intentAny": [
+            "draft_email",
+            "schedule_meeting",
+            "create_calendar_invite",
+            "crm_update"
+          ],
+          "agent": "fn-actions"
+        }
+      ]
     }
   },
   "logging": {
@@ -139,10 +241,53 @@
           "streaming": {
             "enabled": true,
             "streamPath": "/voice/stream"
+          },
+          "runtime": {
+            "conversationMode": "agentic",
+            "entryAgentId": "orchestrator",
+            "responseModel": "openai/gpt-4o-mini",
+            "silenceDurationMs": 450,
+            "businessResolver": {
+              "fromNumberMap": {
+                "+18443169534": "rosser_nft_gallery"
+              },
+              "defaultBusinessId": "ai_cofoundry"
+            },
+            "knowledge": {
+              "enabled": true,
+              "packPath": "/etc/openclaw/knowledge-packs/knowledge-pack.v2.json",
+              "sharedPacks": [
+                "shared_voice_and_policy.md"
+              ],
+              "routePacks": {
+                "ai_cofoundry": [
+                  "ai_cofoundry.md"
+                ],
+                "rosser_nft_gallery": [
+                  "rosser_nft_gallery.md"
+                ],
+                "rt_solutions": [
+                  "rt_solutions.md"
+                ]
+              }
+            },
+            "actionTools": {
+              "enabled": [
+                "gmail.createDraft",
+                "calendar.createEvent",
+                "calendar.createMeet",
+                "crm.upsertLead"
+              ],
+              "writeAgentId": "fn-actions",
+              "emailDraftOnly": true,
+              "requireThreadLookup": true,
+              "calendarRequireGoogleMeet": true,
+              "calendarRequireTimezone": true,
+              "humanApprovalForSend": true
+            }
           }
         }
       }
     }
   }
 }
-

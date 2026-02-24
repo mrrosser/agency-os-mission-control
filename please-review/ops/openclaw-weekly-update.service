@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenClaw weekly update + health verification
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=/home/marcu/ai-hell-mary/scripts/openclaw_ops_cycle.sh
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/marcu/ai-hell-mary
+Environment=DO_UPDATE=true
+Environment=TAILSCALE_VALIDATE=true
+ExecStart=/bin/bash /home/marcu/ai-hell-mary/scripts/openclaw_ops_cycle.sh
+TimeoutStartSec=900

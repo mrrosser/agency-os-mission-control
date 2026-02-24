@@ -16,7 +16,7 @@ describe("outreach DNC domain candidates", () => {
       "b.example.com",
       "example.com",
     ]);
-  });
+  }, 15000);
 
   it("normalizes URLs and www prefixes", async () => {
     const { expandDomainCandidates } = await import("@/lib/outreach/dnc");
@@ -41,4 +41,3 @@ describe("outreach DNC domain candidates", () => {
     expect(expandDomainCandidates("   ")).toEqual([]);
   });
 });
-

@@ -56,10 +56,24 @@ Steps
 6) Repoint Tailscale Funnel paths (native)
 - On the VM:
   - `bash scripts/native_tailscale_repoint.sh`
+  - Optional: `ENABLE_GMAIL_PUBSUB_FUNNELS=true bash scripts/native_tailscale_repoint.sh` if Gmail Pub/Sub webhooks must stay public.
+
+6b) Enable Tailscale SSH admin access
+- On the VM:
+  - `bash scripts/tailscale_admin_setup.sh`
 
 7) Verify locally (avoid heavy IAP smoke tests)
 - On the VM:
   - `bash scripts/native_gmail_smoke_local.sh`
+
+8) Optional scheduled health checks + weekly auto-update
+- On the VM:
+  - `sudo cp ops/openclaw-healthcheck.service /etc/systemd/system/openclaw-healthcheck.service`
+  - `sudo cp ops/openclaw-healthcheck.timer /etc/systemd/system/openclaw-healthcheck.timer`
+  - `sudo cp ops/openclaw-weekly-update.service /etc/systemd/system/openclaw-weekly-update.service`
+  - `sudo cp ops/openclaw-weekly-update.timer /etc/systemd/system/openclaw-weekly-update.timer`
+  - `sudo systemctl daemon-reload`
+  - `sudo systemctl enable --now openclaw-healthcheck.timer openclaw-weekly-update.timer`
 
 Notes
 - Gmail Pub/Sub expects HTTP 200/404 on GET; actual pushes are POST.

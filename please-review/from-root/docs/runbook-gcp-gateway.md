@@ -23,7 +23,7 @@ PLACEHOLDERS (set these before running commands)
 Goal
 - Provision a Debian GCE VM.
 - Install Docker and run OpenClaw Gateway bound to loopback.
-- Enable SSH tunnel or Tailscale access.
+- Enable Tailscale Serve access for operators (SSH tunnel only as fallback).
 
 Prereqs
 - `gcloud` installed locally and authenticated.
@@ -70,9 +70,15 @@ Steps
  - Optional scheduled attestation on the VM:
    - `bash scripts/install_attest_cron.sh`
 
-8) Access pattern
-- Preferred: SSH tunnel from your Windows machine (see `docs/runbook-windows-node.md`).
-- Optional: Tailscale Serve for private UI; Funnel only for `/googlechat` webhook path if needed.
+8) Access pattern (recommended)
+- Preferred: Tailscale Serve for private dashboard access (see `docs/runbook_remote_access.md`).
+- Apply Serve now:
+  - `bash scripts/tailscale_serve_setup.sh`
+- Enable Tailscale SSH for admin shell:
+  - `bash scripts/tailscale_admin_setup.sh`
+- SSH tunnel is fallback only for break-glass operations.
+- If Google Chat webhook ingress is hosted here, expose only `/googlechat` with Funnel.
+  - `bash scripts/tailscale_funnel_googlechat.sh`
 
 9) Stop switch (manual)
 - Edit `data/openclaw/openclaw.json`:

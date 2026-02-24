@@ -25,6 +25,9 @@ Scope: AI CoFoundry, RT Solutions, Rosser NFT Gallery
 6. Added business-specific reply template bank so all drafts do not sound the same.
 7. Added Marcus voice-pack guardrails (no robotic phrasing, concise structure, brand tone overlays).
 8. Added explicit business calendar profile mapping so each business can use its own booking flow.
+9. Added `agentTopology` for orchestrator + per-business + functional sub-agents with deterministic handoff triggers.
+10. Added `knowledgeIngestionPolicy` with weekly metadata delta scan and approved Drive roots by business/account.
+11. Added `voiceOpsPolicy` so phone flows can use knowledge context and perform draft-first email + strict calendar actions.
 
 ## Critical Gaps (Must Fill First)
 
@@ -41,9 +44,9 @@ Scope: AI CoFoundry, RT Solutions, Rosser NFT Gallery
 - Current operations use Sheets; no canonical CRM API system is configured.
 - Action: lock one system now (Sheets schema first, HubSpot later) and map stage IDs.
 
-4. Missing Drive/Chat indexing policy for contextual drafting
-- Need defined folders to ingest and exclude, plus max token budget for context snippets.
-- Action: add `knowledgeIngestionPolicy` with allowed sources and ranking.
+4. Drive/Chat indexing policy requires final production IDs
+- A policy template now exists (`knowledgeIngestionPolicy`) with source ranking + allowed roots.
+- Remaining action: replace folder-name placeholders with immutable folder IDs before production enforcement.
 
 5. Missing payment/finance integration contract
 - RT Solutions + Rosser NFT Gallery use Square; AICF billing ownership differs.

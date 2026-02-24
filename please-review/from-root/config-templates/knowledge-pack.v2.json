@@ -32,6 +32,272 @@
       "sendSms": "manual",
       "startVoiceCall": "manual"
     },
+    "agentTopology": {
+      "masterAgentId": "orchestrator",
+      "handoffEnabled": true,
+      "agents": [
+        {
+          "id": "orchestrator",
+          "role": "master_router",
+          "workspace": "workspace",
+          "description": "Routes calls and messages to business/function specialists and enforces approval policy.",
+          "canExecuteExternalWrites": false,
+          "handoffTargets": [
+            "biz_aicf",
+            "biz_rng",
+            "biz_rts",
+            "fn_marketing",
+            "fn_research",
+            "fn_actions"
+          ]
+        },
+        {
+          "id": "biz_aicf",
+          "role": "business_specialist",
+          "businessId": "ai_cofoundry",
+          "workspace": "workspace-aicf",
+          "canExecuteExternalWrites": false
+        },
+        {
+          "id": "biz_rng",
+          "role": "business_specialist",
+          "businessId": "rosser_nft_gallery",
+          "workspace": "workspace-rng",
+          "canExecuteExternalWrites": false
+        },
+        {
+          "id": "biz_rts",
+          "role": "business_specialist",
+          "businessId": "rt_solutions",
+          "workspace": "workspace-rts",
+          "canExecuteExternalWrites": false
+        },
+        {
+          "id": "fn_marketing",
+          "role": "function_specialist",
+          "workspace": "workspace-marketing",
+          "description": "Handles content planning, social drafts, campaign support.",
+          "canExecuteExternalWrites": false
+        },
+        {
+          "id": "fn_research",
+          "role": "function_specialist",
+          "workspace": "workspace-research",
+          "description": "Runs web/company research and summarizes findings with citations.",
+          "canExecuteExternalWrites": false
+        },
+        {
+          "id": "fn_actions",
+          "role": "action_executor",
+          "workspace": "workspace-actions",
+          "description": "Single writer agent for Gmail drafts, calendar events, CRM updates.",
+          "canExecuteExternalWrites": true,
+          "writeTools": [
+            "gmail.createDraft",
+            "gmail.send",
+            "calendar.createEvent",
+            "calendar.updateEvent",
+            "crm.upsertLead"
+          ]
+        }
+      ],
+      "handoffTriggers": [
+        {
+          "id": "route_ai_cofoundry",
+          "matchAny": [
+            "aicf",
+            "ai cofoundry",
+            "pilot",
+            "managed ai ops",
+            "workflow automation"
+          ],
+          "handoffTo": "biz_aicf"
+        },
+        {
+          "id": "route_rosser_nft_gallery",
+          "matchAny": [
+            "rng",
+            "gallery",
+            "commission",
+            "event booking",
+            "exhibition",
+            "collector"
+          ],
+          "handoffTo": "biz_rng"
+        },
+        {
+          "id": "route_rt_solutions",
+          "matchAny": [
+            "rt solutions",
+            "school",
+            "district",
+            "workshop",
+            "professional development",
+            "after-school"
+          ],
+          "handoffTo": "biz_rts"
+        },
+        {
+          "id": "route_marketing",
+          "matchAny": [
+            "content",
+            "social",
+            "campaign",
+            "post",
+            "promotion"
+          ],
+          "handoffTo": "fn_marketing"
+        },
+        {
+          "id": "route_research",
+          "matchAny": [
+            "research",
+            "market scan",
+            "competitor",
+            "intel",
+            "sources"
+          ],
+          "handoffTo": "fn_research"
+        },
+        {
+          "id": "route_external_action",
+          "intentAny": [
+            "send_email",
+            "draft_email",
+            "schedule_meeting",
+            "create_calendar_event",
+            "update_crm"
+          ],
+          "handoffTo": "fn_actions"
+        }
+      ]
+    },
+    "knowledgeIngestionPolicy": {
+      "enabled": true,
+      "scanMode": "metadata_delta_weekly",
+      "scanCadence": "weekly",
+      "readMode": "metadata_plus_excerpt",
+      "maxSnippetCharsPerDoc": 3500,
+      "maxContextCharsPerResponse": 12000,
+      "rankedSources": [
+        "gmail_thread_history",
+        "google_drive",
+        "calendar_history",
+        "google_chat"
+      ],
+      "sources": {
+        "gmailThreadHistory": {
+          "enabled": true,
+          "maxMessages": 20,
+          "preferSameContactThread": true
+        },
+        "googleDrive": {
+          "enabled": true,
+          "allowSharedDrives": true,
+          "rootsByAccount": [
+            {
+              "account": "marcus@aicofoundry.com",
+              "businessId": "ai_cofoundry",
+              "roots": [
+                "AICoFoundry_Doc_Pack_v1",
+                "Meet Recordings"
+              ]
+            },
+            {
+              "account": "mrosser@rossernftgallery.com",
+              "businessId": "rosser_nft_gallery",
+              "roots": [
+                "NOTCF_Prepared_Documents_PACKET",
+                "IG-Auto",
+                "Meet Recordings"
+              ]
+            },
+            {
+              "account": "mrosser@rossernftgallery.com",
+              "businessId": "rt_solutions",
+              "roots": [
+                "NOTCF_Prepared_Documents_PACKET",
+                "IG-Auto",
+                "Meet Recordings"
+              ]
+            }
+          ],
+          "exclusions": [
+            "Spam",
+            "Trash",
+            "Screenshots",
+            "Recordings/raw"
+          ]
+        },
+        "calendarHistory": {
+          "enabled": true,
+          "includePastDays": 120,
+          "includeUpcomingDays": 30
+        },
+        "googleChat": {
+          "enabled": true,
+          "includeSpaces": [
+            "spaces/AAQA62xqRGQ",
+            "spaces/AAQALocqO7Q"
+          ],
+          "maxMessagesPerSpace": 200
+        }
+      }
+    },
+    "voiceOpsPolicy": {
+      "enabled": true,
+      "entryAgentId": "orchestrator",
+      "defaultActionAgentId": "fn_actions",
+      "callerRouting": [
+        {
+          "phoneNumber": "+18443169534",
+          "defaultBusinessId": "rosser_nft_gallery",
+          "notes": "Current inbound line used for RNG + RT Solutions tests."
+        }
+      ],
+      "requireBusinessContextBeforeWrite": true,
+      "requireThreadLookupBeforeEmailDraft": true,
+      "allowActions": [
+        "gmail.createDraft",
+        "calendar.createEvent",
+        "calendar.createMeet",
+        "crm.upsertLead"
+      ],
+      "actionPolicies": {
+        "gmail": {
+          "mode": "draft_first",
+          "autoSend": false,
+          "mustCheckExistingThread": true,
+          "attachBusinessSignature": true
+        },
+        "calendar": {
+          "mode": "strict_auto_book",
+          "requireGoogleMeet": true,
+          "requireTimezone": true,
+          "onConflict": "offer_alternates"
+        },
+        "crm": {
+          "mode": "upsert_only",
+          "requiredFields": [
+            "lead_id",
+            "business",
+            "source",
+            "next_action",
+            "owner"
+          ]
+        }
+      },
+      "humanEscalation": {
+        "requiredFor": [
+          "send_email",
+          "contracts",
+          "pricing_commitment",
+          "payment_change",
+          "legal_commitment"
+        ],
+        "notifySpaceId": "spaces/AAQA62xqRGQ"
+      }
+    },
     "mailboxRouting": [
       {
         "address": "mrosser@rossernftgallery.com",

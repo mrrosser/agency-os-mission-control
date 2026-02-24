@@ -10,7 +10,7 @@ Add a time-based retention policy for telemetry so Firestore telemetry collectio
 - Add a scheduled GitHub Action to run cleanup daily.
 - Add unit tests for config parsing and cleanup behavior.
 - Persist cleanup run summaries to Firestore for operational visibility.
-- Add an authenticated status API + Operations surface for cleanup metrics.
+- Add authenticated status/dispatch APIs + Operations surface for cleanup metrics and alerts.
 - Document local run + policy knobs.
 
 ## Non-Goals
@@ -31,16 +31,16 @@ Add a time-based retention policy for telemetry so Firestore telemetry collectio
    - Dry-run behavior.
    - Non-dry-run batched deletion behavior.
 4. Update `README.md` + `package.json` script.
-5. Add `GET /api/telemetry/retention-status` and show metrics in Operations.
+5. Add `GET /api/telemetry/retention-status` and `POST /api/telemetry/retention-run`, then show metrics/alerts/controls in Operations.
 
 ## Verification
 - `npx vitest run tests/unit/telemetry-retention-cleanup.test.ts`
 - `npx vitest run tests/unit/telemetry-sanitize.test.ts tests/unit/telemetry-fingerprint.test.ts`
-- `npx vitest run tests/smoke/telemetry-error-route.test.ts tests/smoke/telemetry-groups-route.test.ts tests/smoke/telemetry-retention-status-route.test.ts`
+- `npx vitest run tests/smoke/telemetry-error-route.test.ts tests/smoke/telemetry-groups-route.test.ts tests/smoke/telemetry-retention-status-route.test.ts tests/smoke/telemetry-retention-run-route.test.ts`
 
 ## Status
 - [x] Cleanup script added.
 - [x] Scheduled workflow added.
 - [x] Tests added.
-- [x] Firestore status persistence + status API + Operations UI card added.
+- [x] Firestore status persistence + status API + alerting surface + run-now dispatch API/UI added.
 - [x] Docs and local run commands updated.

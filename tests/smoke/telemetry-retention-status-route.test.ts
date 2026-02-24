@@ -103,5 +103,6 @@ describe("telemetry retention status route", () => {
     expect(data.runs).toHaveLength(2);
     expect(data.runs[1].status).toBe("failed");
     expect(data.runs[1].error.message).toContain("permission denied");
+    expect(data.runs[1].alert.code).toBe("cleanup_failed");
   });
 });

@@ -152,6 +152,7 @@ Phase 3: scheduled retention cleanup
   - `telemetry_error_groups` by `lastSeenAt`
 - Cleanup is idempotent and bounded per run with batch + max-delete caps.
 - Cleanup status is written to Firestore and exposed at `GET /api/telemetry/retention-status` (shown in Operations as **Telemetry Cleanup**).
+- Manual trigger API for Operations UI: `POST /api/telemetry/retention-run`.
 
 Config (SSR runtime):
 - `TELEMETRY_ENABLED=true` (set to `false` to disable ingest)
@@ -168,6 +169,12 @@ Config (retention cleanup):
 - `TELEMETRY_CLEANUP_BATCH_SIZE` (default `200`)
 - `TELEMETRY_CLEANUP_MAX_DELETES_PER_COLLECTION` (default `5000`)
 - `TELEMETRY_CLEANUP_DRY_RUN` (default `false`)
+- Optional for manual UI-triggered dispatch (`POST /api/telemetry/retention-run`):
+  - `GITHUB_WORKFLOW_DISPATCH_TOKEN` (required for dispatch)
+  - `GITHUB_WORKFLOW_OWNER`, `GITHUB_WORKFLOW_REPO` (fallback: `GITHUB_REPOSITORY`)
+  - `GITHUB_TELEMETRY_RETENTION_WORKFLOW` (default: `telemetry-retention-cleanup.yml`)
+  - `GITHUB_TELEMETRY_RETENTION_REF` (default: `main`)
+  - `TELEMETRY_CLEANUP_ALLOWED_UIDS` (optional CSV allowlist)
 
 Run triage locally:
 ```powershell

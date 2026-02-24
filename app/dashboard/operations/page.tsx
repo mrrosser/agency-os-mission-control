@@ -170,6 +170,24 @@ interface TelemetryCleanupStatusSummary {
     error?: {
         message?: string | null;
     };
+    alert?: {
+        severity?: "critical" | "warning";
+        code?: string;
+        message?: string;
+    } | null;
+}
+
+interface TelemetryCleanupRunResponse {
+    ok?: boolean;
+    dispatchRequested?: boolean;
+    replayed?: boolean;
+    workflowFile?: string;
+    workflowRef?: string;
+    runUrl?: string;
+    dryRun?: boolean;
+    eventRetentionDays?: number;
+    groupRetentionDays?: number;
+    error?: string;
 }
 
 interface LeadRunQuotaSummary {
@@ -339,6 +357,7 @@ export default function OperationsPage() {
     const [telemetryCleanupStatus, setTelemetryCleanupStatus] = useState<TelemetryCleanupStatusSummary | null>(null);
     const [loadingTelemetry, setLoadingTelemetry] = useState(false);
     const [loadingTelemetryCleanup, setLoadingTelemetryCleanup] = useState(false);
+    const [dispatchingTelemetryCleanup, setDispatchingTelemetryCleanup] = useState<null | "dry" | "live">(null);
     const [quotaSummary, setQuotaSummary] = useState<LeadRunQuotaSummary | null>(null);
     const [alerts, setAlerts] = useState<LeadRunAlert[]>([]);
     const [loadingQuota, setLoadingQuota] = useState(false);
@@ -605,6 +624,54 @@ export default function OperationsPage() {
             reportClientError(message, { source: "operations.load_telemetry_cleanup_status" });
         } finally {
             setLoadingTelemetryCleanup(false);
+        }
+    };
+
+    const runTelemetryCleanupNow = async (dryRun: boolean) => {
+        if (!user) return;
+        setDispatchingTelemetryCleanup(dryRun ? "dry" : "live");
+        try {
+            const headers = await buildAuthHeaders(user, {
+                idempotencyKey: crypto.randomUUID(),
+            });
+            const res = await fetch("/api/telemetry/retention-run", {
+                method: "POST",
+                headers,
+                body: JSON.stringify({
+                    dryRun,
+                    eventRetentionDays: telemetryCleanupStatus?.eventRetentionDays || 30,
+                    groupRetentionDays: telemetryCleanupStatus?.groupRetentionDays || 180,
+                }),
+            });
+            const data = await readApiJson<TelemetryCleanupRunResponse>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                        `Failed to dispatch telemetry cleanup (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+
+            toast.success(
+                data?.replayed
+                    ? "Telemetry cleanup dispatch replayed"
+                    : `Telemetry cleanup ${dryRun ? "dry-run" : "live"} dispatched`,
+                {
+                    description: data?.runUrl
+                        ? "Open workflow run from the Telemetry Cleanup card once available."
+                        : undefined,
+                }
+            );
+            void loadTelemetryCleanupStatus();
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            toast.error("Telemetry cleanup dispatch failed", { description: message });
+            reportClientError(message, {
+                source: "operations.dispatch_telemetry_cleanup",
+                dryRun,
+            });
+        } finally {
+            setDispatchingTelemetryCleanup(null);
         }
     };
 
@@ -3013,16 +3080,38 @@ export default function OperationsPage() {
                                 <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">
                                     <div className="flex items-center justify-between">
                                         <p className="font-medium text-zinc-200">Telemetry Cleanup</p>
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="outline"
-                                            disabled={loadingTelemetryCleanup}
-                                            className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
-                                            onClick={() => void loadTelemetryCleanupStatus()}
-                                        >
-                                            {loadingTelemetryCleanup ? "..." : "Refresh"}
-                                        </Button>
+                                        <div className="flex items-center gap-1">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={Boolean(dispatchingTelemetryCleanup)}
+                                                className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white px-2"
+                                                onClick={() => void runTelemetryCleanupNow(true)}
+                                            >
+                                                {dispatchingTelemetryCleanup === "dry" ? "..." : "Dry"}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={Boolean(dispatchingTelemetryCleanup)}
+                                                className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white px-2"
+                                                onClick={() => void runTelemetryCleanupNow(false)}
+                                            >
+                                                {dispatchingTelemetryCleanup === "live" ? "..." : "Run"}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={loadingTelemetryCleanup}
+                                                className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                                onClick={() => void loadTelemetryCleanupStatus()}
+                                            >
+                                                {loadingTelemetryCleanup ? "..." : "Refresh"}
+                                            </Button>
+                                        </div>
                                     </div>
                                     {telemetryCleanupStatus ? (
                                         <div className="space-y-1 text-[11px]">
@@ -3058,6 +3147,17 @@ export default function OperationsPage() {
                                                 Deleted: {telemetryCleanupStatus.events.deleted} events /{" "}
                                                 {telemetryCleanupStatus.groups.deleted} groups
                                             </p>
+                                            {telemetryCleanupStatus.alert?.message && (
+                                                <p
+                                                    className={
+                                                        telemetryCleanupStatus.alert.severity === "critical"
+                                                            ? "text-red-400"
+                                                            : "text-amber-400"
+                                                    }
+                                                >
+                                                    Alert: {telemetryCleanupStatus.alert.message}
+                                                </p>
+                                            )}
                                             {(telemetryCleanupStatus.events.reachedDeleteCap ||
                                                 telemetryCleanupStatus.groups.reachedDeleteCap) && (
                                                 <p className="text-amber-400">

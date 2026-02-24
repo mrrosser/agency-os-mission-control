@@ -39,9 +39,27 @@ function mapRunRecord(value: Record<string, unknown> | null) {
   const groups = (value.groups || {}) as Record<string, unknown>;
   const github = (value.github || {}) as Record<string, unknown>;
   const error = (value.error || {}) as Record<string, unknown>;
+  const status = String(value.status || "unknown");
+  const eventsReachedCap = toBoolean(events.reachedDeleteCap);
+  const groupsReachedCap = toBoolean(groups.reachedDeleteCap);
+  const reachedAnyCap = eventsReachedCap || groupsReachedCap;
+  const alert =
+    status !== "success"
+      ? {
+          severity: "critical",
+          code: "cleanup_failed",
+          message: error.message ? String(error.message) : "Telemetry cleanup run failed.",
+        }
+      : reachedAnyCap
+        ? {
+            severity: "warning",
+            code: "cleanup_cap_reached",
+            message: "Telemetry cleanup reached delete cap; some stale records may remain.",
+          }
+        : null;
 
   return {
-    status: String(value.status || "unknown"),
+    status,
     correlationId: String(value.correlationId || ""),
     projectId: String(value.projectId || ""),
     startedAt: toIso(value.startedAt),
@@ -57,12 +75,12 @@ function mapRunRecord(value: Record<string, unknown> | null) {
     events: {
       deleted: toNumber(events.deleted),
       batches: toNumber(events.batches),
-      reachedDeleteCap: toBoolean(events.reachedDeleteCap),
+      reachedDeleteCap: eventsReachedCap,
     },
     groups: {
       deleted: toNumber(groups.deleted),
       batches: toNumber(groups.batches),
-      reachedDeleteCap: toBoolean(groups.reachedDeleteCap),
+      reachedDeleteCap: groupsReachedCap,
     },
     github: {
       runId: github.runId ? String(github.runId) : null,
@@ -77,6 +95,7 @@ function mapRunRecord(value: Record<string, unknown> | null) {
       message: error.message ? String(error.message) : null,
       stack: error.stack ? String(error.stack) : null,
     },
+    alert,
   };
 }
 

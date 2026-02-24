@@ -19,6 +19,7 @@
     "test:pw:install": "playwright install",
     "test:postdeploy": "node scripts/post-deploy-smoke.mjs",
     "check:oauth-readiness": "node scripts/google-verification-readiness.mjs",
+    "telemetry:cleanup": "node scripts/telemetry-retention-cleanup.js",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",
     "pw:helper": "node please-review/scripts/playwright-helper.mjs",
     "pw:shortcuts": "node please-review/scripts/playwright-shortcuts.mjs"
@@ -74,5 +75,13 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "firebase-frameworks": {
+      "cookie": "0.7.2"
+    },
+    "glob": {
+      "minimatch": "10.2.1"
+    }
   }
 }

@@ -62,6 +62,7 @@ npm run dev
   - OpenAI: `GET /v1/organization/costs` (org admin key required for live pulls)
   - Twilio: Usage Records (ThisMonth, total price category)
   - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
+  - Control-plane billing pulls are cached per user for 120s by default (`CONTROL_PLANE_BILLING_CACHE_TTL_MS`).
 
 ## Competitor Monitor Dashboard
 - UI: `/dashboard/competitors`
@@ -81,6 +82,7 @@ npm run dev
 - Current behavior:
   - answers inbound calls with `<Gather>` speech loop,
   - detects action intents (`calendar.createMeet`, `gmail.createDraft`, `crm.upsertLead`),
+  - only queues write actions when `globalPolicies.voiceOpsPolicy.enabled` is explicitly `true`,
   - writes idempotent action requests to Firestore `voice_action_requests` (queued for review),
   - stores call session state in `voice_call_sessions`.
 
@@ -97,6 +99,7 @@ npm run dev
 - Processing behavior:
   - Claims queued records from `voice_action_requests`.
   - Executes `gmail.createDraft` and `calendar.createMeet` with DNC checks.
+  - Calendar date/time parsing uses business-local timezone from knowledge policy (`calendarDefaults.timeZone`) and falls back to `VOICE_ACTIONS_DEFAULT_TIMEZONE`.
   - Upserts `crm.upsertLead` into `voice_crm_leads`.
   - Marks each request as `complete`, `needs_input`, or `error`.
   - `POST /api/twilio/voice-webhook` now triggers this worker immediately after queueing a write action.
@@ -141,6 +144,14 @@ Phase 2: automated triage
 - It is idempotent: once a group is linked to an issue, it will not create duplicates.
 - It does not auto-merge or auto-deploy.
 
+Phase 3: scheduled retention cleanup
+- `.github/workflows/telemetry-retention-cleanup.yml` runs daily and deletes old telemetry docs by time-based retention windows.
+- Manual `workflow_dispatch` supports dry-run and retention overrides for safe first runs.
+- It prunes:
+  - `telemetry_error_events` by `createdAt`
+  - `telemetry_error_groups` by `lastSeenAt`
+- Cleanup is idempotent and bounded per run with batch + max-delete caps.
+
 Config (SSR runtime):
 - `TELEMETRY_ENABLED=true` (set to `false` to disable ingest)
 - `TELEMETRY_SERVER_ERRORS=true` (optional: capture 5xx responses)
@@ -150,6 +161,13 @@ Config (GitHub Action triage):
 - Uses `FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW` to read/write Firestore groups.
 - Uses `${{ github.token }}` to create issues in this repo.
 
+Config (retention cleanup):
+- `TELEMETRY_EVENT_RETENTION_DAYS` (default `30`)
+- `TELEMETRY_GROUP_RETENTION_DAYS` (default `180`, must be >= event retention)
+- `TELEMETRY_CLEANUP_BATCH_SIZE` (default `200`)
+- `TELEMETRY_CLEANUP_MAX_DELETES_PER_COLLECTION` (default `5000`)
+- `TELEMETRY_CLEANUP_DRY_RUN` (default `false`)
+
 Run triage locally:
 ```powershell
 $env:GCLOUD_PROJECT="leadflow-review"
@@ -157,6 +175,16 @@ $env:GOOGLE_APPLICATION_CREDENTIALS="C:\\path\\to\\firebase-adminsdk.json"
 $env:GITHUB_TOKEN="<your token>" # optional if you want to create issues locally
 $env:GITHUB_REPOSITORY="mrrosser/agency-os-mission-control"
 node scripts/telemetry-triage.js
+```
+
+Run retention cleanup locally:
+```powershell
+$env:GCLOUD_PROJECT="leadflow-review"
+$env:GOOGLE_APPLICATION_CREDENTIALS="C:\\path\\to\\firebase-adminsdk.json"
+$env:TELEMETRY_EVENT_RETENTION_DAYS="30"
+$env:TELEMETRY_GROUP_RETENTION_DAYS="180"
+$env:TELEMETRY_CLEANUP_DRY_RUN="true" # flip to false to delete
+npm run telemetry:cleanup
 ```
 
 ## Lead Run Queue + Limits (recommended defaults for 5-10 active users)

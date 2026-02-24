@@ -1,0 +1,62 @@
+name: Telemetry Retention Cleanup
+
+on:
+  schedule:
+    # Daily UTC run; GitHub schedules are best-effort.
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (no deletes)"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      event_retention_days:
+        description: "Retention in days for telemetry_error_events"
+        required: true
+        default: "30"
+        type: string
+      group_retention_days:
+        description: "Retention in days for telemetry_error_groups"
+        required: true
+        default: "180"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Write Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: |
+          node -e "require('fs').writeFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, process.env.FIREBASE_SERVICE_ACCOUNT_JSON)"
+
+      - name: Run retention cleanup
+        env:
+          GCLOUD_PROJECT: leadflow-review
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+          TELEMETRY_EVENT_RETENTION_DAYS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.event_retention_days || '30' }}
+          TELEMETRY_GROUP_RETENTION_DAYS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.group_retention_days || '180' }}
+          TELEMETRY_CLEANUP_BATCH_SIZE: "200"
+          TELEMETRY_CLEANUP_MAX_DELETES_PER_COLLECTION: "5000"
+          TELEMETRY_CLEANUP_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}
+        run: node scripts/telemetry-retention-cleanup.js

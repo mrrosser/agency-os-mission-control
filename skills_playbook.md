@@ -11,20 +11,10 @@ Use global shared skills and RT Infinite Loop references while keeping project t
 - Process/docs: `docs/`
 - Exec plans: `docs/execplans/`
 
-## Loop contract (this repo)
-- Runner (Windows): `scripts/loop/run.ps1`
-- Runner (CI/Linux): `scripts/loop/run.sh`
-- Report output: `docs/reports/latest-run.md`
-
-Run the full gate set:
-```powershell
-.\scripts\loop\run.ps1
-```
-
-CI runner:
-```bash
-bash scripts/loop/run.sh
-```
+## RT loop ownership
+- RT loop is a global skill/workflow, not a repo-level CI workflow for this project.
+- Use the global RT loop playbook/repo for loop orchestration.
+- This repo runs its own quality gates in standard CI workflows.
 
 ## DoD gates (default)
 - Lint: `npm run lint`
@@ -37,5 +27,5 @@ bash scripts/loop/run.sh
 ## Default execution loop
 1) Confirm active DoD from exec plan.
 2) Implement only in-scope work.
-3) Run gates via `scripts/loop/run.ps1` (Windows) or `scripts/loop/run.sh` (CI/Linux).
+3) Run local gates directly (`npm run lint`, `npm run test:unit`, `npm run test:smoke`, `npm run build`).
 4) Keep `docs/reports/latest-run.md` updated and attach artifacts for CI runs.

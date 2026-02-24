@@ -185,22 +185,65 @@ export async function triggerLeadRunWorker(
     }
   }
 
-  try {
-    const url = `${origin}/api/lead-runs/${encodeURIComponent(runId)}/jobs/worker`;
-    await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Correlation-Id": correlationId,
-      },
-      body: JSON.stringify({ workerToken }),
-      cache: "no-store",
-    });
-    log?.info("lead_runs.job.worker_triggered", { runId, dispatch: "http" });
-  } catch (error) {
-    log?.warn("lead_runs.job.worker_trigger_failed", {
-      runId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  const fallbackOrigins = new Set<string>();
+  const addOrigin = (value: string | undefined | null) => {
+    const normalized = String(value || "").trim().replace(/\/+$/, "");
+    if (!normalized) return;
+    fallbackOrigins.add(normalized);
+  };
+
+  addOrigin(origin);
+  addOrigin(process.env.LEAD_RUNS_WORKER_ORIGIN);
+  if (projectId) {
+    const region =
+      process.env.FUNCTION_REGION ||
+      process.env.GCLOUD_REGION ||
+      process.env.GOOGLE_CLOUD_REGION ||
+      process.env.LEAD_RUNS_TASK_LOCATION ||
+      "us-central1";
+    addOrigin(`https://${region}-${projectId}.cloudfunctions.net/ssrleadflowreview`);
   }
+  if (process.env.VERCEL_URL) {
+    addOrigin(`https://${process.env.VERCEL_URL}`);
+  }
+
+  for (const fallbackOrigin of fallbackOrigins) {
+    const url = `${fallbackOrigin}/api/lead-runs/${encodeURIComponent(runId)}/jobs/worker`;
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Correlation-Id": correlationId,
+        },
+        body: JSON.stringify({ workerToken }),
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        log?.warn("lead_runs.job.worker_trigger_http_failed", {
+          runId,
+          origin: fallbackOrigin,
+          status: response.status,
+        });
+        continue;
+      }
+      log?.info("lead_runs.job.worker_triggered", {
+        runId,
+        dispatch: "http",
+        origin: fallbackOrigin,
+      });
+      return;
+    } catch (error) {
+      log?.warn("lead_runs.job.worker_trigger_http_error", {
+        runId,
+        origin: fallbackOrigin,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  log?.warn("lead_runs.job.worker_trigger_failed", {
+    runId,
+    attemptedOrigins: Array.from(fallbackOrigins),
+  });
 }

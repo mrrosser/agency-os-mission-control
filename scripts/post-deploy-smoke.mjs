@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { initializeApp, applicationDefault, getApps } from "firebase-admin/app";
+import { initializeApp, applicationDefault, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
@@ -41,6 +41,27 @@ function resolveProjectId() {
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
     null
   );
+}
+
+function resolveServiceAccountCredential() {
+  const credentialPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (!credentialPath || !fs.existsSync(credentialPath)) return null;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(credentialPath, "utf8"));
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.client_email === "string" &&
+      typeof parsed.private_key === "string"
+    ) {
+      return parsed;
+    }
+  } catch {
+    // fall through to applicationDefault()
+  }
+
+  return null;
 }
 
 function assert(condition, message) {
@@ -89,14 +110,15 @@ async function main() {
   ).replace(/\/+$/, "");
   const apiKey = resolveFirebaseApiKey();
   const projectId = resolveProjectId();
-  const uid = process.env.SMOKE_TEST_UID || "ci-smoke-user";
+  const uid = process.env.SMOKE_TEST_UID || `ci-smoke-user-${Date.now()}`;
 
   assert(apiKey, "Missing NEXT_PUBLIC_FIREBASE_API_KEY (env or .env.local).");
   assert(projectId, "Missing Firebase project id env (GOOGLE_CLOUD_PROJECT / GCLOUD_PROJECT / FIREBASE_PROJECT_ID).");
 
   if (getApps().length === 0) {
+    const serviceAccount = resolveServiceAccountCredential();
     initializeApp({
-      credential: applicationDefault(),
+      credential: serviceAccount ? cert(serviceAccount) : applicationDefault(),
       projectId,
     });
   }
@@ -109,7 +131,6 @@ async function main() {
   const leadDocId = `ci-smoke-${runTag}`;
   let templateId = null;
   let runId = null;
-  let workerToken = null;
   let idToken = null;
 
   console.log(`[smoke] baseUrl=${baseUrl} uid=${uid}`);
@@ -177,7 +198,7 @@ async function main() {
       console.log(`[smoke] template save passed templateId=${templateId}`);
     }
 
-    // 5) Source from firestore (fallback to manual run seeding if provider config is unavailable)
+    // 5) Source from firestore
     {
       const { response, payload } = await requestJson(`${baseUrl}/api/leads/source`, {
         method: "POST",
@@ -189,74 +210,16 @@ async function main() {
           minScore: 0,
         }),
       });
-      if (response.ok) {
-        runId = payload?.runId;
-        assert(typeof runId === "string" && runId.length > 0, "Lead source missing runId.");
-        assert(Array.isArray(payload?.leads) && payload.leads.length > 0, "Lead source returned no leads.");
-        console.log(`[smoke] lead source passed runId=${runId}`);
-      } else {
-        console.warn(
-          `[smoke] lead source unavailable (${response.status}); using manual fallback run seed: ${JSON.stringify(payload)}`
-        );
+      if (!response.ok) {
+        throw new Error(`Lead source failed (${response.status}): ${JSON.stringify(payload)}`);
       }
+      runId = payload?.runId;
+      assert(typeof runId === "string" && runId.length > 0, "Lead source missing runId.");
+      assert(Array.isArray(payload?.leads) && payload.leads.length > 0, "Lead source returned no leads.");
+      console.log(`[smoke] lead source passed runId=${runId}`);
     }
 
-    if (!runId) {
-      runId = `ci-smoke-run-${runTag}`;
-      const runRef = db.collection("lead_runs").doc(runId);
-      await runRef.set({
-        userId: uid,
-        request: {
-          sources: ["firestore"],
-          limit: 1,
-          includeEnrichment: false,
-          minScore: 0,
-        },
-        sourcesUsed: ["firestore"],
-        candidateTotal: 1,
-        filteredOut: 0,
-        total: 1,
-        sourceDiagnostics: {
-          requestedLimit: 1,
-          fetchedTotal: 1,
-          dedupedTotal: 1,
-          duplicatesRemoved: 0,
-          domainClusters: 0,
-          maxDomainClusterSize: 0,
-          scoredTotal: 1,
-          filteredByScore: 0,
-          withEmail: 1,
-          withoutEmail: 0,
-          budget: {
-            maxCostUsd: 0,
-            maxPages: 0,
-            maxRuntimeSec: 0,
-            costUsedUsd: 0,
-            pagesUsed: 0,
-            runtimeSec: 0,
-            stopped: false,
-          },
-        },
-        createdAt: new Date(),
-      });
-      await runRef.collection("leads").doc(`firestore:${leadDocId}`).set({
-        userId: uid,
-        runId,
-        source: "firestore",
-        score: 70,
-        companyName: "CI Smoke Co",
-        founderName: "Smoke Contact",
-        email: "smoke@example.com",
-        phone: "+15555550123",
-        website: "https://example.com",
-        industry: "Testing",
-        location: "New Orleans",
-        createdAt: new Date(),
-      });
-      console.log(`[smoke] fallback run seeded runId=${runId}`);
-    }
-
-    let leadRunStarted = false;
+    // 6) Start worker-backed lead run job
     {
       const { response, payload } = await requestJson(
         `${baseUrl}/api/lead-runs/${encodeURIComponent(runId)}/jobs`,
@@ -273,86 +236,24 @@ async function main() {
           }),
         }
       );
-      if (response.ok) {
-        leadRunStarted = true;
-        console.log("[smoke] lead run start passed");
-      } else {
-        console.warn(
-          `[smoke] lead run start unavailable (${response.status}); using manual worker fallback: ${JSON.stringify(payload)}`
-        );
+      if (!response.ok) {
+        throw new Error(`Lead run start failed (${response.status}): ${JSON.stringify(payload)}`);
       }
+      console.log("[smoke] lead run start passed");
     }
 
-    if (!leadRunStarted) {
-      workerToken = crypto.randomUUID();
-      await db
-        .collection("lead_runs")
-        .doc(runId)
-        .collection("jobs")
-        .doc("default")
-        .set({
-          runId,
-          userId: uid,
-          status: "queued",
-          config: {
-            dryRun: true,
-            draftFirst: true,
-            timeZone: "America/Chicago",
-            useSMS: false,
-            useAvatar: false,
-            useOutboundCall: false,
-          },
-          workerToken,
-          leadDocIds: [`firestore:${leadDocId}`],
-          nextIndex: 0,
-          totalLeads: 1,
-          diagnostics: {
-            sourceFetched: 1,
-            sourceScored: 1,
-            sourceFilteredByScore: 0,
-            sourceWithEmail: 1,
-            sourceWithoutEmail: 0,
-            processedLeads: 0,
-            failedLeads: 0,
-            calendarRetries: 0,
-            noEmail: 0,
-            noSlot: 0,
-            meetingsScheduled: 0,
-            meetingsDrafted: 0,
-            emailsSent: 0,
-            emailsDrafted: 0,
-            smsSent: 0,
-            callsPlaced: 0,
-            avatarsQueued: 0,
-            channelFailures: 0,
-          },
-          attemptsByLead: {},
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-      console.log("[smoke] manual worker fallback seeded");
-    }
-
-    // 6) Poll worker until completion (best-effort when runtime queue constraints exist)
+    // 7) Poll worker until completion
     let workerCompleted = false;
     {
       const maxWaitMs = 120_000;
       const started = Date.now();
       let lastStatus = "unknown";
       while (Date.now() - started < maxWaitMs) {
-        if (workerToken) {
-          await requestJson(`${baseUrl}/api/lead-runs/${encodeURIComponent(runId)}/jobs/worker`, {
-            method: "POST",
-            headers: authHeaders,
-            body: JSON.stringify({ workerToken }),
-          });
-        }
         const { response, payload } = await requestJson(`${baseUrl}/api/lead-runs/${encodeURIComponent(runId)}/jobs`, {
           headers: { Authorization: `Bearer ${idToken}` },
         });
         if (!response.ok) {
-          console.warn(`[smoke] lead run status unavailable (${response.status}): ${JSON.stringify(payload)}`);
-          break;
+          throw new Error(`Lead run status failed (${response.status}): ${JSON.stringify(payload)}`);
         }
         const status = payload?.job?.status;
         if (typeof status === "string") lastStatus = status;
@@ -362,13 +263,12 @@ async function main() {
           break;
         }
         if (status === "failed") {
-          console.warn(`[smoke] lead run worker failed: ${payload?.job?.lastError || "unknown"}`);
-          break;
+          throw new Error(`Lead run worker failed: ${payload?.job?.lastError || "unknown"}`);
         }
         await sleep(2500);
       }
       if (!workerCompleted) {
-        console.warn(`[smoke] worker verification skipped (last=${lastStatus}).`);
+        throw new Error(`Lead run worker did not complete before timeout (last=${lastStatus}).`);
       }
     }
 

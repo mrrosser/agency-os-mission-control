@@ -161,10 +161,10 @@ export const POST = withApiHandler(
         dryRun: Boolean(body.config?.dryRun),
         draftFirst: Boolean(body.config?.draftFirst),
         timeZone: body.config?.timeZone || "UTC",
-        businessKey: body.config?.businessKey,
         useSMS: Boolean(body.config?.useSMS),
         useAvatar: Boolean(body.config?.useAvatar),
         useOutboundCall: Boolean(body.config?.useOutboundCall),
+        ...(body.config?.businessKey ? { businessKey: body.config.businessKey } : {}),
       };
 
       const orgId = await resolveLeadRunOrgId(user.uid, log);

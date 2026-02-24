@@ -24,5 +24,10 @@ describe("lead run stages", () => {
     expect(progress.currentStage).toBe("complete");
     expect(progress.stages.enrich.status).toBe("skipped");
   });
-});
 
+  it("does not write undefined detail fields on stage updates", () => {
+    const progress = updateLeadStageProgress(undefined, "booking", "running");
+    expect(progress.stages.booking.detail).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(progress.stages.booking, "detail")).toBe(false);
+  });
+});

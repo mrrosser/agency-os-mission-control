@@ -59,7 +59,11 @@ export function updateLeadStageProgress(
     [stage]: {
       status,
       updatedAt: ts,
-      detail,
+      ...(detail !== undefined
+        ? { detail }
+        : base.stages[stage]?.detail !== undefined
+          ? { detail: base.stages[stage].detail }
+          : {}),
     },
   };
 
@@ -74,4 +78,3 @@ export function updateLeadStageProgress(
     stages,
   };
 }
-

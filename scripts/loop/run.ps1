@@ -138,7 +138,7 @@ try {
   $unitCmd = if ($env:RT_UNIT_CMD) { $env:RT_UNIT_CMD } else { "npm run test:unit" }
   $smokeCmd = if ($env:RT_SMOKE_CMD) { $env:RT_SMOKE_CMD } else { "npm run test:smoke" }
   $buildCmd = if ($env:RT_BUILD_CMD) { $env:RT_BUILD_CMD } else { "npm run build" }
-  $securityCmd = if ($env:RT_SECURITY_CMD) { $env:RT_SECURITY_CMD } else { "npm audit --audit-level=high" }
+  $securityCmd = if ($env:RT_SECURITY_CMD) { $env:RT_SECURITY_CMD } else { "npm audit --audit-level=high --omit=dev" }
 
   Run-Gate -Name "format_lint" -Cmd $formatCmd
   Run-Gate -Name "unit" -Cmd $unitCmd

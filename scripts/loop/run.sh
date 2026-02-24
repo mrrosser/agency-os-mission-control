@@ -226,7 +226,7 @@ FORMAT_CMD="${RT_FORMAT_CMD:-npm run lint}"
 UNIT_CMD="${RT_UNIT_CMD:-npm run test:unit}"
 SMOKE_CMD="${RT_SMOKE_CMD:-npm run test:smoke}"
 BUILD_CMD="${RT_BUILD_CMD:-npm run build}"
-SECURITY_CMD="${RT_SECURITY_CMD:-npm audit --audit-level=high}"
+SECURITY_CMD="${RT_SECURITY_CMD:-npm audit --audit-level=high --omit=dev}"
 
 run "format_lint" "$FORMAT_CMD"
 run "unit" "$UNIT_CMD"

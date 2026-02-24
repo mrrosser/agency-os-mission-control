@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import cleanupModule from "../../scripts/telemetry-retention-cleanup.js";
 
 const { parseConfig, cleanupTelemetryRetention } = cleanupModule as {
+  buildGithubMeta: (env: NodeJS.ProcessEnv) => {
+    runId: string | null;
+    runNumber: string | null;
+    repository: string | null;
+    workflow: string | null;
+    actor: string | null;
+    sha: string | null;
+    runUrl: string | null;
+  };
   parseConfig: (env: NodeJS.ProcessEnv) => {
     eventRetentionDays: number;
     groupRetentionDays: number;
@@ -23,6 +32,17 @@ const { parseConfig, cleanupTelemetryRetention } = cleanupModule as {
     events: { deleted: number; batches: number; reachedDeleteCap: boolean };
     groups: { deleted: number; batches: number; reachedDeleteCap: boolean };
   }>;
+};
+const { buildGithubMeta } = cleanupModule as {
+  buildGithubMeta: (env: NodeJS.ProcessEnv) => {
+    runId: string | null;
+    runNumber: string | null;
+    repository: string | null;
+    workflow: string | null;
+    actor: string | null;
+    sha: string | null;
+    runUrl: string | null;
+  };
 };
 
 type MockDoc = { ref: { id: string } };
@@ -91,6 +111,22 @@ describe("telemetry retention cleanup", () => {
       maxDeletesPerCollection: 999,
       dryRun: true,
     });
+  });
+
+  it("builds github run metadata when workflow env is present", () => {
+    const meta = buildGithubMeta({
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_NUMBER: "44",
+      GITHUB_REPOSITORY: "org/repo",
+      GITHUB_SERVER_URL: "https://github.com",
+      GITHUB_WORKFLOW: "Telemetry Retention Cleanup",
+      GITHUB_ACTOR: "bot-user",
+      GITHUB_SHA: "abc123",
+    });
+    expect(meta.runId).toBe("123");
+    expect(meta.runNumber).toBe("44");
+    expect(meta.repository).toBe("org/repo");
+    expect(meta.runUrl).toBe("https://github.com/org/repo/actions/runs/123");
   });
 
   it("rejects group retention shorter than event retention", () => {

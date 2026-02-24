@@ -77,6 +77,22 @@ function initLogger(correlationId) {
   };
 }
 
+function buildGithubMeta(env = process.env) {
+  const runId = getEnv("GITHUB_RUN_ID", env);
+  const repository = getEnv("GITHUB_REPOSITORY", env);
+  const serverUrl = getEnv("GITHUB_SERVER_URL", env, "https://github.com");
+  const runUrl = runId && repository ? `${serverUrl}/${repository}/actions/runs/${runId}` : null;
+  return {
+    runId: runId || null,
+    runNumber: getEnv("GITHUB_RUN_NUMBER", env, null),
+    repository: repository || null,
+    workflow: getEnv("GITHUB_WORKFLOW", env, null),
+    actor: getEnv("GITHUB_ACTOR", env, null),
+    sha: getEnv("GITHUB_SHA", env, null),
+    runUrl,
+  };
+}
+
 async function initFirestore(projectId) {
   if (!admin.apps.length) {
     admin.initializeApp({
@@ -85,6 +101,34 @@ async function initFirestore(projectId) {
     });
   }
   return admin.firestore();
+}
+
+async function persistCleanupStatus(db, record, log) {
+  const latestRef = db.collection("telemetry_maintenance").doc("retention_cleanup");
+  const runRef = db.collection("telemetry_maintenance_runs").doc(record.correlationId);
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+  const latestPayload = {
+    ...record,
+    updatedAt: timestamp,
+  };
+  const runPayload = {
+    ...record,
+    createdAt: timestamp,
+  };
+
+  const batch = db.batch();
+  batch.set(latestRef, latestPayload, { merge: true });
+  batch.set(runRef, runPayload, { merge: true });
+  await batch.commit();
+
+  log("info", "telemetry.cleanup.persisted", {
+    status: record.status,
+    dryRun: record.dryRun,
+    correlationId: record.correlationId,
+    eventsDeleted: record.events?.deleted || 0,
+    groupsDeleted: record.groups?.deleted || 0,
+  });
 }
 
 async function deleteCollectionBeforeCutoff(args) {
@@ -188,14 +232,71 @@ async function main(env = process.env) {
   const correlationId = getEnv("TELEMETRY_CLEANUP_CORRELATION_ID", env, crypto.randomUUID());
   const config = parseConfig(env);
   const log = initLogger(correlationId);
+  const github = buildGithubMeta(env);
+  const startedAt = new Date().toISOString();
+  let db = null;
 
-  log("info", "telemetry.cleanup.start", { projectId, ...config });
+  log("info", "telemetry.cleanup.start", { projectId, ...config, github });
 
-  const db = await initFirestore(projectId);
-  const result = await cleanupTelemetryRetention(db, config, log);
+  try {
+    db = await initFirestore(projectId);
+    const result = await cleanupTelemetryRetention(db, config, log);
+    const finishedAt = new Date().toISOString();
+    const record = {
+      status: "success",
+      correlationId,
+      projectId,
+      startedAt,
+      finishedAt,
+      ...config,
+      ...result,
+      github,
+    };
 
-  log("info", "telemetry.cleanup.completed", { projectId, ...result });
-  return result;
+    await persistCleanupStatus(db, record, log);
+    log("info", "telemetry.cleanup.completed", { projectId, ...result });
+    return record;
+  } catch (err) {
+    const finishedAt = new Date().toISOString();
+    const error =
+      err instanceof Error
+        ? {
+            message: err.message,
+            stack: err.stack || null,
+          }
+        : {
+            message: String(err),
+            stack: null,
+          };
+
+    if (db) {
+      try {
+        await persistCleanupStatus(
+          db,
+          {
+            status: "failed",
+            correlationId,
+            projectId,
+            startedAt,
+            finishedAt,
+            ...config,
+            events: { deleted: 0, batches: 0, dryRun: config.dryRun, reachedDeleteCap: false },
+            groups: { deleted: 0, batches: 0, dryRun: config.dryRun, reachedDeleteCap: false },
+            github,
+            error,
+          },
+          log
+        );
+      } catch (persistErr) {
+        log("error", "telemetry.cleanup.persist_failed", {
+          error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          correlationId,
+        });
+      }
+    }
+
+    throw err;
+  }
 }
 
 if (require.main === module) {
@@ -218,6 +319,8 @@ module.exports = {
   isTruthy,
   parsePositiveInt,
   parseConfig,
+  buildGithubMeta,
+  persistCleanupStatus,
   deleteCollectionBeforeCutoff,
   cleanupTelemetryRetention,
   main,

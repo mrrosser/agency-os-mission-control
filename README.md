@@ -151,6 +151,7 @@ Phase 3: scheduled retention cleanup
   - `telemetry_error_events` by `createdAt`
   - `telemetry_error_groups` by `lastSeenAt`
 - Cleanup is idempotent and bounded per run with batch + max-delete caps.
+- Cleanup status is written to Firestore and exposed at `GET /api/telemetry/retention-status` (shown in Operations as **Telemetry Cleanup**).
 
 Config (SSR runtime):
 - `TELEMETRY_ENABLED=true` (set to `false` to disable ingest)

@@ -144,6 +144,34 @@ interface TelemetryGroupSummary {
     };
 }
 
+interface TelemetryCleanupStatusSummary {
+    status: string;
+    correlationId: string;
+    startedAt?: string | null;
+    finishedAt?: string | null;
+    updatedAt?: string | null;
+    dryRun: boolean;
+    eventRetentionDays: number;
+    groupRetentionDays: number;
+    events: {
+        deleted: number;
+        batches: number;
+        reachedDeleteCap: boolean;
+    };
+    groups: {
+        deleted: number;
+        batches: number;
+        reachedDeleteCap: boolean;
+    };
+    github?: {
+        runId?: string | null;
+        runUrl?: string | null;
+    };
+    error?: {
+        message?: string | null;
+    };
+}
+
 interface LeadRunQuotaSummary {
     orgId: string;
     windowKey: string;
@@ -308,7 +336,9 @@ export default function OperationsPage() {
     const [auditOpen, setAuditOpen] = useState(false);
     const [selectedReceiptLeadId, setSelectedReceiptLeadId] = useState<string | null>(null);
     const [telemetryGroups, setTelemetryGroups] = useState<TelemetryGroupSummary[]>([]);
+    const [telemetryCleanupStatus, setTelemetryCleanupStatus] = useState<TelemetryCleanupStatusSummary | null>(null);
     const [loadingTelemetry, setLoadingTelemetry] = useState(false);
+    const [loadingTelemetryCleanup, setLoadingTelemetryCleanup] = useState(false);
     const [quotaSummary, setQuotaSummary] = useState<LeadRunQuotaSummary | null>(null);
     const [alerts, setAlerts] = useState<LeadRunAlert[]>([]);
     const [loadingQuota, setLoadingQuota] = useState(false);
@@ -474,6 +504,7 @@ export default function OperationsPage() {
             setAuditOpen(false);
             setSelectedReceiptLeadId(null);
             setTelemetryGroups([]);
+            setTelemetryCleanupStatus(null);
             setQuotaSummary(null);
             setAlerts([]);
             setGoogleConnected(false);
@@ -485,6 +516,7 @@ export default function OperationsPage() {
         void loadAlerts();
         void loadGoogleConnectionStatus();
         void loadDriveDeltaStatus();
+        void loadTelemetryCleanupStatus();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid]);
 
@@ -544,6 +576,35 @@ export default function OperationsPage() {
             reportClientError(message, { source: "operations.load_telemetry_groups", runId: normalizedRunId });
         } finally {
             setLoadingTelemetry(false);
+        }
+    };
+
+    const loadTelemetryCleanupStatus = async () => {
+        if (!user) return;
+        setLoadingTelemetryCleanup(true);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const res = await fetch("/api/telemetry/retention-status?limit=3", {
+                method: "GET",
+                headers,
+            });
+            const data = await readApiJson<{
+                latest?: TelemetryCleanupStatusSummary | null;
+                error?: string;
+            }>(res);
+            if (!res.ok) {
+                const cid = getResponseCorrelationId(res);
+                throw new Error(
+                    data?.error ||
+                        `Failed to load telemetry cleanup status (status ${res.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setTelemetryCleanupStatus(data.latest || null);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            reportClientError(message, { source: "operations.load_telemetry_cleanup_status" });
+        } finally {
+            setLoadingTelemetryCleanup(false);
         }
     };
 
@@ -2946,6 +3007,84 @@ export default function OperationsPage() {
                                                 </div>
                                             ))}
                                         </div>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <p className="font-medium text-zinc-200">Telemetry Cleanup</p>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={loadingTelemetryCleanup}
+                                            className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
+                                            onClick={() => void loadTelemetryCleanupStatus()}
+                                        >
+                                            {loadingTelemetryCleanup ? "..." : "Refresh"}
+                                        </Button>
+                                    </div>
+                                    {telemetryCleanupStatus ? (
+                                        <div className="space-y-1 text-[11px]">
+                                            <p>
+                                                Last run:{" "}
+                                                <span className="text-zinc-200">
+                                                    {telemetryCleanupStatus.finishedAt
+                                                        ? new Date(telemetryCleanupStatus.finishedAt).toLocaleString()
+                                                        : "Unknown"}
+                                                </span>
+                                            </p>
+                                            <p>
+                                                Status:{" "}
+                                                <span
+                                                    className={
+                                                        telemetryCleanupStatus.status === "success"
+                                                            ? "text-emerald-400"
+                                                            : "text-red-400"
+                                                    }
+                                                >
+                                                    {telemetryCleanupStatus.status}
+                                                </span>
+                                                {" · "}
+                                                <span className="text-zinc-400">
+                                                    {telemetryCleanupStatus.dryRun ? "dry-run" : "live"}
+                                                </span>
+                                            </p>
+                                            <p className="text-zinc-500">
+                                                Retention: {telemetryCleanupStatus.eventRetentionDays}d events /{" "}
+                                                {telemetryCleanupStatus.groupRetentionDays}d groups
+                                            </p>
+                                            <p className="text-zinc-500">
+                                                Deleted: {telemetryCleanupStatus.events.deleted} events /{" "}
+                                                {telemetryCleanupStatus.groups.deleted} groups
+                                            </p>
+                                            {(telemetryCleanupStatus.events.reachedDeleteCap ||
+                                                telemetryCleanupStatus.groups.reachedDeleteCap) && (
+                                                <p className="text-amber-400">
+                                                    Delete cap reached this run. Consider raising per-run limits.
+                                                </p>
+                                            )}
+                                            {telemetryCleanupStatus.error?.message && (
+                                                <p className="text-red-400">Error: {telemetryCleanupStatus.error.message}</p>
+                                            )}
+                                            {telemetryCleanupStatus.github?.runUrl && (
+                                                <a
+                                                    href={telemetryCleanupStatus.github.runUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1 text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                                                >
+                                                    Open workflow run
+                                                    <ArrowUpRight className="h-3 w-3" />
+                                                </a>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-[11px] text-zinc-500">
+                                            {loadingTelemetryCleanup
+                                                ? "Loading cleanup status..."
+                                                : "No telemetry cleanup status recorded yet."}
+                                        </p>
                                     )}
                                 </div>
 

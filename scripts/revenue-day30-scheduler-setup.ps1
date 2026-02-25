@@ -140,7 +140,50 @@ function Upsert-SchedulerJob {
     }
 }
 
-$templates = @{
+function Get-TemplateIdsForBusiness {
+    param(
+        [Parameter(Mandatory = $true)][string]$Business,
+        [Parameter(Mandatory = $true)][string]$DefaultTemplateId
+    )
+
+    $businessKey = $Business.ToUpperInvariant()
+    $day30Override = Get-EnvOrDefault -Name "REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_$businessKey"
+    if (-not $day30Override) {
+        $day30Override = Get-EnvOrDefault -Name "REVENUE_AUTOMATION_TEMPLATE_IDS_$businessKey"
+    }
+
+    if (-not $day30Override) {
+        return @($DefaultTemplateId)
+    }
+
+    $parsed = @($day30Override.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if (-not $parsed.Count) {
+        return @($DefaultTemplateId)
+    }
+    return $parsed
+}
+
+function Get-WeeklyTemplateIds {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$TemplateIdsByBusiness
+    )
+
+    $weeklyOverride = Get-EnvOrDefault -Name "REVENUE_AUTOMATION_DAY30_WEEKLY_TEMPLATE_IDS"
+    if ($weeklyOverride) {
+        $parsed = @($weeklyOverride.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($parsed.Count) {
+            return $parsed
+        }
+    }
+
+    $weeklyTemplateIds = @()
+    foreach ($business in @("rts", "rng", "aicf")) {
+        $weeklyTemplateIds += @($TemplateIdsByBusiness[$business])
+    }
+    return $weeklyTemplateIds
+}
+
+$templateDefaults = @{
     "rts"  = "rts-south-day1"
     "rng"  = "rng-south-day1"
     "aicf" = "aicf-south-day1"
@@ -151,11 +194,13 @@ if ($requireApprovalGates -match "^(?i:false|0|no)$") {
     $requireApprovalGatesBool = $false
 }
 
+$templateIdsByBusiness = @{}
 foreach ($business in @("rts", "rng", "aicf")) {
-    $templateId = $templates[$business]
+    $templateIds = Get-TemplateIdsForBusiness -Business $business -DefaultTemplateId $templateDefaults[$business]
+    $templateIdsByBusiness[$business] = @($templateIds)
     $payload = (@{
             uid                    = $uid
-            templateIds            = @($templateId)
+            templateIds            = @($templateIds)
             dryRun                 = $false
             forceRun               = $false
             timeZone               = $timeZone
@@ -179,9 +224,10 @@ foreach ($business in @("rts", "rng", "aicf")) {
     Upsert-SchedulerJob -JobName "revenue-day30-$business-daily" -Cron $day30Cron -Body $payload
 }
 
+$weeklyTemplateIds = Get-WeeklyTemplateIds -TemplateIdsByBusiness $templateIdsByBusiness
 $weeklyPayload = (@{
         uid                    = $uid
-        templateIds            = @("rts-south-day1", "rng-south-day1", "aicf-south-day1")
+        templateIds            = @($weeklyTemplateIds)
         dryRun                 = $false
         forceRun               = $false
         timeZone               = $timeZone

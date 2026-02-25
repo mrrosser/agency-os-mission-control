@@ -31,6 +31,10 @@ Template naming convention:
 - RT Solutions: `rts-south-day1`
 - Rosser NFT Gallery: `rng-south-day1`
 - AI CoFoundry: `aicf-south-day1`
+- Optional experiment variants:
+  - RT Solutions: `rts-south-day1-exp-b`
+  - Rosser NFT Gallery: `rng-south-day1-exp-b`
+  - AI CoFoundry: `aicf-south-day1-exp-b`
 
 Default timezone:
 - `America/Chicago` (New Orleans, LA)
@@ -98,6 +102,10 @@ export REVENUE_AUTOMATION_DAY30_CRON="15 9 * * *"
 export REVENUE_AUTOMATION_DAY30_WEEKLY_CRON="20 6 * * 1"
 export REVENUE_AUTOMATION_DAY30_RESPONSE_MAX_TASKS=10
 export REVENUE_AUTOMATION_DAY30_REQUIRE_APPROVAL_GATES=true
+export REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_RTS="rts-south-day1,rts-south-day1-exp-b"
+export REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_RNG="rng-south-day1,rng-south-day1-exp-b"
+export REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_AICF="aicf-south-day1,aicf-south-day1-exp-b"
+export REVENUE_AUTOMATION_DAY30_WEEKLY_TEMPLATE_IDS="rts-south-day1,rts-south-day1-exp-b,rng-south-day1,rng-south-day1-exp-b,aicf-south-day1,aicf-south-day1-exp-b"
 
 bash scripts/revenue-day30-scheduler-setup.sh
 ```
@@ -115,6 +123,10 @@ $env:REVENUE_AUTOMATION_DAY30_CRON = "15 9 * * *"
 $env:REVENUE_AUTOMATION_DAY30_WEEKLY_CRON = "20 6 * * 1"
 $env:REVENUE_AUTOMATION_DAY30_RESPONSE_MAX_TASKS = "10"
 $env:REVENUE_AUTOMATION_DAY30_REQUIRE_APPROVAL_GATES = "true"
+$env:REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_RTS = "rts-south-day1,rts-south-day1-exp-b"
+$env:REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_RNG = "rng-south-day1,rng-south-day1-exp-b"
+$env:REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_AICF = "aicf-south-day1,aicf-south-day1-exp-b"
+$env:REVENUE_AUTOMATION_DAY30_WEEKLY_TEMPLATE_IDS = "rts-south-day1,rts-south-day1-exp-b,rng-south-day1,rng-south-day1-exp-b,aicf-south-day1,aicf-south-day1-exp-b"
 
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/revenue-day30-scheduler-setup.ps1
 ```

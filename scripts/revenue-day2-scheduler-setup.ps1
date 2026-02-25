@@ -135,21 +135,44 @@ function Upsert-SchedulerJob {
     }
 }
 
-$templates = @{
+function Get-TemplateIdsForBusiness {
+    param(
+        [Parameter(Mandatory = $true)][string]$Business,
+        [Parameter(Mandatory = $true)][string]$DefaultTemplateId
+    )
+
+    $businessKey = $Business.ToUpperInvariant()
+    $day2Override = Get-EnvOrDefault -Name "REVENUE_AUTOMATION_DAY2_TEMPLATE_IDS_$businessKey"
+    if (-not $day2Override) {
+        $day2Override = Get-EnvOrDefault -Name "REVENUE_AUTOMATION_TEMPLATE_IDS_$businessKey"
+    }
+
+    if (-not $day2Override) {
+        return @($DefaultTemplateId)
+    }
+
+    $parsed = @($day2Override.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if (-not $parsed.Count) {
+        return @($DefaultTemplateId)
+    }
+    return $parsed
+}
+
+$templateDefaults = @{
     "rts"  = "rts-south-day1"
     "rng"  = "rng-south-day1"
     "aicf" = "aicf-south-day1"
 }
 
 foreach ($business in @("rts", "rng", "aicf")) {
-    $templateId = $templates[$business]
+    $templateIds = Get-TemplateIdsForBusiness -Business $business -DefaultTemplateId $templateDefaults[$business]
     $requireApprovalGatesBool = $true
     if ($requireApprovalGates -match "^(?i:false|0|no)$") {
         $requireApprovalGatesBool = $false
     }
     $payload = (@{
             uid                  = $uid
-            templateIds          = @($templateId)
+            templateIds          = @($templateIds)
             dryRun               = $false
             forceRun             = $false
             timeZone             = $timeZone

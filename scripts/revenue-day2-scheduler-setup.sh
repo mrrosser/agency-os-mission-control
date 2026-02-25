@@ -68,10 +68,56 @@ declare -A TEMPLATE_BY_BUSINESS=(
   [aicf]="aicf-south-day1"
 )
 
+json_array_from_csv() {
+  local csv="$1"
+  local output="["
+  local first=1
+  IFS=',' read -ra raw_items <<<"$csv"
+  for raw_item in "${raw_items[@]}"; do
+    local item
+    item="$(echo "$raw_item" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -z "$item" ]] && continue
+    if [[ "$first" -eq 0 ]]; then
+      output+=","
+    fi
+    output+="\"$item\""
+    first=0
+  done
+  output+="]"
+  echo "$output"
+}
+
+template_ids_json_for_business() {
+  local business="$1"
+  local default_template="$2"
+  local business_upper
+  business_upper="$(echo "$business" | tr '[:lower:]' '[:upper:]')"
+  local override_var="REVENUE_AUTOMATION_DAY2_TEMPLATE_IDS_${business_upper}"
+  local override="${!override_var:-}"
+  if [[ -z "$override" ]]; then
+    local fallback_var="REVENUE_AUTOMATION_TEMPLATE_IDS_${business_upper}"
+    override="${!fallback_var:-}"
+  fi
+
+  if [[ -z "$override" ]]; then
+    echo "[\"${default_template}\"]"
+    return
+  fi
+
+  local parsed
+  parsed="$(json_array_from_csv "$override")"
+  if [[ "$parsed" == "[]" ]]; then
+    echo "[\"${default_template}\"]"
+    return
+  fi
+  echo "$parsed"
+}
+
 for business in rts rng aicf; do
   template_id="${TEMPLATE_BY_BUSINESS[$business]}"
+  template_ids_json="$(template_ids_json_for_business "$business" "$template_id")"
   job_name="revenue-day2-${business}-loop"
-  payload="{\"uid\":\"${UID}\",\"templateIds\":[\"${template_id}\"],\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY2_MAX_TASKS},\"requireApprovalGates\":${DAY2_REQUIRE_APPROVAL_GATES},\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1}"
+  payload="{\"uid\":\"${UID}\",\"templateIds\":${template_ids_json},\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY2_MAX_TASKS},\"requireApprovalGates\":${DAY2_REQUIRE_APPROVAL_GATES},\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1}"
   job_upsert "$job_name" "$DAY2_CRON" "$payload"
 done
 

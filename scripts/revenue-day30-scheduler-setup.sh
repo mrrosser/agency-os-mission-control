@@ -69,14 +69,92 @@ declare -A TEMPLATE_BY_BUSINESS=(
   [aicf]="aicf-south-day1"
 )
 
+json_array_from_csv() {
+  local csv="$1"
+  local output="["
+  local first=1
+  IFS=',' read -ra raw_items <<<"$csv"
+  for raw_item in "${raw_items[@]}"; do
+    local item
+    item="$(echo "$raw_item" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -z "$item" ]] && continue
+    if [[ "$first" -eq 0 ]]; then
+      output+=","
+    fi
+    output+="\"$item\""
+    first=0
+  done
+  output+="]"
+  echo "$output"
+}
+
+template_ids_json_for_business() {
+  local business="$1"
+  local default_template="$2"
+  local business_upper
+  business_upper="$(echo "$business" | tr '[:lower:]' '[:upper:]')"
+  local override_var="REVENUE_AUTOMATION_DAY30_TEMPLATE_IDS_${business_upper}"
+  local override="${!override_var:-}"
+  if [[ -z "$override" ]]; then
+    local fallback_var="REVENUE_AUTOMATION_TEMPLATE_IDS_${business_upper}"
+    override="${!fallback_var:-}"
+  fi
+
+  if [[ -z "$override" ]]; then
+    echo "[\"${default_template}\"]"
+    return
+  fi
+
+  local parsed
+  parsed="$(json_array_from_csv "$override")"
+  if [[ "$parsed" == "[]" ]]; then
+    echo "[\"${default_template}\"]"
+    return
+  fi
+  echo "$parsed"
+}
+
+weekly_template_ids_json() {
+  local weekly_override="${REVENUE_AUTOMATION_DAY30_WEEKLY_TEMPLATE_IDS:-}"
+  if [[ -n "$weekly_override" ]]; then
+    local parsed
+    parsed="$(json_array_from_csv "$weekly_override")"
+    if [[ "$parsed" != "[]" ]]; then
+      echo "$parsed"
+      return
+    fi
+  fi
+
+  local merged="["
+  local first=1
+  for business in rts rng aicf; do
+    local template_ids_json
+    template_ids_json="$(template_ids_json_for_business "$business" "${TEMPLATE_BY_BUSINESS[$business]}")"
+    local inner="${template_ids_json#[}"
+    inner="${inner%]}"
+    if [[ -z "$inner" ]]; then
+      continue
+    fi
+    if [[ "$first" -eq 0 ]]; then
+      merged+=","
+    fi
+    merged+="$inner"
+    first=0
+  done
+  merged+="]"
+  echo "$merged"
+}
+
 for business in rts rng aicf; do
   template_id="${TEMPLATE_BY_BUSINESS[$business]}"
+  template_ids_json="$(template_ids_json_for_business "$business" "$template_id")"
   job_name="revenue-day30-${business}-daily"
-  payload="{\"uid\":\"${UID}\",\"templateIds\":[\"${template_id}\"],\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY30_MAX_TASKS},\"requireApprovalGates\":${DAY30_REQUIRE_APPROVAL_GATES},\"runWeeklyKpi\":false,\"runServiceLab\":false,\"runCloserQueue\":true,\"runRevenueMemory\":true,\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1,\"serviceCandidateLimit\":5,\"closerQueueLookbackHours\":72,\"closerQueueLimit\":40,\"memoryLookbackDays\":30}"
+  payload="{\"uid\":\"${UID}\",\"templateIds\":${template_ids_json},\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY30_MAX_TASKS},\"requireApprovalGates\":${DAY30_REQUIRE_APPROVAL_GATES},\"runWeeklyKpi\":false,\"runServiceLab\":false,\"runCloserQueue\":true,\"runRevenueMemory\":true,\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1,\"serviceCandidateLimit\":5,\"closerQueueLookbackHours\":72,\"closerQueueLimit\":40,\"memoryLookbackDays\":30}"
   job_upsert "$job_name" "$DAY30_CRON" "$payload"
 done
 
-weekly_payload="{\"uid\":\"${UID}\",\"templateIds\":[\"rts-south-day1\",\"rng-south-day1\",\"aicf-south-day1\"],\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY30_MAX_TASKS},\"requireApprovalGates\":${DAY30_REQUIRE_APPROVAL_GATES},\"runWeeklyKpi\":true,\"runServiceLab\":true,\"runCloserQueue\":true,\"runRevenueMemory\":true,\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1,\"serviceCandidateLimit\":5,\"closerQueueLookbackHours\":72,\"closerQueueLimit\":40,\"memoryLookbackDays\":30}"
+weekly_template_ids_json="$(weekly_template_ids_json)"
+weekly_payload="{\"uid\":\"${UID}\",\"templateIds\":${weekly_template_ids_json},\"dryRun\":false,\"forceRun\":false,\"timeZone\":\"${TIME_ZONE}\",\"autoQueueFollowups\":true,\"processDueResponses\":true,\"responseLoopMaxTasks\":${DAY30_MAX_TASKS},\"requireApprovalGates\":${DAY30_REQUIRE_APPROVAL_GATES},\"runWeeklyKpi\":true,\"runServiceLab\":true,\"runCloserQueue\":true,\"runRevenueMemory\":true,\"followupDelayHours\":48,\"followupMaxLeads\":25,\"followupSequence\":1,\"serviceCandidateLimit\":5,\"closerQueueLookbackHours\":72,\"closerQueueLimit\":40,\"memoryLookbackDays\":30}"
 job_upsert "revenue-day30-weekly-brain" "$DAY30_WEEKLY_CRON" "$weekly_payload"
 
 echo "Configured Day30 scheduler jobs (daily per business + weekly brain loop) in ${TIME_ZONE}."

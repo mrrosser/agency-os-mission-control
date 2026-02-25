@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/clean-next-build.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -20,6 +21,9 @@
     "test:postdeploy": "node scripts/post-deploy-smoke.mjs",
     "check:oauth-readiness": "node scripts/google-verification-readiness.mjs",
     "telemetry:cleanup": "node scripts/telemetry-retention-cleanup.js",
+    "revenue:day1:run": "node scripts/revenue-day1-run.mjs",
+    "revenue:day2:run": "node scripts/revenue-day2-run.mjs",
+    "revenue:day1:seed-templates": "node scripts/revenue-day1-seed-templates.mjs",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",
     "pw:helper": "node please-review/scripts/playwright-helper.mjs",
     "pw:shortcuts": "node please-review/scripts/playwright-shortcuts.mjs"

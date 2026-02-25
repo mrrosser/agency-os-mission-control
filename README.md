@@ -21,12 +21,21 @@ copy .env.local.example .env.local
 - Optional: `APIFY_TOKEN` + `APIFY_GOOGLE_MAPS_ACTOR_ID` (enables Apify Maps fallback/provider)
 - Optional: `APIFY_EST_COST_PER_1K_RESULTS_USD` (used for estimated Apify source cost in diagnostics)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
+- Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_API_KEY`
+- Optional (recommended for operator controls): `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions)
+- Optional (internal rollout guardrails): `NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI=false`
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 - Optional (recommended for live OpenAI billing pulls): `OPENAI_ADMIN_API_KEY`
+- Optional (Square deposit stage webhook): `SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_NOTIFICATION_URL`, `SQUARE_WEBHOOK_DEFAULT_UID`
+- Optional (POS worker service auth): `REVENUE_POS_WORKER_TOKEN`
+- Optional (POS side-effect policy): `POS_WORKER_ALLOW_SIDE_EFFECTS`, `POS_WORKER_AUTO_APPROVE_LOW_RISK`, `POS_WORKER_REQUIRE_APPROVAL_FOR_HIGH_RISK`, `POS_WORKER_MAX_ATTEMPTS`
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
 - Optional (lead source budget defaults): `LEAD_SOURCE_BUDGET_MAX_COST_USD`, `LEAD_SOURCE_BUDGET_MAX_PAGES`, `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC`
 - Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
+- Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
+- Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
+- Optional (service-to-service weekly KPI worker): `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
 4) Start dev server:
@@ -52,10 +61,13 @@ npm run dev
 ## Agent Nexus Dashboard
 - New control-plane dashboard: `app/dashboard/agents` (`/dashboard/agents` in the UI).
 - Backend snapshot API: `GET /api/agents/control-plane`.
+- Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` requests for operators).
 - Includes:
   - agent runtime states (active/idle/degraded/inactive),
   - service/tool/skill health,
   - open alerts + top telemetry bug groups,
+  - per-agent quick actions (`Ping`, `Pause`, `Route`),
+  - timeline filters (`All`, `Tasks`, `Comments`, `Status`, `Decisions`),
   - daily quota posture,
   - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability).
 - Billing sources:
@@ -63,6 +75,78 @@ npm run dev
   - Twilio: Usage Records (ThisMonth, total price category)
   - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
   - Control-plane billing pulls are cached per user for 120s by default (`CONTROL_PLANE_BILLING_CACHE_TTL_MS`).
+
+## Cross-Project MCP Connectors
+- Purpose: consume external systems (`SMAuto`, LeadOps Mission Control) as tools without merging codebases.
+- Runtime env vars:
+  - `SMAUTO_MCP_SERVER_URL` (+ optional `SMAUTO_MCP_API_KEY`)
+  - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
+  - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
+  - `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`)
+- Verification:
+  - Settings -> **Runtime Config Preflight** shows connector checks.
+  - Agent Nexus -> **Services + Tools** shows `SMAuto MCP` / `LeadOps MCP` states.
+- Capability ownership matrix: `docs/runtime-capability-matrix.md`
+
+## Model Prompting Guidance
+- Repo-local provider guidance is tracked in `docs/model-guidance/`.
+- Source links and retrieval date: `docs/model-guidance/sources.md`.
+- Keep cross-model operational facts aligned using `docs/model-guidance/shared-cross-model-checklist.md`.
+
+## Sponsor/SMB Inbox Agent Skill
+- Skill file: `skills/sponsor-inbox-crm-agent/SKILL.md`
+- Refined prompt pack: `docs/plans/2026-02-25-refined-prompts-sponsor-crm.md`
+- Rubric template (sync target): `please-review/config-templates/sponsor-inbox-rubric.v1.json`
+
+## Revenue Day 1 Automation
+- Manual/authenticated route: `POST /api/revenue/day1`
+- Scheduler/service route: `POST /api/revenue/day1/worker-task`
+- Use case: source leads from a saved template, start outreach run, and optionally seed follow-up queue in one call.
+- Worker auth: send `Authorization: Bearer <REVENUE_DAY1_WORKER_TOKEN>` (or `x-revenue-day1-token`).
+- Runner script: `npm run revenue:day1:run`
+- Template seeding script: `npm run revenue:day1:seed-templates`
+- Scheduler setup helpers:
+  - `scripts/revenue-day1-scheduler-setup.sh` (bash)
+  - `scripts/revenue-day1-scheduler-setup.ps1` (Windows PowerShell)
+- Full setup/runbook: `docs/runbook-day1-revenue-automation.md`
+
+## Revenue Day 2 Automation
+- Manual/authenticated route: `POST /api/revenue/day2`
+- Scheduler/service route: `POST /api/revenue/day2/worker-task`
+- Use case: run Day 1 pipeline generation and process due follow-up responses in one loop.
+- Worker auth: send `Authorization: Bearer <REVENUE_DAY2_WORKER_TOKEN>` (or `x-revenue-day2-token`); route falls back to `REVENUE_DAY1_WORKER_TOKEN`.
+- Runner script: `npm run revenue:day2:run`
+- Scheduler setup helpers:
+  - `scripts/revenue-day2-scheduler-setup.sh` (bash)
+  - `scripts/revenue-day2-scheduler-setup.ps1` (Windows PowerShell)
+- Full setup/runbook: `docs/runbook-day2-revenue-automation.md`
+
+## Revenue Weekly KPI Rollup
+- Manual/authenticated route: `POST /api/revenue/kpi/weekly`
+- Scheduler/service route: `POST /api/revenue/kpi/weekly/worker-task`
+- Worker auth: send `Authorization: Bearer <REVENUE_WEEKLY_KPI_WORKER_TOKEN>` (or `x-revenue-weekly-kpi-token`).
+- Writes weekly and latest KPI docs under `identities/{uid}/revenue_kpi_reports/*`.
+- Automation workflow: `.github/workflows/revenue-weekly-kpi.yml`
+
+## Square Deposit Webhook
+- Route: `POST /api/webhooks/square`
+- Verifies `x-square-hmacsha256-signature` with `SQUARE_WEBHOOK_SIGNATURE_KEY`.
+- Accepts allowlisted Square event families (`PAYMENT.*`, `INVOICE.*`, `REFUND.*`, `ORDER.*`) and queues deterministic POS worker events under `identities/{uid}/pos_worker_events/*`.
+- Processes completed payment events inline and updates matching leads to `pipelineStage=deposit_received` (idempotent by `event_id` in `square_webhook_events`).
+- POS worker service route: `POST /api/revenue/pos/worker-task` (Bearer or `x-revenue-pos-token` = `REVENUE_POS_WORKER_TOKEN`).
+- POS worker status route: `GET /api/revenue/pos/status` (authenticated).
+- High-risk POS actions can be approved via `POST /api/revenue/pos/approvals` and side-effect outbox items are written to `identities/{uid}/pos_worker_outbox/*`.
+
+## Mission Control -> AI_HELL_MARY Sync
+- Sync command:
+```bash
+node scripts/sync-ai-hell-mary.mjs --target-root "C:\\CTO Projects\\AI_HELL_MARY"
+```
+- Windows scheduler helper:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-nightly.ps1
+```
+- Runbook: `docs/runbook-revenue-sync-and-kpi.md`
 
 ## Competitor Monitor Dashboard
 - UI: `/dashboard/competitors`

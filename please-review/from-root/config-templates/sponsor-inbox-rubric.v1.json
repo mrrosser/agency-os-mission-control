@@ -1,0 +1,64 @@
+{
+  "version": "v1",
+  "updatedAt": "2026-02-25",
+  "confidenceThreshold": 0.65,
+  "dimensions": [
+    { "id": "fit", "weight": 0.2 },
+    { "id": "clarity", "weight": 0.15 },
+    { "id": "budget", "weight": 0.15 },
+    { "id": "seriousness", "weight": 0.15 },
+    { "id": "companyTrust", "weight": 0.2 },
+    { "id": "closeLikelihood", "weight": 0.15 }
+  ],
+  "buckets": [
+    {
+      "id": "exceptional",
+      "minScore": 80,
+      "action": {
+        "escalate": true,
+        "priority": "critical",
+        "autoDraft": false
+      }
+    },
+    {
+      "id": "high",
+      "minScore": 65,
+      "action": {
+        "escalate": true,
+        "priority": "high",
+        "autoDraft": true,
+        "template": "qualify"
+      }
+    },
+    {
+      "id": "medium",
+      "minScore": 45,
+      "action": {
+        "escalate": false,
+        "priority": "normal",
+        "autoDraft": true,
+        "template": "qualify"
+      }
+    },
+    {
+      "id": "low",
+      "minScore": 20,
+      "action": {
+        "escalate": false,
+        "priority": "normal",
+        "autoDraft": true,
+        "template": "decline"
+      }
+    },
+    {
+      "id": "spam",
+      "minScore": 0,
+      "action": {
+        "escalate": false,
+        "priority": "none",
+        "autoDraft": false,
+        "suppress": true
+      }
+    }
+  ]
+}

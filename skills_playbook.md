@@ -10,6 +10,13 @@ Use global shared skills and RT Infinite Loop references while keeping project t
 ## Local source of truth
 - Process/docs: `docs/`
 - Exec plans: `docs/execplans/`
+- Model prompting guidance: `docs/model-guidance/`
+- Local skills:
+  - `skills/rt-local-web-sales-loop/SKILL.md` (RT Solutions local SMB web-sales service loop)
+  - `skills/revenue-day1-automation/SKILL.md` (Day 1 revenue automation service/worker skill)
+  - `skills/revenue-day2-automation/SKILL.md` (Day 2 loop: Day1 + due-response processing + approval gates)
+  - `skills/sponsor-inbox-crm-agent/SKILL.md` (sponsor/SMB inbox scoring + CRM sync + draft-first replies)
+  - `skills/cross-business-brain-service-lab/SKILL.md` (cross-business digest + approval-gated service ideation loop)
 
 ## RT loop ownership
 - RT loop is a global skill/workflow, not a repo-level CI workflow for this project.

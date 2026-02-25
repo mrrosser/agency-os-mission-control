@@ -21,6 +21,19 @@ function firecrawlOk(data: Record<string, unknown>): Response {
   );
 }
 
+function firecrawlError(status: number, error: string): Response {
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error,
+    }),
+    {
+      status,
+      headers: { "Content-Type": "application/json" },
+    }
+  );
+}
+
 describe("firecrawl enrichment", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -130,5 +143,37 @@ describe("firecrawl enrichment", () => {
     expect(result[1]?.email).toBeUndefined();
     expect(result[2]?.email).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("short-circuits remaining lead scrapes when Firecrawl credits are exhausted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        firecrawlError(
+          402,
+          "Insufficient credits to perform this request. For more credits, upgrade plan."
+        )
+      )
+      .mockResolvedValue(
+        firecrawlOk({
+          markdown: "hello@later.com",
+          metadata: { title: "Later Lead" },
+        })
+      );
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+
+    const leads: LeadCandidate[] = [
+      { id: "q1", companyName: "Q1", website: "https://q1.example", source: "googlePlaces" },
+      { id: "q2", companyName: "Q2", website: "https://q2.example", source: "googlePlaces" },
+      { id: "q3", companyName: "Q3", website: "https://q3.example", source: "googlePlaces" },
+    ];
+
+    const result = await enrichLeadsWithFirecrawl(leads, "fc-test", { maxLeads: 3, concurrency: 1 }, log);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]?.email).toBeUndefined();
+    expect(result[1]?.email).toBeUndefined();
+    expect(result[2]?.email).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

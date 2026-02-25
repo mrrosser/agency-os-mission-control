@@ -24,6 +24,7 @@
     "revenue:day1:run": "node scripts/revenue-day1-run.mjs",
     "revenue:day2:run": "node scripts/revenue-day2-run.mjs",
     "revenue:day30:run": "node scripts/revenue-day30-run.mjs",
+    "revenue:variant:report": "node scripts/revenue-variant-split-report.mjs",
     "revenue:day1:seed-templates": "node scripts/revenue-day1-seed-templates.mjs",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",
     "pw:helper": "node please-review/scripts/playwright-helper.mjs",

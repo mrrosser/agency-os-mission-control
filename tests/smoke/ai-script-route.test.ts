@@ -13,7 +13,7 @@ vi.mock("@/lib/api/secrets", () => ({
 }));
 
 vi.mock("@/lib/api/idempotency", () => ({
-  getIdempotencyKey: vi.fn(() => null),
+  getIdempotencyKey: vi.fn(() => undefined),
   withIdempotency: vi.fn(async (_params, executor: () => Promise<unknown>) => ({
     data: await executor(),
     replayed: false,
@@ -33,8 +33,8 @@ describe("ai script route", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
-    resolveSecretMock.mockResolvedValue(null);
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
+    resolveSecretMock.mockResolvedValue(undefined);
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
       data: await executor(),
       replayed: false,

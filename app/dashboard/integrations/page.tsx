@@ -12,9 +12,9 @@ import { AfroGlyph } from "@/components/branding/AfroGlyph";
 
 export default function IntegrationsPage() {
     const searchParams = useSearchParams();
-    const googleError = searchParams.get("google") === "error";
-    const googleErrorCode = searchParams.get("googleError");
-    const googleErrorDescription = searchParams.get("googleErrorDescription");
+    const googleError = searchParams?.get("google") === "error";
+    const googleErrorCode = searchParams?.get("googleError");
+    const googleErrorDescription = searchParams?.get("googleErrorDescription");
 
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">

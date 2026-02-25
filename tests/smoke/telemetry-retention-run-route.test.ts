@@ -26,7 +26,7 @@ describe("telemetry retention run route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getIdempotencyKeyMock.mockReturnValue("idempotency-1");
     withIdempotencyMock.mockImplementation(async (_params, executor) => ({
       data: await executor(),

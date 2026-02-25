@@ -47,7 +47,7 @@ const knowledgePackPayload = {
       name: "Rosser NFT Gallery",
       serviceCatalog: ["Exhibitions", "Commissions"],
       calendarDefaults: {
-        bookingLink: "https://calendar.app.google/d6WVsrcihD63TZZj8",
+        bookingLink: "https://calendar.app.google/afjkNdXsLSWYibfUA",
       },
     },
   ],
@@ -66,8 +66,8 @@ describe("twilio voice webhook route", () => {
   });
 
   it("returns gather twiml for initial inbound call", async () => {
-    const sessionSet = vi.fn(async () => undefined);
-    const actionSet = vi.fn(async () => undefined);
+    const sessionSet = vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined);
+    const actionSet = vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined);
     getAdminDbMock.mockReturnValue({
       collection: (name: string) => {
         if (name === "voice_call_sessions") {
@@ -86,7 +86,7 @@ describe("twilio voice webhook route", () => {
         }
         return {
           doc: () => ({
-            set: vi.fn(async () => undefined),
+            set: vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined),
           }),
         };
       },
@@ -120,8 +120,8 @@ describe("twilio voice webhook route", () => {
   });
 
   it("queues write action when transcript requests scheduling", async () => {
-    const sessionSet = vi.fn(async () => undefined);
-    const actionSet = vi.fn(async () => undefined);
+    const sessionSet = vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined);
+    const actionSet = vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined);
     getAdminDbMock.mockReturnValue({
       collection: (name: string) => {
         if (name === "voice_call_sessions") {
@@ -140,7 +140,7 @@ describe("twilio voice webhook route", () => {
         }
         return {
           doc: () => ({
-            set: vi.fn(async () => undefined),
+            set: vi.fn(async (_data: Record<string, unknown>, _opts?: Record<string, unknown>) => undefined),
           }),
         };
       },
@@ -169,9 +169,9 @@ describe("twilio voice webhook route", () => {
     expect(response.status).toBe(200);
     expect(xml).toContain("queued");
     expect(actionSet).toHaveBeenCalledOnce();
-    const actionPayload = actionSet.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(actionPayload.action).toBe("calendar.createMeet");
-    expect(actionPayload.mode).toBe("strict_auto_book");
+    const actionPayload = actionSet.mock.calls[0]?.[0];
+    expect(actionPayload?.action).toBe("calendar.createMeet");
+    expect(actionPayload?.mode).toBe("strict_auto_book");
     expect(sessionSet).toHaveBeenCalledOnce();
     expect(triggerVoiceActionsWorkerMock).toHaveBeenCalledOnce();
     const triggerArgs = triggerVoiceActionsWorkerMock.mock.calls[0]?.[0];

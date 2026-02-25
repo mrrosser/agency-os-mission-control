@@ -43,11 +43,19 @@ describe("buildControlPlaneSnapshot", () => {
         hasKnowledgeIngestionPolicy: false,
         hasVoiceOpsPolicy: false,
       },
+      externalTools: {
+        smAutoEndpoint: null,
+        leadOpsEndpoint: null,
+      },
+      posWorker: null,
     });
 
     expect(snapshot.summary.health).toBe("offline");
     expect(snapshot.summary.activeAgents).toBe(0);
     expect(snapshot.services.find((service) => service.id === "openai_brain")?.state).toBe("offline");
+    expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("degraded");
+    expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("degraded");
+    expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("degraded");
     expect(snapshot.diagnostics.recommendations[0]).toContain("OpenAI API key");
   });
 
@@ -124,6 +132,20 @@ describe("buildControlPlaneSnapshot", () => {
         hasKnowledgeIngestionPolicy: true,
         hasVoiceOpsPolicy: true,
       },
+      externalTools: {
+        smAutoEndpoint: "https://smauto.example/mcp",
+        leadOpsEndpoint: "https://leadops.example/mcp",
+      },
+      posWorker: {
+        health: "operational",
+        detail: "Webhook feed active and queue healthy.",
+        lastWebhookAt: "2026-02-16T17:50:00.000Z",
+        oldestPendingSeconds: 0,
+        queuedEvents: 0,
+        blockedEvents: 0,
+        deadLetterEvents: 0,
+        outboxQueued: 0,
+      },
       billing: {
         capturedAt: "2026-02-16T18:00:00.000Z",
         providers: [
@@ -168,5 +190,54 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.costModel.method).toBe("hybrid-v1");
     expect(snapshot.costModel.liveProviderCostUsd).toBeCloseTo(42.65, 2);
     expect(snapshot.costModel.providerBilling).toHaveLength(3);
+    expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("operational");
+    expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("operational");
+    expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("operational");
+  });
+
+  it("marks connector services degraded when endpoint format is invalid", () => {
+    const snapshot = buildControlPlaneSnapshot({
+      nowIso: "2026-02-16T18:00:00.000Z",
+      spaces: {},
+      secretStatus: {
+        ...ALL_MISSING,
+        openaiKey: "secret",
+      },
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-02-16",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: true,
+        hasAgentTopology: true,
+        hasKnowledgeIngestionPolicy: true,
+        hasVoiceOpsPolicy: true,
+      },
+      externalTools: {
+        smAutoEndpoint: "smauto-local",
+        leadOpsEndpoint: "ftp://leadops.local",
+      },
+      posWorker: null,
+    });
+
+    const smAuto = snapshot.services.find((service) => service.id === "smauto_mcp");
+    const leadOps = snapshot.services.find((service) => service.id === "leadops_mcp");
+    expect(smAuto?.state).toBe("degraded");
+    expect(leadOps?.state).toBe("degraded");
+    expect(String(smAuto?.detail || "")).toContain("invalid");
+    expect(String(leadOps?.detail || "")).toContain("invalid");
   });
 });

@@ -63,7 +63,7 @@ function createContext(params: Record<string, string>) {
 describe("lead run jobs route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     assertOwnerMock.mockResolvedValue(undefined);
     claimLeadRunQuotaMock.mockResolvedValue({ windowKey: "2026-02-12", maxRunsPerDay: 30, maxLeadsPerDay: 400 });
     acquireLeadRunConcurrencySlotMock.mockResolvedValue({ activeRuns: 1, maxActiveRuns: 3 });

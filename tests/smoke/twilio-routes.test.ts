@@ -31,7 +31,7 @@ vi.mock("@/lib/api/secrets", () => ({
 }));
 
 vi.mock("@/lib/api/idempotency", () => ({
-  getIdempotencyKey: vi.fn(() => null),
+  getIdempotencyKey: vi.fn(() => undefined),
   withIdempotency: vi.fn(async (_params, executor: () => Promise<unknown>) => ({
     data: await executor(),
     replayed: false,
@@ -67,14 +67,14 @@ function withDefaultSecrets() {
     if (key === "twilioToken") return "test_token";
     if (key === "twilioPhoneNumber") return "+15005550006";
     if (key === "elevenLabsKey") return "eleven_test_key";
-    return null;
+    return undefined;
   });
 }
 
 describe("twilio routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveOrgMock.mockResolvedValue("org-1");
     findDncMock.mockResolvedValue(null);
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
@@ -131,8 +131,8 @@ describe("twilio routes", () => {
     resolveSecretMock.mockImplementation(async (_uid, key) => {
       if (key === "twilioSid") return "AC_test_sid";
       if (key === "twilioToken") return "test_token";
-      if (key === "twilioPhoneNumber") return null;
-      return null;
+      if (key === "twilioPhoneNumber") return undefined;
+      return undefined;
     });
 
     const req = new Request("http://localhost/api/twilio/send-sms", {

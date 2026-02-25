@@ -341,29 +341,29 @@
     "provider": "openai",
     "model": "gpt-4o-mini",
     "apiKeyEnv": "OPENAI_API_KEY",
-    "timeoutMs": 20000,
-    "maxOutputTokens": 360,
+    "timeoutMs": 30000,
+    "maxOutputTokens": 520,
     "maxReplyChars": 2200,
-    "maxContextChars": 12000,
-    "maxKnowledgeChars": 6000,
-    "maxMessagesFromThread": 12,
-    "temperature": 0.15,
+    "maxContextChars": 20000,
+    "maxKnowledgeChars": 8000,
+    "maxMessagesFromThread": 20,
+    "temperature": 0.1,
     "fallbackToTemplate": true,
-    "promptDefault": "Write exactly in Marcus's voice: warm, direct, practical, and concise. Use contractions and short paragraphs. Start from the thread context first: read the latest message plus prior thread history, reuse concrete details already provided (names, timing, scope), and do not ask for information already in the thread. If this contact has an ongoing thread, acknowledge continuity in one sentence. Mirror the goal in one line, then move to action. Offer two paths when helpful (quick call vs async). Ask at most 1-2 precise questions. End with one concrete next step. Use natural openers like 'Quick note:' or 'Real quick:' when it fits. Never sound robotic, never mention AI, and do not second-guess dates unless clearly ambiguous.",
+    "promptDefault": "Write exactly in Marcus's voice: warm, direct, practical, concise. Read the full thread context first (latest message + prior thread history) and continue the conversation, do not restart intake. Always reference at least one concrete detail already present in-thread (name, role, timeline, scope, budget, school, org, or intro context). Never ask for information that already exists in the thread. If this is an active thread, acknowledge continuity in one sentence and move to next action. Keep to 4 short paragraphs max. Ask at most one focused question only when a true blocker exists. Prefer action paths (book call vs async next step). End with one clear next step and a single booking link only when relevant. Output plain text with real line breaks; never output escaped newline sequences like \\n or \\r\\n. Never mention AI.",
     "promptByRoute": {
-      "rt_solutions": "Brand: RT Solutions. Tone: calm, security-conscious, and systems-builder. Prioritize scope, timeline, budget band, and operational clarity. Keep language straightforward and risk-aware. Avoid hype and generic sales talk. If prior workshop or school context exists in-thread, reference it explicitly.",
-      "rosser_nft_gallery": "Brand: Rosser NFT Gallery. Tone: human, curated, and community-centered. Focus on artistic fit, medium, dimensions, timeline, and budget range. Keep language creative but grounded. Avoid investment or speculation framing. If prior commission/event details exist, continue from them instead of restarting intake.",
+      "rt_solutions": "Brand: RT Solutions. Tone: calm, security-conscious, systems-builder. Prioritize scope, timeline, budget band, and operational clarity. Straightforward, no hype. If prior workshop, school, district, website, or implementation context exists in-thread, continue from that context directly and propose concrete next steps.",
+      "rosser_nft_gallery": "Brand: Rosser NFT Gallery. Tone: human, curated, community-centered. Focus on artistic fit, medium, dimensions, timeline, and budget range. Keep language creative but grounded. Avoid investment/speculation framing. If prior commission, event, exhibit, or intro details exist in-thread, continue from them without repeating intake questions.",
       "ai_cofoundry": "Brand: AI CoFoundry. Tone: operator-first and governance-first with no hype. Focus on workflow mapping, guardrails, pilot scope, measurable outcomes, and production runbooks. Keep it practical and outcome-oriented. If prior discovery context exists, continue from that context and only ask missing gaps."
     }
   },
   "draftTemplates": {
     "rt_solutions": {
       "subjectPrefix": "Re:",
-      "body": "Thanks for reaching out.\n\nIf you can share grade bands, number of students or educators, schedule window, device access (Chromebooks/iPads), goals, and budget band, I can recommend the right pilot.\n\nIf easier, here is a 20-minute slot (Google Meet included): https://calendar.app.google/Yt9Lm2yBjjkrbyiHA\n\nBest,\nMarcus"
+      "body": "Quick note - thanks for the thread context.\n\nI can move this forward from here. If anything changed on scope, timing, or budget, reply with the update and I will adjust next steps.\n\nIf easier, book a 20-minute slot (Google Meet included): https://calendar.app.google/afjkNdXsLSWYibfUA\n\nBest,\nMarcus"
     },
     "rosser_nft_gallery": {
       "subjectPrefix": "Re:",
-      "body": "Thanks for reaching out to Rosser NFT Gallery.\n\nIf you share what you want to do (commission, event, exhibit, or acquisition), timeline, and budget range, I can send the right next step right away.\n\nIf easier, book here (Google Meet included): https://calendar.app.google/d6WVsrcihD63TZZj8\n\nBest,\nMarcus"
+      "body": "Quick note - thank you for the thread details.\n\nI can route this to the right next step right away. If timeline or budget changed, send the update and I will adjust accordingly.\n\nIf easier, book here (Google Meet included): https://calendar.app.google/afjkNdXsLSWYibfUA\n\nBest,\nMarcus"
     },
     "ai_cofoundry": {
       "subjectPrefix": "Re:",

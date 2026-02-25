@@ -29,7 +29,7 @@ describe("drive picker token", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getAccessTokenMock.mockResolvedValue("access-token");
   });
 

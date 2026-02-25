@@ -13,6 +13,7 @@
       "https://aicofoundry.com/terms",
       "https://aicofoundry.com/demos",
       "https://rossernftgallery.com/",
+      "https://rossertech.netlify.app/",
       "https://eventsize.com/@rt-solutions-17486315356094"
     ],
     "internal": [
@@ -31,6 +32,44 @@
       "deleteCalendarEvent": "manual",
       "sendSms": "manual",
       "startVoiceCall": "manual"
+    },
+    "revenueAutomation": {
+      "stageWorkers": [
+        "source",
+        "enrich",
+        "score",
+        "outreach",
+        "booking"
+      ],
+      "pipelineStageSchema": [
+        "lead_capture",
+        "qualification",
+        "outreach",
+        "booking",
+        "proposal",
+        "deposit_received",
+        "won",
+        "lost"
+      ],
+      "requiredLeadFields": [
+        "businessUnit",
+        "offerCode",
+        "pipelineStage",
+        "owner",
+        "next_action",
+        "correlationId"
+      ],
+      "offerCatalogCodes": [
+        "RNG-MINI-REPLICA",
+        "RNG-COMMISSION-SCULPTURE",
+        "RNG-HISTORICAL-PRESERVATION",
+        "RNG-PRIVATE-EVENT-RENTAL",
+        "RTS-QUICK-WEBSITE-SPRINT",
+        "RTS-AI-LUNCH-LEARN",
+        "RTS-AI-TEAM-TRAINING",
+        "RTS-CUSTOM-BUILD-DISCOVERY",
+        "AICF-DISCOVERY"
+      ]
     },
     "agentTopology": {
       "masterAgentId": "orchestrator",
@@ -484,7 +523,7 @@
         {
           "id": "rts_discovery_primary",
           "businessId": "rt_solutions",
-          "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+          "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
           "calendarId": "mrosser@rossernftgallery.com",
           "attachGoogleMeet": true,
           "defaultDurationMinutes": 20,
@@ -494,7 +533,7 @@
         {
           "id": "rng_events_primary",
           "businessId": "rosser_nft_gallery",
-          "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+          "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
           "calendarId": "mrosser@rossernftgallery.com",
           "attachGoogleMeet": true,
           "defaultDurationMinutes": 30,
@@ -553,12 +592,18 @@
         "country": "US",
         "notes": "Public references include PO Box in Kenner and New Orleans service footprint."
       },
+      "contacts": {
+        "phone": "+18443169534",
+        "website": "https://rossertech.netlify.app/",
+        "primaryEmail": "mrosser@rossernftgallery.com"
+      },
       "publicFacts": {
         "formationDate": "2025-02-26",
         "filingNamesSeen": [
           "RT SOLUTIONS LLC"
         ],
-        "publicPage": "https://eventsize.com/@rt-solutions-17486315356094"
+        "publicPage": "https://eventsize.com/@rt-solutions-17486315356094",
+        "serviceSite": "https://rossertech.netlify.app/"
       },
       "voiceAndStyle": {
         "tone": [
@@ -573,10 +618,33 @@
         }
       },
       "serviceCatalog": [
+        "SMB website build and refresh",
         "Automation and workflow design",
         "Cloud strategy and infrastructure",
         "Cybersecurity advisory and secure deployments",
         "Workshops and demos"
+      ],
+      "packagedOffers": [
+        {
+          "code": "RTS-QUICK-WEBSITE-SPRINT",
+          "name": "Quick Website Launch Sprint",
+          "depositRule": "50_percent_deposit"
+        },
+        {
+          "code": "RTS-AI-LUNCH-LEARN",
+          "name": "AI Lunch-and-Learn",
+          "depositRule": "40_percent_deposit"
+        },
+        {
+          "code": "RTS-AI-TEAM-TRAINING",
+          "name": "AI Team Training Workshop",
+          "depositRule": "40_percent_deposit"
+        },
+        {
+          "code": "RTS-CUSTOM-BUILD-DISCOVERY",
+          "name": "Custom Software + AI Build Discovery",
+          "depositRule": "paid_discovery_required"
+        }
       ],
       "pipelineStages": [
         "lead_capture",
@@ -592,7 +660,7 @@
       ],
       "calendarDefaults": {
         "calendarProfileId": "rts_discovery_primary",
-        "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+        "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
         "defaultDurationMinutes": 20,
         "googleMeetRequired": true
       }
@@ -640,6 +708,28 @@
         "Custom commissions",
         "Venue and workshop bookings"
       ],
+      "packagedOffers": [
+        {
+          "code": "RNG-MINI-REPLICA",
+          "name": "Mini Replica",
+          "depositRule": "full_payment"
+        },
+        {
+          "code": "RNG-COMMISSION-SCULPTURE",
+          "name": "Custom Sculpture Commission",
+          "depositRule": "50_percent_deposit"
+        },
+        {
+          "code": "RNG-HISTORICAL-PRESERVATION",
+          "name": "Historical Preservation + Replica",
+          "depositRule": "40_percent_deposit"
+        },
+        {
+          "code": "RNG-PRIVATE-EVENT-RENTAL",
+          "name": "Private Event Rental",
+          "depositRule": "30_percent_date_hold"
+        }
+      ],
       "pipelineStages": [
         "inquiry",
         "qualification",
@@ -651,7 +741,7 @@
       ],
       "calendarDefaults": {
         "calendarProfileId": "rng_events_primary",
-        "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+        "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
         "defaultDurationMinutes": 30,
         "googleMeetRequired": true
       }
@@ -696,6 +786,13 @@
         "Pilot-to-production implementation",
         "Voice and multimodal systems",
         "Venture studio programs"
+      ],
+      "packagedOffers": [
+        {
+          "code": "AICF-DISCOVERY",
+          "name": "AI CoFoundry Discovery",
+          "depositRule": "paid_discovery_required"
+        }
       ],
       "pipelineStages": [
         "inbound",

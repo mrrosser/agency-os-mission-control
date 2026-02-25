@@ -1,4 +1,5 @@
 export type LeadSource = "googlePlaces" | "firestore" | "apifyMaps";
+export type LeadBusinessUnit = "ai_cofoundry" | "rosser_nft_gallery" | "rt_solutions";
 
 export type LeadContactSource = "googlePlaces" | "firecrawl" | "firestore";
 export type LeadContactConfidence = "high" | "medium" | "low";
@@ -64,6 +65,9 @@ export interface LeadCandidate {
     lng?: number;
     domainClusterSize?: number;
     source: LeadSource;
+    businessUnit?: LeadBusinessUnit;
+    offerCode?: string;
+    pipelineStage?: string;
     score?: number;
     scoreSignals?: LeadScoreSignals;
     enriched?: boolean;
@@ -83,6 +87,8 @@ export interface LeadSourceRequest {
     minScore?: number;
     sources?: LeadSource[];
     includeEnrichment?: boolean;
+    businessUnit?: LeadBusinessUnit;
+    offerCode?: string;
     budget?: {
         maxCostUsd?: number;
         maxPages?: number;

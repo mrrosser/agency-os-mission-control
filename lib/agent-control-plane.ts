@@ -59,6 +59,22 @@ export interface ControlPlaneSkillHealthInput {
   hasVoiceOpsPolicy: boolean;
 }
 
+export interface ControlPlaneExternalToolInput {
+  smAutoEndpoint: string | null;
+  leadOpsEndpoint: string | null;
+}
+
+export interface ControlPlanePosWorkerInput {
+  health: ControlPlaneHealth;
+  detail: string;
+  lastWebhookAt: string | null;
+  oldestPendingSeconds: number;
+  queuedEvents: number;
+  blockedEvents: number;
+  deadLetterEvents: number;
+  outboxQueued: number;
+}
+
 export interface ControlPlaneServiceSnapshot {
   id: string;
   label: string;
@@ -155,7 +171,9 @@ interface BuildControlPlaneSnapshotInput {
   telemetryGroups: ControlPlaneTelemetryGroup[];
   driveSummary: ControlPlaneDriveSummary;
   skillHealth: ControlPlaneSkillHealthInput;
+  externalTools?: ControlPlaneExternalToolInput;
   billing?: ControlPlaneBillingInput;
+  posWorker?: ControlPlanePosWorkerInput | null;
 }
 
 type ServiceKey =
@@ -166,7 +184,10 @@ type ServiceKey =
   | "drive_knowledge"
   | "twilio_voice"
   | "elevenlabs_tts"
-  | "firecrawl_research";
+  | "firecrawl_research"
+  | "square_pos"
+  | "smauto_mcp"
+  | "leadops_mcp";
 
 const PROVIDER_TO_SERVICE: Record<ControlPlaneBillingProviderId, ServiceKey> = {
   openai: "openai_brain",
@@ -265,6 +286,32 @@ function parseIso(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+interface ParsedConnectorEndpoint {
+  origin: string | null;
+  invalid: boolean;
+}
+
+function parseConnectorEndpoint(value: string | null | undefined): ParsedConnectorEndpoint {
+  if (!value) {
+    return { origin: null, invalid: false };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { origin: null, invalid: false };
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") {
+      return { origin: null, invalid: true };
+    }
+    return { origin: parsed.origin, invalid: false };
+  } catch {
+    return { origin: null, invalid: true };
+  }
+}
+
 function mapAgentAliases(agentId: string): string {
   const normalized = agentId.trim().toLowerCase();
   for (const def of AGENT_DEFINITIONS) {
@@ -278,7 +325,9 @@ function resolveServiceState(
   id: ServiceKey,
   secretStatus: SecretStatus,
   google: ControlPlaneGoogleCapabilities,
-  driveSummary: ControlPlaneDriveSummary
+  driveSummary: ControlPlaneDriveSummary,
+  externalTools: ControlPlaneExternalToolInput,
+  posWorker: ControlPlanePosWorkerInput | null | undefined
 ): ControlPlaneServiceSnapshot {
   if (id === "openai_brain") {
     const hasKey = secretStatus.openaiKey !== "missing";
@@ -418,6 +467,60 @@ function resolveServiceState(
     };
   }
 
+  if (id === "square_pos") {
+    if (!posWorker) {
+      return {
+        id,
+        label: "Square POS Worker",
+        state: "degraded",
+        detail: "No POS worker snapshot available yet.",
+        required: false,
+        monthlyCostUsd: 0,
+      };
+    }
+
+    return {
+      id,
+      label: "Square POS Worker",
+      state: posWorker.health,
+      detail: `${posWorker.detail} | queue ${posWorker.queuedEvents} | blocked ${posWorker.blockedEvents} | dead-letter ${posWorker.deadLetterEvents} | outbox ${posWorker.outboxQueued}`,
+      required: false,
+      monthlyCostUsd: 0,
+    };
+  }
+
+  if (id === "smauto_mcp") {
+    const endpoint = parseConnectorEndpoint(externalTools.smAutoEndpoint);
+    return {
+      id,
+      label: "SMAuto MCP",
+      state: endpoint.origin ? "operational" : "degraded",
+      detail: endpoint.origin
+        ? `Connected via ${endpoint.origin}`
+        : endpoint.invalid
+          ? "SMAUTO_MCP_SERVER_URL is invalid. Use a full http(s) URL."
+          : "Set SMAUTO_MCP_SERVER_URL to enable social orchestration tool calls.",
+      required: false,
+      monthlyCostUsd: 0,
+    };
+  }
+
+  if (id === "leadops_mcp") {
+    const endpoint = parseConnectorEndpoint(externalTools.leadOpsEndpoint);
+    return {
+      id,
+      label: "LeadOps MCP",
+      state: endpoint.origin ? "operational" : "degraded",
+      detail: endpoint.origin
+        ? `Connected via ${endpoint.origin}`
+        : endpoint.invalid
+          ? "LEADOPS_MCP_SERVER_URL is invalid. Use a full http(s) URL."
+          : "Set LEADOPS_MCP_SERVER_URL to enable LeadOps/mission-control backend tools.",
+      required: false,
+      monthlyCostUsd: 0,
+    };
+  }
+
   const firecrawlReady = secretStatus.firecrawlKey !== "missing";
   return {
     id,
@@ -544,6 +647,21 @@ function buildRecommendations(args: {
     recommendations.push("Add ElevenLabs key to keep calls in your cloned voice profile.");
   }
 
+  const smAuto = serviceById.get("smauto_mcp");
+  if (smAuto?.state !== "operational") {
+    recommendations.push("Configure SMAUTO_MCP_SERVER_URL to restore social orchestration tooling.");
+  }
+
+  const leadOps = serviceById.get("leadops_mcp");
+  if (leadOps?.state !== "operational") {
+    recommendations.push("Configure LEADOPS_MCP_SERVER_URL to enable LeadOps mission-control tool routing.");
+  }
+
+  const squarePos = serviceById.get("square_pos");
+  if (squarePos?.state !== "operational") {
+    recommendations.push("Review Square POS worker queue/dead-letter status before enabling fully autonomous invoice/refund actions.");
+  }
+
   if (args.driveSummary.staleDays !== null && args.driveSummary.staleDays > 7) {
     recommendations.push("Run a Drive delta scan now; knowledge sync is older than one week.");
   }
@@ -572,16 +690,23 @@ function buildRecommendations(args: {
 export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput): ControlPlaneSnapshot {
   const generatedAt = input.nowIso || new Date().toISOString();
   const nowMs = parseIso(generatedAt) || Date.now();
+  const externalTools: ControlPlaneExternalToolInput = input.externalTools || {
+    smAutoEndpoint: process.env.SMAUTO_MCP_SERVER_URL || null,
+    leadOpsEndpoint: process.env.LEADOPS_MCP_SERVER_URL || null,
+  };
 
   const serviceList: ControlPlaneServiceSnapshot[] = [
-    resolveServiceState("openai_brain", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("google_workspace", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("gmail_tooling", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("calendar_tooling", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("drive_knowledge", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("twilio_voice", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("elevenlabs_tts", input.secretStatus, input.google, input.driveSummary),
-    resolveServiceState("firecrawl_research", input.secretStatus, input.google, input.driveSummary),
+    resolveServiceState("openai_brain", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("google_workspace", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("gmail_tooling", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("calendar_tooling", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("drive_knowledge", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("twilio_voice", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("elevenlabs_tts", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("firecrawl_research", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("square_pos", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("smauto_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("leadops_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
   ];
   const providerBilling = input.billing?.providers || [];
   const billingRollup = applyProviderBilling(serviceList, providerBilling);

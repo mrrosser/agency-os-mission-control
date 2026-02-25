@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/agents/control-plane/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAgentSpaceStatus } from "@/lib/agent-status";
@@ -104,6 +104,8 @@ const getQuotaMock = vi.mocked(getLeadRunQuotaSummary);
 const listAlertsMock = vi.mocked(listLeadRunAlerts);
 const getAdminDbMock = vi.mocked(getAdminDb);
 const pullProviderBillingMock = vi.mocked(pullProviderBilling);
+const ORIGINAL_SMAUTO_MCP_SERVER_URL = process.env.SMAUTO_MCP_SERVER_URL;
+const ORIGINAL_LEADOPS_MCP_SERVER_URL = process.env.LEADOPS_MCP_SERVER_URL;
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -112,7 +114,7 @@ function createContext() {
 describe("agents control-plane route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getAgentSpaceStatusMock.mockResolvedValue({
       "spaces/AAQA62xqRGQ": {
         agentId: "orchestrator",
@@ -194,6 +196,8 @@ describe("agents control-plane route", () => {
         },
       ],
     });
+    process.env.SMAUTO_MCP_SERVER_URL = "https://smauto.example/mcp";
+    process.env.LEADOPS_MCP_SERVER_URL = "https://leadops.example/mcp";
 
     getAdminDbMock.mockReturnValue({
       collection: (name: string) => {
@@ -253,6 +257,20 @@ describe("agents control-plane route", () => {
     } as unknown as ReturnType<typeof getAdminDb>);
   });
 
+  afterEach(() => {
+    if (typeof ORIGINAL_SMAUTO_MCP_SERVER_URL === "string") {
+      process.env.SMAUTO_MCP_SERVER_URL = ORIGINAL_SMAUTO_MCP_SERVER_URL;
+    } else {
+      delete process.env.SMAUTO_MCP_SERVER_URL;
+    }
+
+    if (typeof ORIGINAL_LEADOPS_MCP_SERVER_URL === "string") {
+      process.env.LEADOPS_MCP_SERVER_URL = ORIGINAL_LEADOPS_MCP_SERVER_URL;
+    } else {
+      delete process.env.LEADOPS_MCP_SERVER_URL;
+    }
+  });
+
   it("returns control-plane snapshot payload", async () => {
     const request = new Request("http://localhost/api/agents/control-plane", { method: "GET" });
     const response = await GET(
@@ -271,5 +289,8 @@ describe("agents control-plane route", () => {
     expect(typeof payload.summary.projectedMonthlyCostUsd).toBe("number");
     expect(payload.costModel.method).toBe("live-v1");
     expect(Array.isArray(payload.costModel.providerBilling)).toBe(true);
+    expect(payload.services.some((service: { id: string }) => service.id === "square_pos")).toBe(true);
+    expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
+    expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");
   });
 });

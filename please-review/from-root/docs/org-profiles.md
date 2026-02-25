@@ -5,7 +5,7 @@ Purpose
 - Update this file as offers and policies evolve.
 
 Last Updated
-- 2026-02-03
+- 2026-02-24
 
 ============================================================
 Rosser NFT Gallery
@@ -15,7 +15,7 @@ Contact
 - Address: 2505 N Tonti St, New Orleans, LA 70117
 - Phone: +1 (757) 214-7313
 - Primary email: mrosser@rossernftgallery.com
-- Booking link: https://calendar.app.google/d6WVsrcihD63TZZj8
+- Booking link: https://calendar.app.google/afjkNdXsLSWYibfUA
 - Founder reference: Marcus L. Rosser
 
 Positioning
@@ -64,8 +64,10 @@ Standard CTA
 RT Solutions (using RNG alias)
 ============================================================
 Contact
+- Website: https://rossertech.netlify.app/
+- Phone: +1 (844) 316-9534
 - Primary email: mrosser@rossernftgallery.com (alias for RT Solutions)
-- Booking link: https://calendar.app.google/Yt9Lm2yBjjkrbyiHA
+- Booking link: https://calendar.app.google/afjkNdXsLSWYibfUA
 
 Services
 - K–8 AI literacy workshops.

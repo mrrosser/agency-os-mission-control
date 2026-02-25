@@ -34,7 +34,7 @@ function createContext(params: Record<string, string> = {}) {
 describe("gmail routes - DNC enforcement", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveOrgMock.mockResolvedValue("org-1");
     findDncMock.mockImplementation(async (args: unknown) => {
       const email = (args as { email?: string | null }).email;
@@ -77,8 +77,8 @@ describe("gmail routes - DNC enforcement", () => {
     expect(res.status).toBe(409);
     expect(String(data.error)).toMatch(/Do Not Contact/i);
     expect(receiptMock).toHaveBeenCalledOnce();
-    const input = (receiptMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>;
-    expect(input.status).toBe("skipped");
+    const input = receiptMock.mock.calls[0]?.[0];
+    expect(input?.status).toBe("skipped");
   });
 
   it("blocks send when cc recipient is on DNC list and records receipt", async () => {
@@ -109,9 +109,9 @@ describe("gmail routes - DNC enforcement", () => {
     expect(res.status).toBe(409);
     expect(String(data.error)).toMatch(/Do Not Contact/i);
     expect(receiptMock).toHaveBeenCalledOnce();
-    const input = (receiptMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>;
-    expect(input.status).toBe("skipped");
-    expect(input.data).toMatchObject({ blockedRecipient: "blocked@example.com" });
+    const input = receiptMock.mock.calls[0]?.[0];
+    expect(input?.status).toBe("skipped");
+    expect(input?.data).toMatchObject({ blockedRecipient: "blocked@example.com" });
   });
 
   it("blocks draft when recipient is on DNC list and records receipt", async () => {
@@ -141,8 +141,8 @@ describe("gmail routes - DNC enforcement", () => {
     expect(res.status).toBe(409);
     expect(String(data.error)).toMatch(/Do Not Contact/i);
     expect(receiptMock).toHaveBeenCalledOnce();
-    const input = (receiptMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>;
-    expect(input.status).toBe("skipped");
+    const input = receiptMock.mock.calls[0]?.[0];
+    expect(input?.status).toBe("skipped");
   });
 
   it("blocks draft when bcc recipient is on DNC list and records receipt", async () => {
@@ -173,8 +173,8 @@ describe("gmail routes - DNC enforcement", () => {
     expect(res.status).toBe(409);
     expect(String(data.error)).toMatch(/Do Not Contact/i);
     expect(receiptMock).toHaveBeenCalledOnce();
-    const input = (receiptMock.mock.calls[0]?.[0] ?? {}) as Record<string, unknown>;
-    expect(input.status).toBe("skipped");
-    expect(input.data).toMatchObject({ blockedRecipient: "blocked@example.com" });
+    const input = receiptMock.mock.calls[0]?.[0];
+    expect(input?.status).toBe("skipped");
+    expect(input?.data).toMatchObject({ blockedRecipient: "blocked@example.com" });
   });
 });

@@ -24,6 +24,18 @@
       "args": [
         "PLACEHOLDER_PATH_TO_FIRESTORE_MCP_SERVER"
       ]
+    },
+    "smauto": {
+      "url": "${SMAUTO_MCP_SERVER_URL}",
+      "headers": {
+        "Authorization": "Bearer ${SMAUTO_MCP_API_KEY}"
+      }
+    },
+    "leadops": {
+      "url": "${LEADOPS_MCP_SERVER_URL}",
+      "headers": {
+        "Authorization": "Bearer ${LEADOPS_MCP_API_KEY}"
+      }
     }
   }
 }

@@ -15,10 +15,14 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import {
   buildControlPlaneSnapshot,
   type ControlPlaneDriveSummary,
+  type ControlPlaneExternalToolInput,
+  type ControlPlanePosWorkerInput,
   type ControlPlaneSkillHealthInput,
   type ControlPlaneTelemetryGroup,
 } from "@/lib/agent-control-plane";
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
+import type { Logger } from "@/lib/logging";
+import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
 
 const TELEMETRY_GROUP_LIMIT = 8;
 const KNOWLEDGE_PACK_PATH = path.join(
@@ -170,11 +174,60 @@ function deriveGoogleCapabilities(scopeValue: string | null | undefined) {
   };
 }
 
+function readExternalToolConfig(): ControlPlaneExternalToolInput {
+  const read = (name: string): string | null => {
+    const value = process.env[name];
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  return {
+    smAutoEndpoint: read("SMAUTO_MCP_SERVER_URL"),
+    leadOpsEndpoint: read("LEADOPS_MCP_SERVER_URL"),
+  };
+}
+
+function isValidHttpUrl(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function readPosWorkerSummary(
+  uid: string,
+  log: Logger
+): Promise<ControlPlanePosWorkerInput | null> {
+  try {
+    const snapshot = await getPosWorkerStatus({ uid, log });
+    return {
+      health: snapshot.summary.health,
+      detail: snapshot.summary.detail,
+      lastWebhookAt: snapshot.summary.lastWebhookAt,
+      oldestPendingSeconds: snapshot.summary.oldestPendingSeconds,
+      queuedEvents: snapshot.summary.queuedEvents,
+      blockedEvents: snapshot.summary.blockedEvents,
+      deadLetterEvents: snapshot.summary.deadLetterEvents,
+      outboxQueued: snapshot.summary.outboxQueued,
+    };
+  } catch (error) {
+    log.warn("agents.control_plane.pos_status_unavailable", {
+      uid,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 export const GET = withApiHandler(
   async ({ request, log }) => {
     const user = await requireFirebaseAuth(request, log);
 
-    const [spaces, secretStatus, googleTokens, orgId, driveSummary, skillHealth, telemetryGroups, billing] =
+    const [spaces, secretStatus, googleTokens, orgId, driveSummary, skillHealth, telemetryGroups, billing, posWorker] =
       await Promise.all([
         getAgentSpaceStatus(user.uid, log),
         getSecretStatus(user.uid),
@@ -184,6 +237,7 @@ export const GET = withApiHandler(
         readSkillHealth(log),
         listTelemetryGroups(user.uid, TELEMETRY_GROUP_LIMIT),
         pullProviderBilling({ uid: user.uid, log }),
+        readPosWorkerSummary(user.uid, log),
       ]);
 
     const [quota, alerts] = await Promise.all([
@@ -195,6 +249,7 @@ export const GET = withApiHandler(
     if (!google.connected && (googleTokens?.refreshToken || googleTokens?.accessToken)) {
       google.connected = true;
     }
+    const externalTools = readExternalToolConfig();
 
     const snapshot = buildControlPlaneSnapshot({
       spaces,
@@ -205,7 +260,9 @@ export const GET = withApiHandler(
       telemetryGroups,
       driveSummary,
       skillHealth,
+      externalTools,
       billing,
+      posWorker,
     });
 
     log.info("agents.control_plane.snapshot", {
@@ -215,6 +272,10 @@ export const GET = withApiHandler(
       openAlerts: snapshot.summary.openAlerts,
       unresolvedBugs: snapshot.summary.unresolvedBugs,
       projectedMonthlyCostUsd: snapshot.summary.projectedMonthlyCostUsd,
+      smAutoConfigured: isValidHttpUrl(externalTools.smAutoEndpoint),
+      leadOpsConfigured: isValidHttpUrl(externalTools.leadOpsEndpoint),
+      posWorkerHealth: posWorker?.health || "unknown",
+      posWorkerQueued: posWorker?.queuedEvents ?? null,
     });
 
     return NextResponse.json(snapshot);

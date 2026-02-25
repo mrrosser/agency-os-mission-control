@@ -21,7 +21,7 @@ function createContext() {
 describe("runtime preflight route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     buildReportMock.mockReturnValue({
       status: "warn",
       generatedAt: "2026-02-21T00:00:00.000Z",

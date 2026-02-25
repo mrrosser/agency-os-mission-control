@@ -31,7 +31,7 @@ const knowledgePayload = {
       name: "Rosser NFT Gallery",
       serviceCatalog: ["Exhibitions", "Commissions"],
       calendarDefaults: {
-        bookingLink: "https://calendar.app.google/d6WVsrcihD63TZZj8",
+        bookingLink: "https://calendar.app.google/afjkNdXsLSWYibfUA",
       },
     },
   ],

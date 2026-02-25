@@ -14,7 +14,7 @@ vi.mock("@/lib/api/secrets", () => ({
 }));
 
 vi.mock("@/lib/api/idempotency", () => ({
-  getIdempotencyKey: vi.fn(() => null),
+  getIdempotencyKey: vi.fn(() => undefined),
   withIdempotency: vi.fn(async (_params, executor: () => Promise<unknown>) => ({
     data: await executor(),
     replayed: false,
@@ -39,7 +39,7 @@ function createContext() {
 describe("elevenlabs synthesize route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
       data: await executor(),
       replayed: false,
@@ -49,7 +49,7 @@ describe("elevenlabs synthesize route", () => {
   });
 
   it("returns 400 when ElevenLabs key is missing", async () => {
-    resolveSecretMock.mockResolvedValue(null);
+    resolveSecretMock.mockResolvedValue(undefined);
 
     const req = new Request("http://localhost/api/elevenlabs/synthesize", {
       method: "POST",

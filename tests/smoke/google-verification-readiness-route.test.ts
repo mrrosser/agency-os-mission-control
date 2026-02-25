@@ -21,7 +21,7 @@ function createContext() {
 describe("google verification readiness route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     buildReportMock.mockResolvedValue({
       status: "ready",
       generatedAt: "2026-02-21T00:00:00.000Z",

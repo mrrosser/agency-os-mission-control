@@ -143,4 +143,44 @@ describe("fetchGooglePlacesLeads", () => {
     expect(result.pagesFetched).toBe(1);
     expect(result.stopReason).toBe("page_limit");
   });
+
+  it(
+    "handles INVALID_REQUEST pagination tokens without failing the run",
+    async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          json: async () => ({
+            status: "OK",
+            next_page_token: "page-2-token",
+            results: [
+              {
+                place_id: "place-1",
+                name: "Signal HVAC",
+                formatted_address: "Austin, TX",
+              },
+            ],
+          }),
+        })
+        .mockResolvedValue({
+          json: async () => ({
+            status: "INVALID_REQUEST",
+            results: [],
+          }),
+        });
+
+      const result = await fetchGooglePlacesLeads({
+        apiKey: "test-key",
+        query: "HVAC contractors",
+        location: "Austin, TX",
+        limit: 10,
+        includeEnrichment: false,
+      });
+
+      expect(result.leads).toHaveLength(1);
+      expect(result.pagesFetched).toBe(1);
+      expect(result.stopReason).toBe("no_more_results");
+      expect(mockFetch).toHaveBeenCalledTimes(5);
+    },
+    20_000
+  );
 });

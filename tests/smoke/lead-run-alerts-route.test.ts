@@ -32,7 +32,7 @@ function createContext() {
 describe("lead run alerts route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveOrgMock.mockResolvedValue("org-1");
     escalateAlertsMock.mockResolvedValue({ escalated: 0 });
   });

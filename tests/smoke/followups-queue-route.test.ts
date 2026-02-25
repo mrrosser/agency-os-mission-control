@@ -75,7 +75,7 @@ describe("followups queue route", () => {
     vi.restoreAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-15T00:00:00.000Z"));
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveLeadRunOrgIdMock.mockResolvedValue("org-1");
     getFollowupsOrgSettingsMock.mockResolvedValue({
       orgId: "org-1",

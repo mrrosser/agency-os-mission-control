@@ -38,7 +38,7 @@ function createContext(params: Record<string, string> = {}) {
 describe("follow-up sequencing routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveOrgMock.mockResolvedValue("org-1");
     // Keep these route tests focused on the API contract; scheduler behavior is covered separately.
     getFollowupsOrgSettingsMock.mockResolvedValue({

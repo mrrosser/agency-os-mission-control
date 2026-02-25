@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.2",
   "mode": "draft_only",
   "globalRules": {
     "neverAutoSend": true,
@@ -16,6 +16,7 @@
       "clear",
       "solution-forward",
       "accountable",
+      "thread-aware",
       "calm confidence"
     ],
     "writingRules": {
@@ -24,6 +25,9 @@
       "avoidFluff": true,
       "avoidJargonByDefault": true,
       "activeVoicePreferred": true,
+      "mustReferenceThreadContext": true,
+      "neverRepeatKnownFacts": true,
+      "maxClarifyingQuestions": 1,
       "defaultParagraphLengthSentences": [
         1,
         3
@@ -134,7 +138,7 @@
       },
       "signature": "-Marcus | RT Solutions",
       "calendarProfileId": "rts_discovery_primary",
-      "bookingLink": "https://calendar.app.google/Yt9Lm2yBjjkrbyiHA",
+      "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
       "templates": {
         "lead_inquiry": "Hey {{first_name}},\n\nThanks for reaching out.\n\nIf you can share grade bands, number of students or educators, schedule window, device access (Chromebooks/iPads), your goals, and budget band, I can recommend the right pilot workshop or program.\n\nIf easier, you can book a 20-minute planning call here: {{booking_link}}\n\nSound good?\n\n-Marcus | RT Solutions",
         "workshop_request": "Hey {{first_name}},\n\nThis looks like a good workshop fit.\n\nPlease confirm audience type, session length, preferred dates, and success criteria. I will send a clean option set with timeline.\n\nIf you prefer live planning, use this link: {{booking_link}}\n\n-Marcus | RT Solutions",
@@ -174,7 +178,7 @@
       },
       "signature": "-Marcus | Rosser NFT Gallery",
       "calendarProfileId": "rng_events_primary",
-      "bookingLink": "https://calendar.app.google/d6WVsrcihD63TZZj8",
+      "bookingLink": "https://calendar.app.google/afjkNdXsLSWYibfUA",
       "alwaysAddVideo": true,
       "templates": {
         "lead_inquiry": "Hey {{first_name}},\n\nThanks for reaching out to Rosser NFT Gallery.\n\nTell me what you want to do (commission, event, exhibit, or acquisition), your timeline, and your budget band, and I will route this the right way.\n\nIf it helps, we can walk it live here (Google Meet included): {{booking_link}}\n\n-Marcus | Rosser NFT Gallery",

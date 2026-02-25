@@ -10,12 +10,12 @@ describe("sourceLeads budget guardrails", () => {
     const providerA: LeadSourceProvider = {
       source: "googlePlaces",
       run: vi.fn(async () => ({
-        source: "googlePlaces",
+        source: "googlePlaces" as const,
         leads: [
           {
             id: "lead-a",
             companyName: "Signal A",
-            source: "googlePlaces",
+            source: "googlePlaces" as const,
             enriched: false,
           },
         ],
@@ -27,12 +27,12 @@ describe("sourceLeads budget guardrails", () => {
     const providerB: LeadSourceProvider = {
       source: "firestore",
       run: vi.fn(async () => ({
-        source: "firestore",
+        source: "firestore" as const,
         leads: [
           {
             id: "lead-b",
             companyName: "Signal B",
-            source: "firestore",
+            source: "firestore" as const,
             enriched: false,
           },
         ],

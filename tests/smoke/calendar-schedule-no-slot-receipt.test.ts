@@ -40,7 +40,7 @@ function createContext(params: Record<string, string>) {
 describe("calendar schedule route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getAccessTokenMock.mockResolvedValue("access-token");
     recordReceiptMock.mockResolvedValue(undefined);
   });

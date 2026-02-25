@@ -23,6 +23,31 @@ async function mapWithConcurrency<T, R>(
     return results;
 }
 
+function shouldUnescapeEscapedNewlines(body: string): boolean {
+    const escapedNewlineCount = (body.match(/\\n/g) || []).length;
+    if (escapedNewlineCount === 0 && !body.includes('\\r')) return false;
+
+    if (body.includes('\\n\\n') || body.includes('\\r\\n')) return true;
+    if (escapedNewlineCount >= 2 && !body.includes('\n')) return true;
+    if (body.includes('\\r') && !body.includes('\n')) return true;
+    return false;
+}
+
+export function normalizeEmailBodyForDelivery(body: string): string {
+    let normalized = String(body || '').replace(/\r\n/g, '\n');
+    if (!shouldUnescapeEscapedNewlines(normalized)) {
+        return normalized;
+    }
+
+    normalized = normalized
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '')
+        .replace(/\\t/g, '\t');
+
+    return normalized;
+}
+
 function buildInboxMessageMetadataQuery(): string {
     const params = new URLSearchParams({
         format: "metadata",
@@ -84,6 +109,8 @@ export async function sendEmail(
     email: EmailMessage,
     log?: Logger
 ): Promise<{ id: string; threadId: string }> {
+    const body = normalizeEmailBodyForDelivery(email.body);
+
     // Build the email in RFC 2822 format
     const messageParts: string[] = [];
 
@@ -104,7 +131,7 @@ export async function sendEmail(
     messageParts.push('');
 
     // Body
-    messageParts.push(email.body);
+    messageParts.push(body);
 
     // Build the raw message
     const rawMessage = messageParts.join('\r\n');
@@ -137,6 +164,7 @@ export async function createDraftEmail(
     email: EmailMessage,
     log?: Logger
 ): Promise<{ draftId: string; messageId: string; threadId?: string }> {
+    const body = normalizeEmailBodyForDelivery(email.body);
     const messageParts: string[] = [];
 
     messageParts.push(`To: ${email.to.join(', ')}`);
@@ -150,7 +178,7 @@ export async function createDraftEmail(
     const contentType = email.isHtml ? 'text/html' : 'text/plain';
     messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
     messageParts.push('');
-    messageParts.push(email.body);
+    messageParts.push(body);
 
     const rawMessage = messageParts.join('\r\n');
     const encodedMessage = Buffer.from(rawMessage)
@@ -277,6 +305,7 @@ export async function replyToMessage(
     isHtml: boolean = false,
     log?: Logger
 ): Promise<{ id: string; threadId: string }> {
+    const normalizedReplyBody = normalizeEmailBodyForDelivery(replyBody);
     // Get original message to extract headers
     const originalMessage = await getMessage(accessToken, originalMessageId, log);
 
@@ -294,7 +323,7 @@ export async function replyToMessage(
     const contentType = isHtml ? 'text/html' : 'text/plain';
     messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
     messageParts.push('');
-    messageParts.push(replyBody);
+    messageParts.push(normalizedReplyBody);
 
     const rawMessage = messageParts.join('\r\n');
     const encodedMessage = Buffer.from(rawMessage)

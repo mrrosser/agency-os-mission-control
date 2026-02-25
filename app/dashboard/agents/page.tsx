@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 type Health = "operational" | "degraded" | "offline";
 type RuntimeState = "active" | "idle" | "degraded" | "inactive";
 type BillingStatus = "live" | "missing_credentials" | "unauthorized" | "unavailable" | "error";
+type TimelineFilter = "all" | "tasks" | "comments" | "status" | "decisions";
 
 interface AgentSnapshot {
   id: string;
@@ -106,6 +107,17 @@ interface ControlPlaneSnapshot {
   };
 }
 
+type ActivityKind = "heartbeat" | "alert" | "bug" | "decision";
+
+interface ActivityItem {
+  id: string;
+  kind: ActivityKind;
+  timeline: Exclude<TimelineFilter, "all">;
+  title: string;
+  detail: string;
+  ts: number;
+}
+
 const HEALTH_BADGE: Record<Health, string> = {
   operational: "border-emerald-400/40 bg-emerald-400/10 text-emerald-200",
   degraded: "border-amber-400/40 bg-amber-400/10 text-amber-200",
@@ -145,11 +157,26 @@ function costMethodLabel(method: string): string {
   return "Heuristic monthly estimate";
 }
 
+function toTs(value: string | null | undefined): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function defaultRouteTarget(agent: AgentSnapshot): string {
+  if (agent.channels.length > 0) return agent.channels[0];
+  if (agent.businessId) return `business:${agent.businessId}`;
+  return "mkt-social";
+}
+
 export default function AgentNexusPage() {
   const { user } = useAuth();
   const [snapshot, setSnapshot] = useState<ControlPlaneSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>("all");
+  const [agentActionState, setAgentActionState] = useState<Record<string, boolean>>({});
+  const [agentActionFeedback, setAgentActionFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadSnapshot = useCallback(async (mode: "initial" | "refresh" = "initial") => {
@@ -187,6 +214,124 @@ export default function AgentNexusPage() {
     if (!snapshot) return 0;
     return snapshot.services.filter((service) => service.state === "operational").length;
   }, [snapshot]);
+
+  const liveFeed = useMemo(() => {
+    if (!snapshot) return [];
+
+    const items: ActivityItem[] = [];
+
+    for (const agent of snapshot.agents) {
+      if (!agent.lastSeenAt) continue;
+      items.push({
+        id: `heartbeat:${agent.id}:${agent.lastSeenAt}`,
+        kind: "heartbeat",
+        timeline: "status",
+        title: `${agent.label} heartbeat`,
+        detail: agent.channels.length > 0 ? `Channels: ${agent.channels.join(", ")}` : "No active channels",
+        ts: toTs(agent.lastSeenAt),
+      });
+    }
+
+    for (const alert of snapshot.diagnostics.alerts) {
+      items.push({
+        id: `alert:${alert.alertId}`,
+        kind: "alert",
+        timeline: "tasks",
+        title: alert.title,
+        detail: `${alert.status.toUpperCase()} • ${alert.message}`,
+        ts: toTs(alert.createdAt),
+      });
+    }
+
+    for (const bug of snapshot.diagnostics.bugs) {
+      items.push({
+        id: `bug:${bug.fingerprint}`,
+        kind: "bug",
+        timeline: "comments",
+        title: bug.message || bug.route || bug.fingerprint,
+        detail: `${bug.count} hits • ${bug.triageStatus}`,
+        ts: toTs(bug.lastSeenAt),
+      });
+    }
+
+    for (const [index, recommendation] of snapshot.diagnostics.recommendations.entries()) {
+      items.push({
+        id: `decision:${index}`,
+        kind: "decision",
+        timeline: "decisions",
+        title: "Control-plane recommendation",
+        detail: recommendation,
+        ts: toTs(snapshot.generatedAt) - index,
+      });
+    }
+
+    return items.sort((a, b) => b.ts - a.ts).slice(0, 20);
+  }, [snapshot]);
+
+  const liveFeedCounts = useMemo(() => {
+    return {
+      all: liveFeed.length,
+      tasks: liveFeed.filter((item) => item.timeline === "tasks").length,
+      comments: liveFeed.filter((item) => item.timeline === "comments").length,
+      status: liveFeed.filter((item) => item.timeline === "status").length,
+      decisions: liveFeed.filter((item) => item.timeline === "decisions").length,
+    };
+  }, [liveFeed]);
+
+  const filteredLiveFeed = useMemo(() => {
+    if (timelineFilter === "all") return liveFeed;
+    return liveFeed.filter((item) => item.timeline === timelineFilter);
+  }, [liveFeed, timelineFilter]);
+
+  const runAgentAction = useCallback(
+    async (agent: AgentSnapshot, action: "pause" | "ping" | "route") => {
+      if (!user) return;
+      const actionKey = `${agent.id}:${action}`;
+      setAgentActionState((prev) => ({ ...prev, [actionKey]: true }));
+      setAgentActionFeedback(null);
+      try {
+        const headers = await buildAuthHeaders(user);
+        const body: {
+          agentId: string;
+          action: "pause" | "ping" | "route";
+          target?: string;
+          idempotencyKey: string;
+        } = {
+          agentId: agent.id,
+          action,
+          idempotencyKey: `agent:${agent.id}:${action}:${Math.floor(Date.now() / 15000)}`,
+        };
+        if (action === "route") {
+          body.target = defaultRouteTarget(agent);
+        }
+
+        const response = await fetch("/api/agents/actions", {
+          method: "POST",
+          headers: {
+            ...headers,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        const payload = await readApiJson<{ error?: string; requestId?: string; replayed?: boolean }>(response);
+        if (!response.ok) {
+          const cid = getResponseCorrelationId(response);
+          throw new Error(payload?.error || `Action failed (${response.status}${cid ? ` cid=${cid}` : ""})`);
+        }
+        const replayed = payload?.replayed ? " (replayed)" : "";
+        setAgentActionFeedback(
+          `${agent.label}: queued ${action}${action === "route" ? ` -> ${body.target}` : ""}${replayed}`
+        );
+      } catch (actionError: unknown) {
+        setAgentActionFeedback(
+          actionError instanceof Error ? actionError.message : `Failed to queue ${action} action for ${agent.label}`
+        );
+      } finally {
+        setAgentActionState((prev) => ({ ...prev, [actionKey]: false }));
+      }
+    },
+    [user]
+  );
 
   if (loading) {
     return (
@@ -231,6 +376,11 @@ export default function AgentNexusPage() {
           {error && (
             <div className="relative z-10 mt-4 rounded-lg border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
               {error}
+            </div>
+          )}
+          {agentActionFeedback && (
+            <div className="relative z-10 mt-3 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-xs text-cyan-100">
+              {agentActionFeedback}
             </div>
           )}
         </section>
@@ -317,6 +467,35 @@ export default function AgentNexusPage() {
                         {agent.blockedBy.length > 0 && (
                           <p className="text-xs text-amber-300">Blocked by: {agent.blockedBy.join(", ")}</p>
                         )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-zinc-700 bg-black/30 text-zinc-100 hover:bg-zinc-800"
+                            disabled={Boolean(agentActionState[`${agent.id}:ping`])}
+                            onClick={() => void runAgentAction(agent, "ping")}
+                          >
+                            Ping
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-zinc-700 bg-black/30 text-zinc-100 hover:bg-zinc-800"
+                            disabled={Boolean(agentActionState[`${agent.id}:pause`])}
+                            onClick={() => void runAgentAction(agent, "pause")}
+                          >
+                            Pause
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-zinc-700 bg-black/30 text-zinc-100 hover:bg-zinc-800"
+                            disabled={Boolean(agentActionState[`${agent.id}:route`])}
+                            onClick={() => void runAgentAction(agent, "route")}
+                          >
+                            Route
+                          </Button>
+                        </div>
                       </div>
                       <div className="text-right md:text-left">
                         <p className="text-xs uppercase tracking-wide text-zinc-500">Monthly Cost</p>
@@ -478,22 +657,95 @@ export default function AgentNexusPage() {
 
               <Card className="border-zinc-800 bg-zinc-950/90 lg:col-span-1">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base font-semibold">Open Alerts</CardTitle>
+                  <CardTitle className="text-base font-semibold">Live Activity Feed</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {snapshot.diagnostics.alerts.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No lead-run alerts.</p>
+                  <div className="flex flex-wrap gap-2 pb-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 px-2 text-xs ${
+                        timelineFilter === "all"
+                          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
+                          : "border-zinc-700 bg-zinc-900/80 text-zinc-300"
+                      }`}
+                      onClick={() => setTimelineFilter("all")}
+                    >
+                      All {liveFeedCounts.all}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 px-2 text-xs ${
+                        timelineFilter === "tasks"
+                          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
+                          : "border-zinc-700 bg-zinc-900/80 text-zinc-300"
+                      }`}
+                      onClick={() => setTimelineFilter("tasks")}
+                    >
+                      Tasks {liveFeedCounts.tasks}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 px-2 text-xs ${
+                        timelineFilter === "comments"
+                          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
+                          : "border-zinc-700 bg-zinc-900/80 text-zinc-300"
+                      }`}
+                      onClick={() => setTimelineFilter("comments")}
+                    >
+                      Comments {liveFeedCounts.comments}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 px-2 text-xs ${
+                        timelineFilter === "status"
+                          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
+                          : "border-zinc-700 bg-zinc-900/80 text-zinc-300"
+                      }`}
+                      onClick={() => setTimelineFilter("status")}
+                    >
+                      Status {liveFeedCounts.status}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-7 px-2 text-xs ${
+                        timelineFilter === "decisions"
+                          ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200"
+                          : "border-zinc-700 bg-zinc-900/80 text-zinc-300"
+                      }`}
+                      onClick={() => setTimelineFilter("decisions")}
+                    >
+                      Decisions {liveFeedCounts.decisions}
+                    </Button>
+                  </div>
+
+                  {filteredLiveFeed.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No recent activity yet.</p>
                   ) : (
-                    snapshot.diagnostics.alerts.map((alert) => (
-                      <div key={alert.alertId} className="rounded-md border border-zinc-800 bg-black/40 p-3">
+                    filteredLiveFeed.map((item) => (
+                      <div key={item.id} className="rounded-md border border-zinc-800 bg-black/40 p-3">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-zinc-100">{alert.title}</p>
-                          <Badge className={alert.status === "open" ? HEALTH_BADGE.degraded : RUNTIME_BADGE.inactive}>
-                            {alert.status}
+                          <p className="text-sm font-medium text-zinc-100 truncate">{item.title}</p>
+                          <Badge
+                            className={
+                              item.kind === "heartbeat"
+                                ? RUNTIME_BADGE.active
+                                : item.kind === "alert"
+                                  ? HEALTH_BADGE.degraded
+                                  : item.kind === "decision"
+                                    ? "border-violet-400/40 bg-violet-400/10 text-violet-200"
+                                  : HEALTH_BADGE.offline
+                            }
+                          >
+                            {item.timeline}
                           </Badge>
                         </div>
-                        <p className="mt-1 text-xs text-zinc-400">{alert.message}</p>
-                        <p className="mt-1 text-xs text-zinc-500">Run {alert.runId.slice(0, 10)} • {formatTimestamp(alert.createdAt)}</p>
+                        <p className="mt-1 text-xs text-zinc-400">{item.detail}</p>
+                        <p className="mt-1 text-xs text-zinc-500">{formatTimestamp(item.ts ? new Date(item.ts).toISOString() : null)}</p>
                       </div>
                     ))
                   )}

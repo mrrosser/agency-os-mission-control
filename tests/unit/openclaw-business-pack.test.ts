@@ -30,6 +30,54 @@ describe("openclaw business pack v2", () => {
     expect(ids.length).toBe(3);
   });
 
+  it("defines stage workers and offer catalog codes for revenue automation", () => {
+    const pack = readJson([
+      "please-review",
+      "from-root",
+      "config-templates",
+      "knowledge-pack.v2.json",
+    ]);
+
+    const globalPolicies = pack.globalPolicies as Record<string, unknown>;
+    const revenueAutomation = globalPolicies.revenueAutomation as Record<string, unknown>;
+
+    expect(revenueAutomation.stageWorkers).toEqual(
+      expect.arrayContaining(["source", "enrich", "score", "outreach", "booking"])
+    );
+    expect(revenueAutomation.pipelineStageSchema).toEqual(
+      expect.arrayContaining(["lead_capture", "qualification", "outreach", "booking", "proposal", "deposit_received", "won", "lost"])
+    );
+    expect(revenueAutomation.requiredLeadFields).toEqual(
+      expect.arrayContaining(["businessUnit", "offerCode", "pipelineStage", "owner", "next_action", "correlationId"])
+    );
+
+    const businesses = pack.businesses as Array<Record<string, unknown>>;
+    const rt = businesses.find((entry) => String(entry.id) === "rt_solutions");
+    const rng = businesses.find((entry) => String(entry.id) === "rosser_nft_gallery");
+    const rtOfferCodes = ((rt?.packagedOffers as Array<Record<string, unknown>>) || []).map((offer) =>
+      String(offer.code)
+    );
+    const rngOfferCodes = ((rng?.packagedOffers as Array<Record<string, unknown>>) || []).map((offer) =>
+      String(offer.code)
+    );
+    expect(rtOfferCodes).toEqual(
+      expect.arrayContaining([
+        "RTS-QUICK-WEBSITE-SPRINT",
+        "RTS-AI-LUNCH-LEARN",
+        "RTS-AI-TEAM-TRAINING",
+        "RTS-CUSTOM-BUILD-DISCOVERY",
+      ])
+    );
+    expect(rngOfferCodes).toEqual(
+      expect.arrayContaining([
+        "RNG-MINI-REPLICA",
+        "RNG-COMMISSION-SCULPTURE",
+        "RNG-HISTORICAL-PRESERVATION",
+        "RNG-PRIVATE-EVENT-RENTAL",
+      ])
+    );
+  });
+
   it("defines orchestrator + sub-agents with deterministic handoff triggers", () => {
     const pack = readJson([
       "please-review",
@@ -148,7 +196,7 @@ describe("openclaw business pack v2", () => {
 
     const rngProfile = calendarProfiles.find((p) => String(p.id) === "rng_events_primary");
     const aicfProfile = calendarProfiles.find((p) => String(p.id) === "aicf_discovery_primary");
-    expect(String(rngProfile?.bookingLink)).toBe("https://calendar.app.google/d6WVsrcihD63TZZj8");
+    expect(String(rngProfile?.bookingLink)).toBe("https://calendar.app.google/afjkNdXsLSWYibfUA");
     expect(String(aicfProfile?.bookingLink)).toBe("https://calendar.app.google/LEk5GQobBpAXTfpR9");
     expect(Boolean(rngProfile?.attachGoogleMeet)).toBe(true);
     expect(Boolean(aicfProfile?.attachGoogleMeet)).toBe(true);
@@ -235,7 +283,7 @@ describe("email triage policy v2", () => {
     const rngProfile = bookingProfiles.find((p) => String(p.id) === "rng_events_primary");
     const aicfProfile = bookingProfiles.find((p) => String(p.id) === "aicf_discovery_primary");
     expect(String(rngProfile?.verificationState)).toBe("verified");
-    expect(String(rngProfile?.bookingLink)).toBe("https://calendar.app.google/d6WVsrcihD63TZZj8");
+    expect(String(rngProfile?.bookingLink)).toBe("https://calendar.app.google/afjkNdXsLSWYibfUA");
     expect(String(aicfProfile?.bookingLink)).toBe("https://calendar.app.google/LEk5GQobBpAXTfpR9");
     expect(Boolean(rngProfile?.attachMeetLink)).toBe(true);
     expect(Boolean(aicfProfile?.attachMeetLink)).toBe(true);
@@ -285,7 +333,7 @@ describe("business reply templates", () => {
     expect(String(businessTemplates.rosser_nft_gallery.calendarProfileId)).toBe("rng_events_primary");
     expect(String(businessTemplates.ai_cofoundry.calendarProfileId)).toBe("aicf_discovery_primary");
     expect(String(businessTemplates.rosser_nft_gallery.bookingLink)).toBe(
-      "https://calendar.app.google/d6WVsrcihD63TZZj8"
+      "https://calendar.app.google/afjkNdXsLSWYibfUA"
     );
     expect(String(businessTemplates.ai_cofoundry.bookingLink)).toBe(
       "https://calendar.app.google/LEk5GQobBpAXTfpR9"

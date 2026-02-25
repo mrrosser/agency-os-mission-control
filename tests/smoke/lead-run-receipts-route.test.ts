@@ -33,7 +33,7 @@ function createContext(params: Record<string, string>) {
 describe("lead run receipts route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     assertOwnerMock.mockResolvedValue(undefined);
   });
 

@@ -33,7 +33,7 @@ function createContext(params: Record<string, string> = {}) {
 describe("DNC routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     resolveOrgMock.mockResolvedValue("org-1");
     normalizeMock.mockImplementation((_type: unknown, value: string) => value.trim().toLowerCase());
   });

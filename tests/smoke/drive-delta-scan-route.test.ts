@@ -27,7 +27,7 @@ vi.mock("@/lib/firebase-admin", () => ({
 }));
 
 vi.mock("@/lib/api/idempotency", () => ({
-  getIdempotencyKey: vi.fn(() => null),
+  getIdempotencyKey: vi.fn(() => undefined),
   withIdempotency: vi.fn(async (_params, executor: () => Promise<unknown>) => ({
     data: await executor(),
     replayed: false,
@@ -47,7 +47,7 @@ function createContext() {
 describe("drive delta-scan route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getAccessTokenMock.mockResolvedValue("ya29.test-token");
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
       data: await executor(),

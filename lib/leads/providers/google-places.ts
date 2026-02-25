@@ -73,6 +73,7 @@ const ESTIMATED_DETAILS_CALL_COST_USD = Number.parseFloat(
 );
 const DEFAULT_MAX_PAGES = 3;
 const DEFAULT_MAX_RUNTIME_SEC = 40;
+const NEXT_PAGE_TOKEN_MAX_RETRIES = 3;
 
 function withTimeout(timeoutMs: number) {
   const controller = new AbortController();
@@ -139,6 +140,7 @@ export async function fetchGooglePlacesLeads(
   const candidates: LeadCandidate[] = [];
   let pagesFetched = 0;
   let nextPageToken: string | undefined;
+  let nextPageTokenRetries = 0;
   let stopReason: GooglePlacesFetchResult["stopReason"] = "no_more_results";
 
   while (candidates.length < limit && pagesFetched < maxPages) {
@@ -160,12 +162,30 @@ export async function fetchGooglePlacesLeads(
     });
 
     if (payload.status !== "OK" && payload.status !== "ZERO_RESULTS") {
+      if (payload.status === "INVALID_REQUEST" && nextPageToken) {
+        nextPageTokenRetries += 1;
+        if (nextPageTokenRetries <= NEXT_PAGE_TOKEN_MAX_RETRIES) {
+          log?.warn("lead.source.google_places.next_page_token_not_ready", {
+            retry: nextPageTokenRetries,
+          });
+          await sleep(1200 * nextPageTokenRetries);
+          continue;
+        }
+
+        log?.warn("lead.source.google_places.next_page_token_dropped", {
+          retries: nextPageTokenRetries,
+        });
+        stopReason = "no_more_results";
+        break;
+      }
+
       log?.warn("lead.source.google_places.failed", {
         status: payload.status,
         error: payload.error_message || "unknown",
       });
       throw new Error(payload.error_message || "Google Places search failed");
     }
+    nextPageTokenRetries = 0;
 
     pagesFetched += 1;
     if (!payload.results?.length) {

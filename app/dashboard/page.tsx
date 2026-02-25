@@ -11,6 +11,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { collection, query, where, onSnapshot, doc, limit, orderBy, type Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
+import { isDepositStage, isMeetingStage, isWonStage } from "@/lib/revenue/offers";
 
 interface AnalyticsData {
     totalLeads: number;
@@ -18,6 +19,8 @@ interface AnalyticsData {
     conversionRate: number;
     emailsSent: number;
     meetingsScheduled: number;
+    depositsCollected: number;
+    pipelineValue: number;
 }
 
 interface AgentSpaceStatus {
@@ -38,6 +41,7 @@ interface ActivityLog {
 export default function DashboardPage() {
     const { user } = useAuth();
     const router = useRouter();
+    const internalRevenueUiEnabled = process.env.NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI === "true";
     const [loading, setLoading] = useState(true);
     const [analytics, setAnalytics] = useState<AnalyticsData>({
         totalLeads: 0,
@@ -45,6 +49,8 @@ export default function DashboardPage() {
         conversionRate: 0,
         emailsSent: 0,
         meetingsScheduled: 0,
+        depositsCollected: 0,
+        pipelineValue: 0,
     });
 
     const [activities, setActivities] = useState<ActivityLog[]>([]);
@@ -105,14 +111,30 @@ export default function DashboardPage() {
             query(collection(db, "leads"), where("userId", "==", user.uid)),
             (snapshot) => {
                 const totalLeads = snapshot.size;
-                const converted = snapshot.docs.filter(d => d.data().status === 'closed').length;
+                let converted = 0;
+                let meetingsScheduled = 0;
+                let depositsCollected = 0;
+                let pipelineValue = 0;
+
+                for (const docSnap of snapshot.docs) {
+                    const data = docSnap.data();
+                    const stage = data.pipelineStage || data.status;
+                    if (isWonStage(stage)) converted += 1;
+                    if (isMeetingStage(stage)) meetingsScheduled += 1;
+                    if (isDepositStage(stage)) depositsCollected += 1;
+                    const value = Number(data.value || 0);
+                    if (Number.isFinite(value)) pipelineValue += value;
+                }
                 const rate = totalLeads > 0 ? Math.round((converted / totalLeads) * 100) : 0;
 
                 setAnalytics(prev => ({
                     ...prev,
                     totalLeads,
                     converted,
-                    conversionRate: rate
+                    conversionRate: rate,
+                    meetingsScheduled,
+                    depositsCollected,
+                    pipelineValue,
                 }));
             }
         );
@@ -161,7 +183,7 @@ export default function DashboardPage() {
             bgColor: "bg-blue-500/10",
         },
         {
-            title: "Converted",
+            title: "Converted (Won/Deposit)",
             value: loading ? "..." : analytics.converted.toLocaleString(),
             change: "+8.1%",
             icon: "inbox" as AfroGlyphVariant,
@@ -175,6 +197,30 @@ export default function DashboardPage() {
             icon: "trend" as AfroGlyphVariant,
             color: "text-purple-500",
             bgColor: "bg-purple-500/10",
+        },
+    ];
+
+    const revenueStats = [
+        {
+            title: "Meetings Booked",
+            value: loading ? "..." : analytics.meetingsScheduled.toLocaleString(),
+            icon: "mission" as AfroGlyphVariant,
+            color: "text-cyan-300",
+            bgColor: "bg-cyan-500/10",
+        },
+        {
+            title: "Deposits Collected",
+            value: loading ? "..." : analytics.depositsCollected.toLocaleString(),
+            icon: "activity" as AfroGlyphVariant,
+            color: "text-emerald-300",
+            bgColor: "bg-emerald-500/10",
+        },
+        {
+            title: "Pipeline Value",
+            value: loading ? "..." : `$${Math.round(analytics.pipelineValue).toLocaleString()}`,
+            icon: "trend" as AfroGlyphVariant,
+            color: "text-amber-300",
+            bgColor: "bg-amber-500/10",
         },
     ];
 
@@ -373,6 +419,26 @@ export default function DashboardPage() {
                                 </CardContent>
                             </Card>
                         </div>
+
+                        {internalRevenueUiEnabled && (
+                            <div className="grid gap-6 md:grid-cols-3">
+                                {revenueStats.map((stat) => (
+                                    <Card key={stat.title} className="bg-zinc-950 border-zinc-800 shadow-lg">
+                                        <CardContent className="p-6">
+                                            <div className="flex items-center justify-between">
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-medium text-zinc-400">{stat.title}</p>
+                                                    <p className="text-2xl font-bold text-white tracking-tight">{stat.value}</p>
+                                                </div>
+                                                <div className={`p-3 rounded-lg ${stat.bgColor}`}>
+                                                    <AfroGlyph variant={stat.icon} className={`h-6 w-6 ${stat.color}`} />
+                                                </div>
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                ))}
+                            </div>
+                        )}
 
                         {/* Recent Activity */}
                         <Card className="bg-zinc-950 border-zinc-800 shadow-lg">

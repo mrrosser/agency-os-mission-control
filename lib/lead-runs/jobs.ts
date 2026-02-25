@@ -40,6 +40,8 @@ export interface LeadRunJobConfig {
   useAvatar: boolean;
   useOutboundCall: boolean;
   businessKey?: "aicf" | "rng" | "rts" | "rt";
+  businessUnit?: "ai_cofoundry" | "rosser_nft_gallery" | "rt_solutions";
+  offerCode?: string;
 }
 
 export interface LeadRunJobDoc {

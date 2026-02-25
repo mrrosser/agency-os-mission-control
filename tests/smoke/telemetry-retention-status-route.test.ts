@@ -21,7 +21,7 @@ function createContext() {
 describe("telemetry retention status route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
   });
 
   it("returns latest retention cleanup metrics and recent runs", async () => {

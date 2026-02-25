@@ -58,8 +58,8 @@ Draft-First Workflow (target behavior)
    - `config-templates/email-reply-templates.v1.json`
 
 Canonical booking links (current)
-- RT Solutions: `https://calendar.app.google/Yt9Lm2yBjjkrbyiHA`
-- Rosser NFT Gallery: `https://calendar.app.google/d6WVsrcihD63TZZj8`
+- RT Solutions: `https://calendar.app.google/afjkNdXsLSWYibfUA`
+- Rosser NFT Gallery: `https://calendar.app.google/afjkNdXsLSWYibfUA`
 - AI CoFoundry: `https://calendar.app.google/LEk5GQobBpAXTfpR9`
 - Policy: always attach Google Meet for auto-booked events.
 

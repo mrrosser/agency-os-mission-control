@@ -7,6 +7,11 @@ import { parseJson } from "@/lib/api/validation";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import type { LeadSource, LeadSourceRequest } from "@/lib/leads/types";
+import {
+  normalizeBusinessUnit,
+  normalizeOfferCode,
+  resolveOfferCodeForBusinessUnit,
+} from "@/lib/revenue/offers";
 
 type LeadRunTemplate = {
   templateId: string;
@@ -80,6 +85,15 @@ const paramsSchema = z.object({
   minScore: optionalBoundedInt(0, 100),
   sources: sourcesSchema.optional(),
   includeEnrichment: optionalBooleanLike(),
+  businessUnit: z
+    .preprocess(
+      (value) => (typeof value === "string" ? value.trim().toLowerCase() : undefined),
+      z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional()
+    )
+    .optional(),
+  offerCode: z
+    .preprocess((value) => normalizeOfferCode(value), z.string().min(1).max(64).optional())
+    .optional(),
   budget: z
     .object({
       maxCostUsd: z.preprocess((value) => {
@@ -157,6 +171,17 @@ export const POST = withApiHandler(
   async ({ request, log }) => {
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
+    const businessUnit = normalizeBusinessUnit(body.params.businessUnit);
+    const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, body.params.offerCode);
+    const offerCode = offerResolution.offerCode;
+    if (offerResolution.adjusted && offerResolution.requestedCode) {
+      log.warn("leads.templates.offer_code_adjusted", {
+        uid: user.uid,
+        businessUnit,
+        requestedOfferCode: offerResolution.requestedCode,
+        appliedOfferCode: offerCode,
+      });
+    }
 
     const id = body.templateId || crypto.randomUUID();
     const docRef = templatesRef(user.uid).doc(id);
@@ -168,7 +193,11 @@ export const POST = withApiHandler(
       const next = stripUndefined({
         name: body.name,
         clientName: body.clientName || null,
-        params: body.params,
+        params: {
+          ...body.params,
+          businessUnit,
+          offerCode,
+        },
         outreach: body.outreach || {},
         updatedAt: now,
         createdAt: existing.exists ? undefined : now,
@@ -181,7 +210,11 @@ export const POST = withApiHandler(
       templateId: id,
       name: body.name,
       clientName: body.clientName || null,
-      params: body.params,
+      params: {
+        ...body.params,
+        businessUnit,
+        offerCode,
+      },
       outreach: body.outreach || {},
     };
 

@@ -280,10 +280,29 @@ async function processLead(
   const primaryService = String(identity.primaryService || "growth support");
   const coreValue = String(identity.coreValue || "high-signal outreach");
   const keyBenefit = String(identity.keyBenefit || "faster qualified conversations");
+  const businessKey = String(args.config.businessKey || "").trim().toLowerCase();
   const voiceProfiles = (identity.voiceProfiles || {}) as Record<
     string,
     { voiceId?: string; modelId?: string }
   >;
+  const avatarProfiles = (identity.avatarProfiles || {}) as Record<
+    string,
+    { avatarId?: string; voiceId?: string }
+  >;
+  const selectedAvatarProfile =
+    (businessKey && avatarProfiles[businessKey]) || avatarProfiles.default || {};
+  const configuredAvatarId =
+    (typeof selectedAvatarProfile.avatarId === "string" &&
+      selectedAvatarProfile.avatarId.trim()) ||
+    (typeof identity.heyGenAvatarId === "string" && identity.heyGenAvatarId.trim()) ||
+    (process.env.HEYGEN_DEFAULT_AVATAR_ID || "").trim() ||
+    "default_avatar";
+  const configuredAvatarVoiceId =
+    (typeof selectedAvatarProfile.voiceId === "string" &&
+      selectedAvatarProfile.voiceId.trim()) ||
+    (typeof identity.heyGenVoiceId === "string" && identity.heyGenVoiceId.trim()) ||
+    (process.env.HEYGEN_DEFAULT_VOICE_ID || "").trim() ||
+    "en-US-Neural2-J";
 
   const driveKey = buildLeadActionIdempotencyKey({
     runId: args.runId,
@@ -827,9 +846,6 @@ async function processLead(
             withIdempotency(
               { uid: args.uid, route: "twilio.make-call", key: callKey, log },
               async () => {
-                const businessKey = String(args.config.businessKey || "")
-                  .trim()
-                  .toLowerCase();
                 const profile =
                   (businessKey && voiceProfiles[businessKey]) || voiceProfiles.default || {};
                 const profileVoiceId =
@@ -967,12 +983,12 @@ async function processLead(
                       {
                         character: {
                           type: "avatar",
-                          avatar_id: "default_avatar",
+                          avatar_id: configuredAvatarId,
                         },
                         voice: {
                           type: "text",
                           input_text: `Hi ${leadName}, this is ${founderName} from ${businessName}. We can help ${args.lead.companyName || "your team"} with ${primaryService}.`,
-                          voice_id: "en-US-Neural2-J",
+                          voice_id: configuredAvatarVoiceId,
                         },
                       },
                     ],

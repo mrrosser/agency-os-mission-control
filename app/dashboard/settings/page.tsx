@@ -72,9 +72,9 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState("identity");
     const [motionSetting, setMotionSetting] = useState<MotionSetting>("auto");
 
-    const googleError = searchParams.get("google") === "error";
-    const googleErrorCode = searchParams.get("googleError");
-    const googleErrorDescription = searchParams.get("googleErrorDescription");
+    const googleError = searchParams?.get("google") === "error";
+    const googleErrorCode = searchParams?.get("googleError");
+    const googleErrorDescription = searchParams?.get("googleErrorDescription");
 
     // Identity State
     const [identity, setIdentity] = useState<IdentityProfile>({
@@ -186,7 +186,7 @@ export default function SettingsPage() {
     }, [user]);
 
     useEffect(() => {
-        const tab = searchParams.get("tab");
+        const tab = searchParams?.get("tab");
         if (tab === "integrations" || tab === "identity" || tab === "appearance") {
             setActiveTab(tab);
         }

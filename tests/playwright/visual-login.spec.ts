@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 test.describe("visual: login", () => {
   test.describe.configure({ timeout: 60_000 });
   test.use({
-    reducedMotion: "reduce",
     viewport: { width: 1280, height: 720 },
   });
 

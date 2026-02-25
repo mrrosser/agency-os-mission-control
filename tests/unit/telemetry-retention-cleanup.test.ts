@@ -86,9 +86,16 @@ function createMockDb(queues: Record<string, MockDoc[][]>) {
   return { db, commits };
 }
 
+function testEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "test",
+    ...overrides,
+  } as NodeJS.ProcessEnv;
+}
+
 describe("telemetry retention cleanup", () => {
   it("parses defaults and allows explicit config", () => {
-    const defaults = parseConfig({});
+    const defaults = parseConfig(testEnv());
     expect(defaults).toMatchObject({
       eventRetentionDays: 30,
       groupRetentionDays: 180,
@@ -97,13 +104,13 @@ describe("telemetry retention cleanup", () => {
       dryRun: false,
     });
 
-    const explicit = parseConfig({
+    const explicit = parseConfig(testEnv({
       TELEMETRY_EVENT_RETENTION_DAYS: "14",
       TELEMETRY_GROUP_RETENTION_DAYS: "45",
       TELEMETRY_CLEANUP_BATCH_SIZE: "50",
       TELEMETRY_CLEANUP_MAX_DELETES_PER_COLLECTION: "999",
       TELEMETRY_CLEANUP_DRY_RUN: "true",
-    });
+    }));
     expect(explicit).toMatchObject({
       eventRetentionDays: 14,
       groupRetentionDays: 45,
@@ -114,7 +121,7 @@ describe("telemetry retention cleanup", () => {
   });
 
   it("builds github run metadata when workflow env is present", () => {
-    const meta = buildGithubMeta({
+    const meta = buildGithubMeta(testEnv({
       GITHUB_RUN_ID: "123",
       GITHUB_RUN_NUMBER: "44",
       GITHUB_REPOSITORY: "org/repo",
@@ -122,7 +129,7 @@ describe("telemetry retention cleanup", () => {
       GITHUB_WORKFLOW: "Telemetry Retention Cleanup",
       GITHUB_ACTOR: "bot-user",
       GITHUB_SHA: "abc123",
-    });
+    }));
     expect(meta.runId).toBe("123");
     expect(meta.runNumber).toBe("44");
     expect(meta.repository).toBe("org/repo");
@@ -131,10 +138,10 @@ describe("telemetry retention cleanup", () => {
 
   it("rejects group retention shorter than event retention", () => {
     expect(() =>
-      parseConfig({
+      parseConfig(testEnv({
         TELEMETRY_EVENT_RETENTION_DAYS: "30",
         TELEMETRY_GROUP_RETENTION_DAYS: "7",
-      })
+      }))
     ).toThrow("TELEMETRY_GROUP_RETENTION_DAYS must be >= TELEMETRY_EVENT_RETENTION_DAYS");
   });
 

@@ -32,6 +32,15 @@ import { RunAuditDrawer } from "@/components/operations/RunAuditDrawer";
 import type { LeadCandidate, LeadSourceRequest } from "@/lib/leads/types";
 import { buildLeadActionIdempotencyKey, buildLeadDocId } from "@/lib/lead-runs/ids";
 import { leadsToCsv } from "@/lib/leads/export";
+import {
+    DEFAULT_OFFER_CODE_BY_BUSINESS,
+    businessUnitFromWorkspaceKey,
+    getOffersForWorkspaceKey,
+    normalizeBusinessUnit,
+    normalizeOfferCode,
+    workspaceKeyFromBusinessUnit,
+    type BusinessWorkspaceKey,
+} from "@/lib/revenue/offers";
 
 interface DriveCreateFolderResponse {
     success?: boolean;
@@ -324,6 +333,7 @@ function mapReceiptLeadToJourney(lead: LeadReceiptEntry): LeadJourneyEntry {
 
 export default function OperationsPage() {
     const { user } = useAuth();
+    const internalRevenueUiEnabled = process.env.NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI === "true";
     const [isRunning, setIsRunning] = useState(false);
     const isRunningRef = useRef(false); // Ref for loop control
 
@@ -345,7 +355,8 @@ export default function OperationsPage() {
     const [useSMS, setUseSMS] = useState(false);
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
-    const [businessKey, setBusinessKey] = useState<"aicf" | "rng" | "rts">("aicf");
+    const [businessKey, setBusinessKey] = useState<BusinessWorkspaceKey>("aicf");
+    const [offerCode, setOfferCode] = useState<string>(DEFAULT_OFFER_CODE_BY_BUSINESS.ai_cofoundry);
     const [draftFirst, setDraftFirst] = useState(false);
     const [dryRun, setDryRun] = useState(false);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
@@ -392,10 +403,19 @@ export default function OperationsPage() {
     const hasHeyGen = secretStatus.heyGenKey !== "missing";
     const hasGooglePlaces = secretStatus.googlePlacesKey !== "missing";
     const hasFirecrawl = secretStatus.firecrawlKey !== "missing";
+    const selectedBusinessUnit = businessUnitFromWorkspaceKey(businessKey);
+    const offerOptions = getOffersForWorkspaceKey(businessKey);
 
     const addLog = (message: string) => {
         setLogs(prev => [message, ...prev]);
     };
+
+    useEffect(() => {
+        const normalizedCode = normalizeOfferCode(offerCode);
+        const exists = offerOptions.some((offer) => offer.code === normalizedCode);
+        if (exists) return;
+        setOfferCode(DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit]);
+    }, [businessKey, offerCode, offerOptions, selectedBusinessUnit]);
 
     const exportReceiptsCsv = () => {
         if (receiptLeads.length === 0) {
@@ -860,6 +880,13 @@ export default function OperationsPage() {
             const next = Math.round(p.budget.maxCostUsd * 100) / 100;
             setMaxCostUsd(Math.max(0.05, Math.min(SOURCE_BUDGET_MAX_COST_USD, next)));
         }
+        if (p.businessUnit) {
+            setBusinessKey(workspaceKeyFromBusinessUnit(normalizeBusinessUnit(p.businessUnit)));
+        }
+        const templateOfferCode = normalizeOfferCode(p.offerCode);
+        if (templateOfferCode) {
+            setOfferCode(templateOfferCode);
+        }
 
         const outreach = template.outreach || {};
         const templateBusinessKey = outreach.businessKey;
@@ -978,6 +1005,8 @@ export default function OperationsPage() {
                         query: sanitizeTemplateText(leadQuery, TEMPLATE_QUERY_MAX),
                         industry: sanitizeTemplateText(targetIndustry, TEMPLATE_INDUSTRY_MAX),
                         location: sanitizeTemplateText(targetLocation, TEMPLATE_LOCATION_MAX),
+                        businessUnit: selectedBusinessUnit,
+                        offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
                         limit,
                         minScore,
                         budget: {
@@ -1220,6 +1249,8 @@ export default function OperationsPage() {
                     query: leadQuery.trim() || undefined,
                     industry: targetIndustry.trim() || undefined,
                     location: targetLocation.trim() || undefined,
+                    businessUnit: selectedBusinessUnit,
+                    offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
                     limit,
                     minScore,
                     includeEnrichment: true,
@@ -1319,6 +1350,8 @@ export default function OperationsPage() {
                         draftFirst,
                         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                         businessKey,
+                        businessUnit: selectedBusinessUnit,
+                        offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
                         useSMS,
                         useAvatar,
                         useOutboundCall,
@@ -1489,6 +1522,8 @@ export default function OperationsPage() {
                      query: leadQuery || undefined,
                     industry: targetIndustry || undefined,
                     location: targetLocation || undefined,
+                    businessUnit: selectedBusinessUnit,
+                    offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
                     limit,
                     minScore,
                     includeEnrichment: true,
@@ -2001,7 +2036,14 @@ export default function OperationsPage() {
                                     industry: lead.industry,
                                     score: lead.score,
                                     source: lead.source,
-                                    status: 'contacted'
+                                    status: "contacted",
+                                    pipelineStage: "outreach",
+                                    businessUnit: selectedBusinessUnit,
+                                    offerCode:
+                                        normalizeOfferCode(offerCode) ||
+                                        DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
+                                }, {
+                                    docId: `crm_${user.uid}_${leadDocId}`.replace(/[^a-zA-Z0-9_-]/g, "_"),
                                 });
                                 addLog(`✓ Syncing ${lead.companyName} to Deal Pipeline`);
                             } else {
@@ -2596,25 +2638,48 @@ export default function OperationsPage() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label className="text-sm font-medium text-zinc-200">Business Workspace</Label>
-                                        <Select
-                                            value={businessKey}
-                                            onValueChange={(value) => setBusinessKey(value as "aicf" | "rng" | "rts")}
-                                        >
-                                            <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                                                <SelectItem value="aicf">AI CoFoundry</SelectItem>
-                                                <SelectItem value="rng">Rosser NFT Gallery</SelectItem>
-                                                <SelectItem value="rts">RT Solutions</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                        <p className="text-xs text-zinc-500">
-                                            Sets the default voice profile for outbound calls and template behavior.
-                                        </p>
-                                    </div>
+                                    {internalRevenueUiEnabled && (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Business Workspace</Label>
+                                            <Select
+                                                value={businessKey}
+                                                onValueChange={(value) => setBusinessKey(value as BusinessWorkspaceKey)}
+                                            >
+                                                <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                                                    <SelectItem value="aicf">AI CoFoundry</SelectItem>
+                                                    <SelectItem value="rng">Rosser NFT Gallery</SelectItem>
+                                                    <SelectItem value="rts">RT Solutions</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                            <p className="text-xs text-zinc-500">
+                                                Sets the default voice profile for outbound calls and template behavior.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {internalRevenueUiEnabled && (
+                                        <div className="space-y-2">
+                                            <Label className="text-sm font-medium text-zinc-200">Offer Package</Label>
+                                            <Select value={normalizeOfferCode(offerCode)} onValueChange={setOfferCode}>
+                                                <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white">
+                                                    <SelectValue placeholder="Select packaged offer" />
+                                                </SelectTrigger>
+                                                <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
+                                                    {offerOptions.map((offer) => (
+                                                        <SelectItem key={offer.code} value={offer.code}>
+                                                            {offer.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <p className="text-xs text-zinc-500">
+                                                Offer code is attached to sourced leads, templates, and run jobs for deterministic tracking.
+                                            </p>
+                                        </div>
+                                    )}
 
                                     <div className="grid grid-cols-2 gap-3">
                                         <div className="space-y-2">

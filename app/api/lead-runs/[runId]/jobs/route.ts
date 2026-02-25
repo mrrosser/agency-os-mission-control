@@ -20,6 +20,11 @@ import {
   releaseLeadRunConcurrencySlot,
   resolveLeadRunOrgId,
 } from "@/lib/lead-runs/quotas";
+import {
+  normalizeBusinessUnit,
+  resolveOfferCodeForBusinessUnit,
+  workspaceKeyFromBusinessUnit,
+} from "@/lib/revenue/offers";
 
 const startBodySchema = z.object({
   action: z.literal("start"),
@@ -28,6 +33,8 @@ const startBodySchema = z.object({
     draftFirst: z.boolean().optional(),
     timeZone: z.string().min(1).max(80).optional(),
     businessKey: z.enum(["aicf", "rng", "rts", "rt"]).optional(),
+    businessUnit: z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional(),
+    offerCode: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9-]+$/).optional(),
     useSMS: z.boolean().optional(),
     useAvatar: z.boolean().optional(),
     useOutboundCall: z.boolean().optional(),
@@ -57,6 +64,8 @@ function serializeJob(job: LeadRunJobDoc) {
       draftFirst: Boolean(job.config?.draftFirst),
       timeZone: job.config?.timeZone || "UTC",
       businessKey: job.config?.businessKey || null,
+      businessUnit: job.config?.businessUnit || null,
+      offerCode: job.config?.offerCode || null,
       useSMS: Boolean(job.config?.useSMS),
       useAvatar: Boolean(job.config?.useAvatar),
       useOutboundCall: Boolean(job.config?.useOutboundCall),
@@ -157,6 +166,20 @@ export const POST = withApiHandler(
         throw new ApiError(400, "Lead run has no leads to process");
       }
 
+      const businessUnit = normalizeBusinessUnit(body.config?.businessUnit || runData.businessUnit);
+      const offerResolution = resolveOfferCodeForBusinessUnit(
+        businessUnit,
+        body.config?.offerCode || runData.offerCode
+      );
+      if (offerResolution.adjusted && offerResolution.requestedCode) {
+        log.warn("lead-runs.jobs.offer_code_adjusted", {
+          runId,
+          businessUnit,
+          requestedOfferCode: offerResolution.requestedCode,
+          appliedOfferCode: offerResolution.offerCode,
+        });
+      }
+
       const config: LeadRunJobConfig = {
         dryRun: Boolean(body.config?.dryRun),
         draftFirst: Boolean(body.config?.draftFirst),
@@ -164,7 +187,9 @@ export const POST = withApiHandler(
         useSMS: Boolean(body.config?.useSMS),
         useAvatar: Boolean(body.config?.useAvatar),
         useOutboundCall: Boolean(body.config?.useOutboundCall),
-        ...(body.config?.businessKey ? { businessKey: body.config.businessKey } : {}),
+        businessKey: body.config?.businessKey || workspaceKeyFromBusinessUnit(businessUnit),
+        businessUnit,
+        offerCode: offerResolution.offerCode,
       };
 
       const orgId = await resolveLeadRunOrgId(user.uid, log);

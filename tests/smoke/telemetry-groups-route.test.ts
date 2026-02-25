@@ -21,7 +21,7 @@ function createContext() {
 describe("telemetry groups route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
   });
 
   it("returns triage groups for a run correlation id", async () => {

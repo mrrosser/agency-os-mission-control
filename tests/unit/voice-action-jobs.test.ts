@@ -26,7 +26,9 @@ describe("voice action jobs", () => {
   });
 
   it("falls back to direct HTTP trigger when Cloud Tasks is not configured", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string | URL, _options?: RequestInit) => {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await triggerVoiceActionsWorker({
@@ -38,7 +40,10 @@ describe("voice action jobs", () => {
 
     expect(result).toBe("http");
     expect(fetchMock).toHaveBeenCalledOnce();
-    const [url, options] = fetchMock.mock.calls[0];
+    const firstCall = fetchMock.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const url = firstCall?.[0];
+    const options = firstCall?.[1];
     expect(url).toBe("http://localhost:3000/api/twilio/voice-actions/worker-task");
     expect(options).toMatchObject({
       method: "POST",

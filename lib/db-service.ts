@@ -12,6 +12,8 @@ import {
     addDoc,
     serverTimestamp
 } from "firebase/firestore";
+import type { LeadBusinessUnit } from "@/lib/leads/types";
+import type { CrmPipelineStage } from "@/lib/revenue/offers";
 
 export interface Lead {
     id?: string;
@@ -25,6 +27,9 @@ export interface Lead {
     score?: number;
     source?: string;
     status: 'new' | 'contacted' | 'meeting' | 'closed' | 'lost';
+    pipelineStage?: CrmPipelineStage;
+    businessUnit?: LeadBusinessUnit;
+    offerCode?: string;
     createdAt: unknown;
 }
 
@@ -52,10 +57,27 @@ export const dbService = {
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Lead));
     },
 
-    async addLead(lead: Omit<Lead, 'id' | 'createdAt'>) {
+    async addLead(lead: Omit<Lead, "id" | "createdAt">, options?: { docId?: string }) {
+        const docId = options?.docId?.trim();
+        if (docId) {
+            const leadRef = doc(db, "leads", docId);
+            const existing = await getDoc(leadRef);
+            await setDoc(
+                leadRef,
+                {
+                    ...lead,
+                    updatedAt: serverTimestamp(),
+                    ...(existing.exists() ? {} : { createdAt: serverTimestamp() }),
+                },
+                { merge: true }
+            );
+            return leadRef;
+        }
+
         return addDoc(collection(db, "leads"), {
             ...lead,
-            createdAt: serverTimestamp()
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         });
     },
 

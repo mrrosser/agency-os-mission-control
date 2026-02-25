@@ -12,6 +12,10 @@ import type { LeadSourceRequest } from "@/lib/leads/types";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { buildLeadDocId } from "@/lib/lead-runs/ids";
 import { buildInitialLeadStageProgress } from "@/lib/lead-runs/stages";
+import {
+  normalizeBusinessUnit,
+  resolveOfferCodeForBusinessUnit,
+} from "@/lib/revenue/offers";
 
 const bodySchema = z.object({
   // Allow longer natural-language descriptions; downstream providers may further truncate.
@@ -22,6 +26,14 @@ const bodySchema = z.object({
   minScore: z.number().int().min(0).max(100).optional(),
   sources: z.array(z.enum(["googlePlaces", "firestore", "apifyMaps"])).optional(),
   includeEnrichment: z.boolean().optional(),
+  businessUnit: z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional(),
+  offerCode: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9-]+$/)
+    .optional(),
   budget: z
     .object({
       maxCostUsd: z.number().positive().max(100).optional(),
@@ -87,8 +99,13 @@ export const POST = withApiHandler(
       minScore: body.minScore,
       sources: body.sources,
       includeEnrichment: body.includeEnrichment ?? true,
+      businessUnit: body.businessUnit,
+      offerCode: body.offerCode,
       budget: body.budget,
     };
+    const businessUnit = normalizeBusinessUnit(requestPayload.businessUnit);
+    const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, requestPayload.offerCode);
+    const offerCode = offerResolution.offerCode;
 
     if (!requestPayload.query && !requestPayload.industry && !(requestPayload.sources || []).includes("firestore")) {
       throw new ApiError(400, "Provide a query or industry to source leads.");
@@ -120,6 +137,17 @@ export const POST = withApiHandler(
       apifyToken,
       log,
     });
+
+    const routeWarnings = [...(warnings || [])];
+    if (offerResolution.adjusted && offerResolution.requestedCode) {
+      const warning = `offer_code '${offerResolution.requestedCode}' is not valid for business_unit '${businessUnit}'; defaulted to '${offerCode}'`;
+      routeWarnings.unshift(warning);
+      log.warn("lead.source.offer_code_adjusted", {
+        requestedOfferCode: offerResolution.requestedCode,
+        businessUnit,
+        appliedOfferCode: offerCode,
+      });
+    }
 
     const rawTotal = diagnostics?.rawCount ?? leads.length;
     const dedupedTotal = diagnostics?.dedupedCount ?? leads.length;
@@ -164,6 +192,10 @@ export const POST = withApiHandler(
           ...lead,
           userId: user.uid,
           runId,
+          businessUnit,
+          offerCode,
+          pipelineStage: "lead_capture",
+          status: "new",
           stageProgress: buildInitialLeadStageProgress({
             includeEnrichment: requestPayload.includeEnrichment ?? true,
           }),
@@ -178,8 +210,10 @@ export const POST = withApiHandler(
       stripUndefined({
         userId: user.uid,
         request: requestPayload,
+        businessUnit,
+        offerCode,
         sourcesUsed,
-        warnings,
+        warnings: routeWarnings,
         candidateTotal: rawTotal,
         filteredOut,
         sourceDiagnostics,
@@ -201,7 +235,7 @@ export const POST = withApiHandler(
       runId,
       leads: scored,
       sourcesUsed,
-      warnings,
+      warnings: routeWarnings,
       candidateTotal: rawTotal,
       filteredOut,
       sourceDiagnostics,

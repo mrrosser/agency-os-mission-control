@@ -1,0 +1,35 @@
+name: Revenue Weekly KPI
+
+on:
+  schedule:
+    # Mondays 15:00 UTC (~9 AM CT during standard time)
+    - cron: "0 15 * * 1"
+  workflow_dispatch:
+    inputs:
+      week_start_date:
+        description: "Optional YYYY-MM-DD week start override"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  weekly-kpi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Trigger weekly KPI rollup
+        env:
+          KPI_BASE_URL: ${{ secrets.REVENUE_WEEKLY_KPI_BASE_URL }}
+          REVENUE_WEEKLY_KPI_WORKER_TOKEN: ${{ secrets.REVENUE_WEEKLY_KPI_WORKER_TOKEN }}
+          REVENUE_WEEKLY_KPI_UID: ${{ secrets.REVENUE_WEEKLY_KPI_UID }}
+          REVENUE_KPI_TIMEZONE: ${{ vars.REVENUE_KPI_TIMEZONE || 'America/Chicago' }}
+          REVENUE_KPI_WEEK_START_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.week_start_date || '' }}
+        run: node scripts/revenue-weekly-kpi-run.mjs

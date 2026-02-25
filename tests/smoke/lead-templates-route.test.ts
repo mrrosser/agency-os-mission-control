@@ -22,7 +22,7 @@ function createContext(params: Record<string, string> = {}) {
 describe("lead templates routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as { uid: string });
+    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
   });
 
   it("lists templates", async () => {
@@ -178,6 +178,62 @@ describe("lead templates routes", () => {
 
     expect(res.status).toBe(200);
     expect(data.template.templateId).toBe("t-long");
+    expect(txSet).toHaveBeenCalledOnce();
+  });
+
+  it("normalizes mismatched offer code to the selected business default", async () => {
+    const docRef = { id: "t-offer-fallback" };
+
+    const templatesCollection = {
+      doc: vi.fn(() => docRef),
+    };
+
+    const identityDoc = {
+      collection: vi.fn(() => templatesCollection),
+    };
+
+    const identitiesCollection = {
+      doc: vi.fn(() => identityDoc),
+    };
+
+    const txGet = vi.fn(async () => ({ exists: false }));
+    const txSet = vi.fn();
+
+    const runTransaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+      return fn({ get: txGet, set: txSet });
+    });
+
+    getAdminDbMock.mockReturnValue({
+      collection: vi.fn(() => identitiesCollection),
+      runTransaction,
+    } as unknown as ReturnType<typeof getAdminDb>);
+
+    const body = {
+      templateId: "t-offer-fallback",
+      name: "Offer mismatch",
+      params: {
+        query: "web design",
+        businessUnit: "rt_solutions",
+        offerCode: "RNG-COMMISSION-SCULPTURE",
+      },
+      outreach: { draftFirst: true },
+    };
+
+    const req = new Request("http://localhost/api/leads/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.template.params.businessUnit).toBe("rt_solutions");
+    expect(data.template.params.offerCode).toBe("RTS-QUICK-WEBSITE-SPRINT");
     expect(txSet).toHaveBeenCalledOnce();
   });
 

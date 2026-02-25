@@ -15,6 +15,8 @@ export type SocialDraftStatus =
   | "posted"
   | "failed";
 
+export type SocialDraftDispatchState = "pending_external_tool" | "dispatched" | "failed";
+
 export type SocialDraftChannel =
   | "instagram_story"
   | "instagram_post"
@@ -41,6 +43,13 @@ export interface SocialDraftRecord {
   publishAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  dispatch: {
+    status: SocialDraftDispatchState | null;
+    queueDocId: string | null;
+    queuedAt: string | null;
+    externalTool: string | null;
+    lastError: string | null;
+  };
   approval: {
     decision: "approve" | "reject" | null;
     decisionSource: string | null;
@@ -74,6 +83,21 @@ export interface SocialDraftApprovalDispatchResult {
   warning: string | null;
 }
 
+export interface SocialDraftExecutionQueuePayload {
+  queueId: string;
+  uid: string;
+  draftId: string;
+  businessKey: "aicf" | "rng" | "rts";
+  channels: SocialDraftChannel[];
+  caption: string;
+  media: SocialDraftMediaAsset[];
+  status: "pending_external_tool";
+  externalTool: "SMAuto";
+  source: "social_draft_approval";
+  correlationId: string;
+  queuedAt: string;
+}
+
 interface CreateSocialDraftResult {
   draft: SocialDraftRecord;
   approvalToken: string;
@@ -90,6 +114,7 @@ interface SocialDraftDoc {
   source?: unknown;
   correlationId?: unknown;
   publishAt?: unknown;
+  dispatch?: unknown;
   approval?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -97,6 +122,14 @@ interface SocialDraftDoc {
 
 function socialDraftCollection(uid: string) {
   return getAdminDb().collection("identities").doc(uid).collection("social_drafts");
+}
+
+function socialDispatchQueueCollection(uid: string) {
+  return getAdminDb().collection("identities").doc(uid).collection("social_dispatch_queue");
+}
+
+export function socialDispatchQueueDocId(draftId: string): string {
+  return `draft_${asString(draftId) || "unknown"}`;
 }
 
 function asString(value: unknown): string {
@@ -208,6 +241,33 @@ function normalizeApproval(value: unknown): SocialDraftRecord["approval"] {
   };
 }
 
+function normalizeDispatch(value: unknown): SocialDraftRecord["dispatch"] {
+  if (!value || typeof value !== "object") {
+    return {
+      status: null,
+      queueDocId: null,
+      queuedAt: null,
+      externalTool: null,
+      lastError: null,
+    };
+  }
+
+  const row = value as Record<string, unknown>;
+  const statusRaw = asString(row.status).toLowerCase();
+  const status: SocialDraftDispatchState | null =
+    statusRaw === "pending_external_tool" || statusRaw === "dispatched" || statusRaw === "failed"
+      ? statusRaw
+      : null;
+
+  return {
+    status,
+    queueDocId: asNullableString(row.queueDocId),
+    queuedAt: asTimestampIso(row.queuedAt),
+    externalTool: asNullableString(row.externalTool),
+    lastError: asNullableString(row.lastError),
+  };
+}
+
 function toSocialDraftRecord(docId: string, data: SocialDraftDoc): SocialDraftRecord {
   return {
     draftId: asString(data.draftId) || docId,
@@ -222,6 +282,7 @@ function toSocialDraftRecord(docId: string, data: SocialDraftDoc): SocialDraftRe
     publishAt: asTimestampIso(data.publishAt),
     createdAt: asTimestampIso(data.createdAt),
     updatedAt: asTimestampIso(data.updatedAt),
+    dispatch: normalizeDispatch(data.dispatch),
     approval: normalizeApproval(data.approval),
   };
 }
@@ -293,7 +354,7 @@ export function buildGoogleChatSocialDraftCard(args: {
   const imageMedia = media.filter((asset) => asset.type === "image").slice(0, 2);
   const videoMedia = media.filter((asset) => asset.type === "video");
 
-  const sections = [
+  const sections: Array<{ widgets: Array<Record<string, unknown>> }> = [
     {
       widgets: [
         {
@@ -396,6 +457,27 @@ export function resolveSocialDraftWebhookUrl(businessKey: "aicf" | "rng" | "rts"
   return asString(process.env.GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL) || null;
 }
 
+export function buildSocialDispatchQueuePayload(args: {
+  draft: SocialDraftRecord;
+  correlationId: string;
+  queuedAt: string;
+}): SocialDraftExecutionQueuePayload {
+  return {
+    queueId: socialDispatchQueueDocId(args.draft.draftId),
+    uid: args.draft.uid,
+    draftId: args.draft.draftId,
+    businessKey: args.draft.businessKey,
+    channels: args.draft.channels,
+    caption: args.draft.caption,
+    media: args.draft.media,
+    status: "pending_external_tool",
+    externalTool: "SMAuto",
+    source: "social_draft_approval",
+    correlationId: args.correlationId,
+    queuedAt: args.queuedAt,
+  };
+}
+
 export async function createSocialDraft(args: CreateSocialDraftInput): Promise<CreateSocialDraftResult> {
   const now = new Date();
   const approvalTtlHours = Math.max(1, Math.min(24 * 14, args.approvalTtlHours ?? 168));
@@ -417,6 +499,13 @@ export async function createSocialDraft(args: CreateSocialDraftInput): Promise<C
       correlationId: args.correlationId,
       publishAt: args.publishAt || null,
       status,
+      dispatch: {
+        status: null,
+        queueDocId: null,
+        queuedAt: null,
+        externalTool: null,
+        lastError: null,
+      },
       approval: {
         tokenHash: approvalTokenHash,
         decision: null,
@@ -444,6 +533,13 @@ export async function createSocialDraft(args: CreateSocialDraftInput): Promise<C
     status,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
+    dispatch: {
+      status: null,
+      queueDocId: null,
+      queuedAt: null,
+      externalTool: null,
+      lastError: null,
+    },
     approval: {
       decision: null,
       decisionSource: null,
@@ -609,66 +705,149 @@ export async function decideSocialDraftWithToken(args: {
   source: string;
   log: Logger;
   correlationId: string;
-}): Promise<{ draftId: string; status: SocialDraftStatus; decision: "approve" | "reject"; replayed: boolean }> {
+}): Promise<{
+  draftId: string;
+  status: SocialDraftStatus;
+  decision: "approve" | "reject";
+  replayed: boolean;
+  queueDocId: string | null;
+  queuedForExternalDispatch: boolean;
+}> {
   const ref = socialDraftCollection(args.uid).doc(args.draftId);
-  const snap = await ref.get();
-  if (!snap.exists) {
-    throw new ApiError(404, "Social draft not found");
-  }
+  const queueRef = socialDispatchQueueCollection(args.uid).doc(socialDispatchQueueDocId(args.draftId));
+  const nowIso = new Date().toISOString();
+  let outcome: {
+    draftId: string;
+    status: SocialDraftStatus;
+    decision: "approve" | "reject";
+    replayed: boolean;
+    queueDocId: string | null;
+    queuedForExternalDispatch: boolean;
+  } = {
+    draftId: args.draftId,
+    status: "draft",
+    decision: args.decision,
+    replayed: false,
+    queueDocId: null,
+    queuedForExternalDispatch: false,
+  };
 
-  const data = (snap.data() || {}) as Record<string, unknown>;
-  const approval = (data.approval || {}) as Record<string, unknown>;
-  const storedTokenHash = asString(approval.tokenHash);
-  if (!storedTokenHash || !compareTokenHash(args.token, storedTokenHash)) {
-    throw new ApiError(403, "Invalid approval token");
-  }
-
-  const expiresAt = asTimestampIso(approval.expiresAt);
-  if (expiresAt) {
-    const expiresMs = Date.parse(expiresAt);
-    if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
-      throw new ApiError(410, "Approval link has expired");
+  await getAdminDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      throw new ApiError(404, "Social draft not found");
     }
-  }
 
-  const existingDecision = asString(approval.decision).toLowerCase();
-  if (existingDecision === "approve" || existingDecision === "reject") {
-    if (existingDecision !== args.decision) {
-      throw new ApiError(409, "Draft already has a final decision");
+    const data = (snap.data() || {}) as Record<string, unknown>;
+    const approval = (data.approval || {}) as Record<string, unknown>;
+    const storedTokenHash = asString(approval.tokenHash);
+    if (!storedTokenHash || !compareTokenHash(args.token, storedTokenHash)) {
+      throw new ApiError(403, "Invalid approval token");
     }
-    return {
-      draftId: args.draftId,
-      status: normalizeStatus(data.status),
-      decision: args.decision,
-      replayed: true,
-    };
-  }
 
-  const status: SocialDraftStatus = args.decision === "approve" ? "approved" : "rejected";
-  await ref.set(
-    {
-      status,
-      approval: {
+    const expiresAt = asTimestampIso(approval.expiresAt);
+    if (expiresAt) {
+      const expiresMs = Date.parse(expiresAt);
+      if (Number.isFinite(expiresMs) && expiresMs < Date.now()) {
+        throw new ApiError(410, "Approval link has expired");
+      }
+    }
+
+    const existingDecision = asString(approval.decision).toLowerCase();
+    if (existingDecision === "approve" || existingDecision === "reject") {
+      if (existingDecision !== args.decision) {
+        throw new ApiError(409, "Draft already has a final decision");
+      }
+
+      const existingDispatch = normalizeDispatch(data.dispatch);
+      outcome = {
+        draftId: args.draftId,
+        status: normalizeStatus(data.status),
         decision: args.decision,
-        decisionSource: args.source || "google_space_link",
-        decidedAt: new Date().toISOString(),
+        replayed: true,
+        queueDocId: existingDispatch.queueDocId,
+        queuedForExternalDispatch: Boolean(existingDispatch.queueDocId),
+      };
+      return;
+    }
+
+    const status: SocialDraftStatus = args.decision === "approve" ? "approved" : "rejected";
+    const draftRecord = toSocialDraftRecord(args.draftId, data as SocialDraftDoc);
+    let queueDocId: string | null = null;
+    let queuedForExternalDispatch = false;
+
+    if (args.decision === "approve") {
+      const queuePayload = buildSocialDispatchQueuePayload({
+        draft: {
+          ...draftRecord,
+          status,
+          updatedAt: nowIso,
+          approval: {
+            ...draftRecord.approval,
+            decision: args.decision,
+            decisionSource: args.source || "google_space_link",
+            decidedAt: nowIso,
+          },
+        },
+        correlationId: args.correlationId,
+        queuedAt: nowIso,
+      });
+      queueDocId = queuePayload.queueId;
+      queuedForExternalDispatch = true;
+      tx.set(
+        queueRef,
+        {
+          ...queuePayload,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          attempts: 0,
+          lastAttemptAt: null,
+          lastError: null,
+        },
+        { merge: true }
+      );
+    }
+
+    tx.set(
+      ref,
+      {
+        status,
+        approval: {
+          decision: args.decision,
+          decisionSource: args.source || "google_space_link",
+          decidedAt: nowIso,
+        },
+        dispatch: {
+          status: queuedForExternalDispatch ? "pending_external_tool" : null,
+          queueDocId,
+          queuedAt: queuedForExternalDispatch ? nowIso : null,
+          externalTool: queuedForExternalDispatch ? "SMAuto" : null,
+          lastError: null,
+        },
+        updatedAt: FieldValue.serverTimestamp(),
       },
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+      { merge: true }
+    );
+
+    outcome = {
+      draftId: args.draftId,
+      status,
+      decision: args.decision,
+      replayed: false,
+      queueDocId,
+      queuedForExternalDispatch,
+    };
+  });
 
   args.log.info("social.draft.decision_recorded", {
     uid: args.uid,
     draftId: args.draftId,
     decision: args.decision,
+    replayed: outcome.replayed,
+    queueDocId: outcome.queueDocId,
+    queuedForExternalDispatch: outcome.queuedForExternalDispatch,
     correlationId: args.correlationId,
   });
 
-  return {
-    draftId: args.draftId,
-    status,
-    decision: args.decision,
-    replayed: false,
-  };
+  return outcome;
 }

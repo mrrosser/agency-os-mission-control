@@ -20,6 +20,8 @@ describe("social draft decision route", () => {
       status: "approved",
       decision: "approve",
       replayed: false,
+      queueDocId: "draft_draft-1",
+      queuedForExternalDispatch: true,
     });
   });
 

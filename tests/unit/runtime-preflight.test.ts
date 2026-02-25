@@ -21,6 +21,16 @@ const KEYS = [
   "SMAUTO_MCP_ID_TOKEN_AUDIENCE",
   "LEADOPS_MCP_SERVER_URL",
   "LEADOPS_MCP_API_KEY",
+  "SOCIAL_DRAFT_WORKER_TOKEN",
+  "SOCIAL_DRAFT_APPROVAL_BASE_URL",
+  "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL",
+  "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS",
+  "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG",
+  "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF",
+  "GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL",
+  "REVENUE_DAY30_WORKER_TOKEN",
+  "REVENUE_DAY2_WORKER_TOKEN",
+  "REVENUE_DAY1_WORKER_TOKEN",
 ] as const;
 
 const ORIGINAL_ENV: Partial<Record<(typeof KEYS)[number], string | undefined>> = {};
@@ -120,5 +130,23 @@ describe("buildRuntimePreflightReport", () => {
     expect(String(smAuto?.detail || "")).toContain("invalid");
     expect(leadOps?.state).toBe("warning");
     expect(String(leadOps?.detail || "")).toContain("invalid");
+  });
+
+  it("marks social draft checks ok when worker token/base url/webhook are configured", () => {
+    process.env.GOOGLE_PLACES_API_KEY = "x";
+    process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD = "2";
+    process.env.LEAD_SOURCE_BUDGET_MAX_PAGES = "4";
+    process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC = "50";
+    process.env.LEAD_RUNS_TASK_QUEUE = "lead-run-worker";
+    process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
+    process.env.SOCIAL_DRAFT_WORKER_TOKEN = "social-token";
+    process.env.SOCIAL_DRAFT_APPROVAL_BASE_URL = "https://leadflow-review.web.app";
+    process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL = "https://chat.googleapis.com/v1/spaces/x/messages?key=k&token=t";
+
+    const report = buildRuntimePreflightReport();
+
+    expect(report.checks.find((check) => check.id === "social-draft-worker-token")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "social-draft-approval-base-url")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "social-draft-webhook")?.state).toBe("ok");
   });
 });

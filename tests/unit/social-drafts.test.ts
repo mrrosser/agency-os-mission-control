@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGoogleChatSocialDraftCard,
+  buildSocialDispatchQueuePayload,
   buildSocialDraftDecisionUrl,
   hashSocialDraftApprovalToken,
+  socialDispatchQueueDocId,
   type SocialDraftRecord,
 } from "@/lib/social/drafts";
 
@@ -48,6 +50,13 @@ describe("social drafts helpers", () => {
       publishAt: null,
       createdAt: "2026-02-25T21:00:00.000Z",
       updatedAt: "2026-02-25T21:00:00.000Z",
+      dispatch: {
+        status: null,
+        queueDocId: null,
+        queuedAt: null,
+        externalTool: null,
+        lastError: null,
+      },
       approval: {
         decision: null,
         decisionSource: null,
@@ -70,5 +79,47 @@ describe("social drafts helpers", () => {
     expect(serialized).toContain("Reject Draft");
     expect(serialized).toContain("story clip");
     expect(serialized).toContain("img1.jpg");
+  });
+
+  it("builds deterministic external dispatch payloads for approved drafts", () => {
+    const draft: SocialDraftRecord = {
+      draftId: "draft-11",
+      uid: "uid-1",
+      businessKey: "aicf",
+      channels: ["instagram_story", "facebook_post"],
+      caption: "Dispatch me to social execution",
+      media: [{ type: "image", url: "https://cdn.example.com/dispatch.jpg" }],
+      status: "approved",
+      source: "agent_worker",
+      correlationId: "corr-11",
+      publishAt: null,
+      createdAt: "2026-02-25T21:00:00.000Z",
+      updatedAt: "2026-02-25T21:00:00.000Z",
+      dispatch: {
+        status: null,
+        queueDocId: null,
+        queuedAt: null,
+        externalTool: null,
+        lastError: null,
+      },
+      approval: {
+        decision: "approve",
+        decisionSource: "google_space_link",
+        decidedAt: "2026-02-25T21:00:00.000Z",
+        expiresAt: "2026-03-04T21:00:00.000Z",
+        requestedAt: "2026-02-25T21:00:00.000Z",
+      },
+    };
+
+    const payload = buildSocialDispatchQueuePayload({
+      draft,
+      correlationId: "corr-dispatch",
+      queuedAt: "2026-02-25T22:00:00.000Z",
+    });
+
+    expect(payload.queueId).toBe(socialDispatchQueueDocId("draft-11"));
+    expect(payload.status).toBe("pending_external_tool");
+    expect(payload.externalTool).toBe("SMAuto");
+    expect(payload.channels).toEqual(["instagram_story", "facebook_post"]);
   });
 });

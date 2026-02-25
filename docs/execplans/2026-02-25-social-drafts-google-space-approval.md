@@ -43,13 +43,19 @@ Status: Completed
 - Run targeted unit/smoke tests for new behaviors.
 - Produce final implementation summary + next steps.
 
+### D5. Approved-draft auto-handoff
+- When an approval is recorded, queue the draft into `social_dispatch_queue` with deterministic queue IDs.
+- Persist dispatch state on each draft (`dispatch.status`, `dispatch.queueDocId`, `dispatch.queuedAt`).
+- Keep dispatch idempotent for replayed approval links.
+
 ## Progress
 
 - [x] D1: Firecrawl fallback guard implemented.
 - [x] D2: variant split report script implemented and baseline report generated.
 - [x] D3: social draft approval workflow implementation.
 - [x] D4: docs + test verification + handoff.
+- [x] D5: approved-draft auto-handoff queued for external SMAuto execution.
 
 ## Verification
 
-- `npx vitest run tests/unit/firecrawl-enrichment.test.ts tests/unit/social-drafts.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts`
+- `npx vitest run tests/unit/firecrawl-enrichment.test.ts tests/unit/social-drafts.test.ts tests/unit/runtime-preflight.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts`

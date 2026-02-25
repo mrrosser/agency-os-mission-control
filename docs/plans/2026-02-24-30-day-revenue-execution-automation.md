@@ -92,6 +92,8 @@ Owner: Mission Control
   - `POST /api/social/drafts`
   - `POST /api/social/drafts/worker-task`
   - `GET /api/social/drafts/{draftId}/decision`
+- Added approval auto-handoff queue for external social execution:
+  - approved drafts now enqueue to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`
 - Added social approval runbook:
   - `docs/runbook-social-draft-approvals.md`
 

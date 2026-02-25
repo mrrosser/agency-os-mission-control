@@ -11,6 +11,7 @@ Adds a draft-first workflow for social posts (IG Stories/Posts + FB Stories/Post
 2. Mission Control sends an approval card to Google Space (with image preview + video links)
 3. operator clicks Approve or Reject directly from the Space card
 4. decision is recorded on the draft in Firestore
+5. approved drafts are auto-queued for external social execution handoff
 
 No auto-posting is performed in this slice.
 
@@ -74,6 +75,8 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
 
 - Draft docs:
   - `identities/{uid}/social_drafts/{draftId}`
+- External handoff queue docs:
+  - `identities/{uid}/social_dispatch_queue/{queueId}` (`status=pending_external_tool`)
 - Approval state fields:
   - `status` (`pending_approval`, `approved`, `rejected`, ...)
   - `approval.tokenHash`
@@ -82,6 +85,9 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
   - `approval.decision`
   - `approval.decidedAt`
   - `approval.decisionSource`
+  - `dispatch.status`
+  - `dispatch.queueDocId`
+  - `dispatch.queuedAt`
 
 ## Safety
 

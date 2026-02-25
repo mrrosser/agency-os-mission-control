@@ -51,6 +51,13 @@ describe("social drafts route", () => {
         publishAt: null,
         createdAt: "2026-02-25T20:00:00.000Z",
         updatedAt: "2026-02-25T20:00:00.000Z",
+        dispatch: {
+          status: null,
+          queueDocId: null,
+          queuedAt: null,
+          externalTool: null,
+          lastError: null,
+        },
         approval: {
           decision: null,
           decisionSource: null,
@@ -96,6 +103,13 @@ describe("social drafts route", () => {
         publishAt: null,
         createdAt: "2026-02-25T20:00:00.000Z",
         updatedAt: "2026-02-25T20:00:00.000Z",
+        dispatch: {
+          status: null,
+          queueDocId: null,
+          queuedAt: null,
+          externalTool: null,
+          lastError: null,
+        },
         approval: {
           decision: null,
           decisionSource: null,

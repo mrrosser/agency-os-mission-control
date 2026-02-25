@@ -11,6 +11,8 @@ import { createDraftEmail } from "@/lib/google/gmail";
 import { buildLeadActionIdempotencyKey } from "@/lib/lead-runs/ids";
 import { assertLeadRunOwner, recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 import { findDncMatch, type DncEntry } from "@/lib/outreach/dnc";
+import { buildFollowupMessagePlan, resolveFollowupBranch, type FollowupBranch } from "@/lib/revenue/close-rate-playbooks";
+import { normalizeBusinessUnit, normalizeCrmPipelineStage, normalizeOfferCode } from "@/lib/revenue/offers";
 
 export type FollowupTaskStatus = "pending" | "processing" | "completed" | "skipped" | "failed";
 
@@ -20,10 +22,12 @@ export type FollowupTask = {
   leadDocId: string;
   uid: string;
   sequence: number;
+  branch: FollowupBranch;
   status: FollowupTaskStatus;
   dueAtMs: number;
   attempts: number;
   leaseUntilMs?: number | null;
+  notNowUntilMs?: number | null;
   lastError?: string | null;
   lead: {
     companyName?: string;
@@ -31,6 +35,11 @@ export type FollowupTask = {
     email?: string;
     website?: string;
     industry?: string;
+    businessUnit?: string;
+    offerCode?: string;
+    pipelineStage?: string;
+    noResponseCount?: number;
+    followupDisposition?: string;
   };
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -59,6 +68,12 @@ function parsePositiveInt(value: unknown, fallback: number): number {
   return parsed;
 }
 
+function parseNonNegativeInt(value: unknown, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
 export async function listFollowupTasks(args: {
   runId: string;
   uid: string;
@@ -77,10 +92,12 @@ export async function listFollowupTasks(args: {
       leadDocId: String(data.leadDocId || ""),
       uid: String(data.uid || ""),
       sequence: Number(data.sequence || 1),
+      branch: (data.branch as FollowupBranch) || "standard",
       status: (data.status as FollowupTaskStatus) || "pending",
       dueAtMs: Number(data.dueAtMs || 0),
       attempts: Number(data.attempts || 0),
       leaseUntilMs: typeof data.leaseUntilMs === "number" ? data.leaseUntilMs : null,
+      notNowUntilMs: typeof data.notNowUntilMs === "number" ? data.notNowUntilMs : null,
       lastError: (data.lastError as string | null | undefined) ?? null,
       lead: (data.lead as FollowupTask["lead"]) || {},
       createdAt: data.createdAt,
@@ -110,7 +127,7 @@ export async function queueFollowupDraftTasksForRun(args: {
   const sequence = typeof args.sequence === "number" && Number.isFinite(args.sequence) ? args.sequence : 1;
   const maxLeads = Math.min(Math.max(args.maxLeads || 25, 1), 25);
   const delayHours = Math.min(Math.max(args.delayHours || 48, 0), 24 * 30);
-  const dueAtMs = Date.now() + delayHours * 60 * 60 * 1000;
+  const baseDueAtMs = Date.now() + delayHours * 60 * 60 * 1000;
 
   const leadsSnap = await getAdminDb()
     .collection("lead_runs")
@@ -131,6 +148,16 @@ export async function queueFollowupDraftTasksForRun(args: {
       founderName?: string;
       website?: string;
       industry?: string;
+      businessUnit?: string;
+      offerCode?: string;
+      pipelineStage?: string;
+      noResponseCount?: number;
+      followupDisposition?: string;
+      responseDisposition?: string;
+      followupNotNowUntil?: string;
+      notNowUntil?: string;
+      nextContactAt?: string;
+      nextFollowupAt?: string;
     };
 
     const email = String(lead.email || "").trim();
@@ -158,6 +185,24 @@ export async function queueFollowupDraftTasksForRun(args: {
 
     const taskId = computeFollowupTaskId({ runId: args.runId, leadDocId: leadDoc.id, sequence });
     const ref = tasksRef(args.runId).doc(taskId);
+    const branchResolution = resolveFollowupBranch({
+      sequence,
+      noResponseCount: lead.noResponseCount,
+      disposition: lead.followupDisposition || lead.responseDisposition,
+      notNowUntil:
+        lead.followupNotNowUntil || lead.notNowUntil || lead.nextFollowupAt || lead.nextContactAt,
+    });
+    const dueAtMs =
+      branchResolution.branch === "not_now" && Number.isFinite(branchResolution.notNowUntilMs)
+        ? Math.max(baseDueAtMs, Number(branchResolution.notNowUntilMs))
+        : baseDueAtMs;
+    const businessUnit = normalizeBusinessUnit(lead.businessUnit);
+    const offerCode = normalizeOfferCode(lead.offerCode);
+    const pipelineStage = normalizeCrmPipelineStage(lead.pipelineStage);
+    const noResponseCount = parseNonNegativeInt(lead.noResponseCount, 0);
+    const followupDisposition = String(
+      lead.followupDisposition || lead.responseDisposition || ""
+    ).trim();
 
     const didCreate = await getAdminDb().runTransaction(async (tx) => {
       const snap = await tx.get(ref);
@@ -171,10 +216,12 @@ export async function queueFollowupDraftTasksForRun(args: {
           leadDocId: leadDoc.id,
           uid: args.uid,
           sequence,
+          branch: branchResolution.branch,
           status: "pending" satisfies FollowupTaskStatus,
           dueAtMs,
           attempts: 0,
           leaseUntilMs: null,
+          notNowUntilMs: branchResolution.notNowUntilMs,
           lastError: null,
           lead: {
             companyName: lead.companyName,
@@ -182,6 +229,11 @@ export async function queueFollowupDraftTasksForRun(args: {
             email,
             website: lead.website,
             industry: lead.industry,
+            businessUnit,
+            offerCode,
+            pipelineStage,
+            noResponseCount,
+            followupDisposition,
           },
           updatedAt: now,
           createdAt: now,
@@ -201,7 +253,7 @@ export async function queueFollowupDraftTasksForRun(args: {
     existing,
     skippedNoEmail,
     skippedNoOutreach,
-    dueAtMs,
+    dueAtMs: baseDueAtMs,
     delayHours,
   });
 
@@ -211,30 +263,12 @@ export async function queueFollowupDraftTasksForRun(args: {
     existing,
     skippedNoEmail,
     skippedNoOutreach,
-    dueAtMs,
+    dueAtMs: baseDueAtMs,
   };
 }
 
 function dncMeta(dnc: DncEntry) {
   return { entryId: dnc.entryId, type: dnc.type, value: dnc.value };
-}
-
-function followupDraftHtml(args: {
-  leadName: string;
-  founderName: string;
-  businessName: string;
-  primaryService: string;
-  companyName: string;
-}): string {
-  return `
-    <h2>Hi ${args.leadName},</h2>
-    <p>Just following up in case my last note got buried.</p>
-    <p>If it’s helpful, I can send a quick 2-3 bullet plan for <strong>${args.companyName}</strong> on ${args.primaryService}.</p>
-    <p>Open to a quick 15-minute call next week?</p>
-    <br/>
-    <p>Best regards,</p>
-    <p>${args.founderName}<br/>${args.businessName}</p>
-  `;
 }
 
 async function claimTaskForProcessing(args: {
@@ -275,10 +309,12 @@ async function claimTaskForProcessing(args: {
       leadDocId: String(data.leadDocId || ""),
       uid: String(data.uid || ""),
       sequence: Number(data.sequence || 1),
+      branch: (data.branch as FollowupBranch) || "standard",
       status: "processing",
       dueAtMs: Number(data.dueAtMs || 0),
       attempts: Number(data.attempts || 0) + 1,
       leaseUntilMs: args.nowMs + args.leaseMs,
+      notNowUntilMs: typeof data.notNowUntilMs === "number" ? data.notNowUntilMs : null,
       lastError: null,
       lead: (data.lead as FollowupTask["lead"]) || {},
       createdAt: data.createdAt,
@@ -427,14 +463,20 @@ export async function processDueFollowupDraftTasks(args: {
         continue;
       }
 
-      const subject = `Following up - ${companyName}`;
-      const body = followupDraftHtml({
+      const messagePlan = buildFollowupMessagePlan({
+        branch: claimed.branch,
+        sequence: claimed.sequence,
+        businessUnit: claimed.lead.businessUnit,
+        offerCode: claimed.lead.offerCode,
+        pipelineStage: claimed.lead.pipelineStage,
         leadName,
         founderName,
         businessName,
         primaryService,
         companyName,
       });
+      const subject = messagePlan.subject;
+      const body = messagePlan.html;
 
       if (args.dryRun) {
         await recordLeadActionReceipt(
@@ -448,7 +490,12 @@ export async function processDueFollowupDraftTasks(args: {
             dryRun: true,
             replayed: false,
             idempotencyKey: receiptKey,
-            data: { subject },
+            data: {
+              subject,
+              branch: claimed.branch,
+              sequence: claimed.sequence,
+              nextStep: messagePlan.nextStep,
+            },
           },
           args.log
         );
@@ -483,6 +530,9 @@ export async function processDueFollowupDraftTasks(args: {
               draftId: draftResult.data?.draftId,
               messageId: draftResult.data?.messageId,
               threadId: draftResult.data?.threadId,
+              branch: claimed.branch,
+              sequence: claimed.sequence,
+              nextStep: messagePlan.nextStep,
             },
           },
           args.log
@@ -496,9 +546,37 @@ export async function processDueFollowupDraftTasks(args: {
           leaseUntilMs: null,
           updatedAt: FieldValue.serverTimestamp(),
           completedAt: FieldValue.serverTimestamp(),
+          outcome: {
+            branch: claimed.branch,
+            sequence: claimed.sequence,
+            nextStep: messagePlan.nextStep,
+          },
         },
         { merge: true }
       );
+
+      const recyclePatch: Record<string, unknown> = {
+        followupLastTaskId: claimed.taskId,
+        followupLastSequence: claimed.sequence,
+        followupLastBranch: claimed.branch,
+        followupNextStep: messagePlan.nextStep,
+        followupLastUpdatedAt: FieldValue.serverTimestamp(),
+      };
+      if (claimed.branch === "no_response") {
+        recyclePatch.followupDisposition = "no_response";
+        recyclePatch.followupRecycleAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+      } else if (claimed.branch === "not_now") {
+        recyclePatch.followupDisposition = "not_now";
+        if (typeof claimed.notNowUntilMs === "number" && Number.isFinite(claimed.notNowUntilMs)) {
+          recyclePatch.followupRecycleAt = new Date(claimed.notNowUntilMs).toISOString();
+        }
+      }
+      await getAdminDb()
+        .collection("lead_runs")
+        .doc(args.runId)
+        .collection("leads")
+        .doc(claimed.leadDocId)
+        .set(recyclePatch, { merge: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failed += 1;

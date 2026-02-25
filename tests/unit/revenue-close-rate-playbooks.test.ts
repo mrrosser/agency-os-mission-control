@@ -42,5 +42,8 @@ describe("revenue close-rate playbooks", () => {
     expect(plan.subject).toContain("proof point");
     expect(plan.html).toContain("Offer CTA");
     expect(plan.nextStep.toLowerCase()).toContain("deposit");
+    expect(plan.html).toContain("Price:");
+    expect(plan.html).toContain("Trust:");
+    expect(plan.html).toContain("Technical:");
   });
 });

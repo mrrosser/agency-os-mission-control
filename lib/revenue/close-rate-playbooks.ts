@@ -47,12 +47,14 @@ const STAGE_NEXT_STEP_SCRIPT: Record<CrmPipelineStage, string> = {
 };
 
 const OBJECTION_PROMPTS = {
-  budget:
-    "If budget is tight, we can start with the packaged scope and phase expansion after milestone one.",
+  price:
+    "If price is the blocker, we can stage delivery into a smaller phase-one package, then expand after initial outcomes.",
   timing:
-    "If timing is the blocker, we can hold your slot with deposit and lock kickoff for your preferred window.",
-  authority:
-    "If another stakeholder needs context, we can send a one-page summary with scope, timeline, and deposit terms.",
+    "If timing is the blocker, we can reserve your slot now and set kickoff to your preferred delivery window.",
+  trust:
+    "If confidence is the blocker, we can share a concise proof bundle (scope examples, expected outcomes, and implementation plan).",
+  technical:
+    "If implementation complexity is the blocker, we can start with a low-risk discovery sprint that de-risks integration before full build.",
 } as const;
 
 function asString(value: unknown): string {
@@ -170,11 +172,12 @@ export function buildFollowupMessagePlan(args: {
     <p>I can send a quick 2-3 bullet plan for <strong>${companyName}</strong> focused on ${primaryService}.</p>
     <p><strong>Offer CTA:</strong> ${offerCta}</p>
     <p><strong>Next Step (${stageLabel}):</strong> ${nextStep}</p>
-    <p>If objections came up, here are easy options:</p>
+    <p>If objections came up, here are practical next-step options:</p>
     <ul>
-      <li><strong>Budget:</strong> ${OBJECTION_PROMPTS.budget}</li>
+      <li><strong>Price:</strong> ${OBJECTION_PROMPTS.price}</li>
       <li><strong>Timing:</strong> ${OBJECTION_PROMPTS.timing}</li>
-      <li><strong>Stakeholders:</strong> ${OBJECTION_PROMPTS.authority}</li>
+      <li><strong>Trust:</strong> ${OBJECTION_PROMPTS.trust}</li>
+      <li><strong>Technical:</strong> ${OBJECTION_PROMPTS.technical}</li>
     </ul>
     <p>Open to a quick 15-minute call next week?</p>
     <br/>

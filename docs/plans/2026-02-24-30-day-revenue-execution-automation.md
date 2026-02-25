@@ -61,6 +61,27 @@ Owner: Mission Control
   - `tests/smoke/revenue-day2-worker-task-route.test.ts`
   - `tests/unit/revenue-day2-automation.test.ts`
 
+### Day 30 autopilot implementation status (2026-02-25)
+- Added Day30 orchestration routes:
+  - `POST /api/revenue/day30` (authenticated operator run)
+  - `POST /api/revenue/day30/worker-task` (token-auth service run, supports fallback to Day2/Day1 worker token)
+- Added Day30 automation service: `lib/revenue/day30-automation.ts`
+  - executes Day2 automation
+  - updates closer queue (hot booking/proposal leads with 30-minute SLA tracking)
+  - syncs revenue memory summaries (win/loss + objection signals)
+  - generates daily executive digest docs
+  - runs weekly KPI + service-lab candidate generation on configured cadence
+- Added Day30 runner + scheduler helpers:
+  - `scripts/revenue-day30-run.mjs`
+  - `scripts/revenue-day30-scheduler-setup.sh`
+  - `scripts/revenue-day30-scheduler-setup.ps1`
+- Added Day30 operator/deploy runbook:
+  - `docs/runbook-day30-revenue-automation.md`
+- Added test coverage:
+  - `tests/smoke/revenue-day30-route.test.ts`
+  - `tests/smoke/revenue-day30-worker-task-route.test.ts`
+  - `tests/unit/revenue-day30-automation.test.ts`
+
 ## Week 2 (Days 8-14): Outbound + Follow-up Automation
 1. Activate daily lead scouting cadence (geo + niche rotations).
 2. Generate demo assets and outreach drafts in batches.

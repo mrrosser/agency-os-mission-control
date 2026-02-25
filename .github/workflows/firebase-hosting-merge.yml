@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - main
+permissions:
+  contents: read
+  id-token: write
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
@@ -30,54 +33,75 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           NEXT_TELEMETRY_DISABLED: "1"
-      - name: Check Firebase service account secret
+      - name: Check WIF config
         env:
-          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
         run: |
-          if [ -n "$FIREBASE_SA" ]; then
-            echo "FIREBASE_SA_SET=1" >> $GITHUB_ENV
+          echo "DEPLOY_PERFORMED=0" >> $GITHUB_ENV
+          if [ -n "$GCP_WIF_PROVIDER" ] && [ -n "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "GCP_AUTH_READY=1" >> $GITHUB_ENV
           else
-            echo "FIREBASE_SA_SET=0" >> $GITHUB_ENV
+            echo "GCP_AUTH_READY=0" >> $GITHUB_ENV
           fi
       - name: Authenticate to Google Cloud
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
-          project_id: leadflow-review
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
       - name: Set up gcloud
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: leadflow-review
-      - name: Firebase deploy (skips if service account secret missing)
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+          project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+      - name: Firebase deploy (skips if WIF config missing)
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           NPM_CONFIG_PRODUCTION: "true"
           NODE_ENV: "production"
         run: |
           set -euo pipefail
-          npx -y firebase-tools@15.5.1 deploy \
+          node scripts/firebase-deploy.mjs deploy \
             --only hosting \
-            --project leadflow-review \
+            --project "$FIREBASE_PROJECT_ID" \
             --force \
             --non-interactive
+          echo "DEPLOY_PERFORMED=1" >> $GITHUB_ENV
       - name: Ensure SSR backend memory (webframeworks)
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
+          FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
         run: |
           set -euo pipefail
-          gcloud run services update ssrleadflowreview \
-            --project leadflow-review \
-            --region us-central1 \
+          gcloud run services update "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
             --memory 512Mi \
             --quiet
       - name: Post-deploy production smoke
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
-          SMOKE_BASE_URL: https://leadflow-review.web.app
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          SMOKE_BASE_URL: ${{ vars.PROD_SMOKE_BASE_URL || 'https://leadflow-review.web.app' }}
           SMOKE_TEST_UID: ci-smoke-user
         run: npm run test:postdeploy
-      - name: Firebase deploy skipped (missing secret)
-        if: ${{ env.FIREBASE_SA_SET != '1' }}
-        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; deploy skipped."
+      - name: Rollback Firebase Hosting on smoke failure
+        if: ${{ failure() && env.GCP_AUTH_READY == '1' && env.DEPLOY_PERFORMED == '1' }}
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE || 'leadflow-review' }}
+        run: |
+          set -euo pipefail
+          echo "Smoke failed; rolling back Firebase Hosting live channel."
+          node scripts/firebase-deploy.mjs hosting:rollback \
+            "$FIREBASE_HOSTING_SITE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive
+      - name: Firebase deploy skipped (missing WIF config)
+        if: ${{ env.GCP_AUTH_READY != '1' }}
+        run: echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars; deploy skipped."

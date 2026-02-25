@@ -132,6 +132,11 @@ async function main() {
   let templateId = null;
   let runId = null;
   let idToken = null;
+  const coreRouteChecks = {
+    leadSource: false,
+    jobStart: false,
+    workerCompletion: false,
+  };
 
   console.log(`[smoke] baseUrl=${baseUrl} uid=${uid}`);
 
@@ -216,6 +221,7 @@ async function main() {
       runId = payload?.runId;
       assert(typeof runId === "string" && runId.length > 0, "Lead source missing runId.");
       assert(Array.isArray(payload?.leads) && payload.leads.length > 0, "Lead source returned no leads.");
+      coreRouteChecks.leadSource = true;
       console.log(`[smoke] lead source passed runId=${runId}`);
     }
 
@@ -239,6 +245,7 @@ async function main() {
       if (!response.ok) {
         throw new Error(`Lead run start failed (${response.status}): ${JSON.stringify(payload)}`);
       }
+      coreRouteChecks.jobStart = true;
       console.log("[smoke] lead run start passed");
     }
 
@@ -259,6 +266,7 @@ async function main() {
         if (typeof status === "string") lastStatus = status;
         if (status === "completed") {
           workerCompleted = true;
+          coreRouteChecks.workerCompletion = true;
           console.log("[smoke] lead run worker completed");
           break;
         }
@@ -271,6 +279,9 @@ async function main() {
         throw new Error(`Lead run worker did not complete before timeout (last=${lastStatus}).`);
       }
     }
+    assert(coreRouteChecks.leadSource, "Lead source route smoke gate did not pass.");
+    assert(coreRouteChecks.jobStart, "Lead run job-start route smoke gate did not pass.");
+    assert(coreRouteChecks.workerCompletion, "Lead run worker-completion gate did not pass.");
 
     console.log("[smoke] post-deploy smoke passed");
   } finally {

@@ -1,0 +1,54 @@
+name: Postdeploy Health Monitor
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  health-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate monitor config
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+          FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+        run: |
+          if [ -z "$GCP_WIF_PROVIDER" ] || [ -z "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars." >&2
+            exit 1
+          fi
+          if [ -z "$FIREBASE_API_KEY" ]; then
+            echo "Missing NEXT_PUBLIC_FIREBASE_API_KEY repo var." >&2
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Run authenticated production smoke
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          SMOKE_BASE_URL: ${{ vars.PROD_SMOKE_BASE_URL || 'https://leadflow-review.web.app' }}
+          SMOKE_TEST_UID: ci-monitor-user
+        run: npm run test:postdeploy

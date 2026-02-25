@@ -6,6 +6,7 @@ on: pull_request
 permissions:
   checks: write
   contents: read
+  id-token: write
   pull-requests: write
 jobs:
   build_and_preview:
@@ -32,48 +33,54 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
           NEXT_TELEMETRY_DISABLED: "1"
-      - name: Check Firebase service account secret
+      - name: Check WIF config
         env:
-          FIREBASE_SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
         run: |
-          if [ -n "$FIREBASE_SA" ]; then
-            echo "FIREBASE_SA_SET=1" >> $GITHUB_ENV
+          if [ -n "$GCP_WIF_PROVIDER" ] && [ -n "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "GCP_AUTH_READY=1" >> $GITHUB_ENV
           else
-            echo "FIREBASE_SA_SET=0" >> $GITHUB_ENV
+            echo "GCP_AUTH_READY=0" >> $GITHUB_ENV
           fi
       - name: Authenticate to Google Cloud
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
-          project_id: leadflow-review
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
       - name: Set up gcloud
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: leadflow-review
-      - name: Firebase preview deploy (skips if service account secret missing)
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+          project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+      - name: Firebase preview deploy (skips if WIF config missing)
+        if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           NPM_CONFIG_PRODUCTION: "true"
           NODE_ENV: "production"
         run: |
           set -euo pipefail
           CHANNEL_ID="pr-${{ github.event.number }}"
-          npx -y firebase-tools@15.5.1 hosting:channel:deploy "$CHANNEL_ID" \
-            --project leadflow-review \
+          node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
+            --project "$FIREBASE_PROJECT_ID" \
             --expires 7d \
             --non-interactive
       - name: Ensure SSR backend memory (webframeworks)
-        if: ${{ env.FIREBASE_SA_SET == '1' }}
+        if: ${{ env.GCP_AUTH_READY == '1' }}
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
+          FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
         run: |
           set -euo pipefail
-          gcloud run services update ssrleadflowreview \
-            --project leadflow-review \
-            --region us-central1 \
+          gcloud run services update "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
             --memory 512Mi \
             --quiet
-      - name: Firebase preview deploy skipped (missing secret)
-        if: ${{ env.FIREBASE_SA_SET != '1' }}
-        run: echo "Missing FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW; preview deploy skipped."
+      - name: Firebase preview deploy skipped (missing WIF config)
+        if: ${{ env.GCP_AUTH_READY != '1' }}
+        run: echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars; preview deploy skipped."

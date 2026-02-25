@@ -23,6 +23,27 @@ interface AnalyticsData {
     pipelineValue: number;
 }
 
+interface WeeklyKpiSnapshot {
+    timeZone: string;
+    weekStartDate: string | null;
+    weekEndDate: string | null;
+    generatedAt: string | null;
+    summary: {
+        leadsSourced: number;
+        meetingsBooked: number;
+        depositsCollected: number;
+        dealsWon: number;
+        closeRatePct: number;
+        pipelineValueUsd: number;
+    };
+    decisionSummary: {
+        scale: number;
+        fix: number;
+        kill: number;
+        watch: number;
+    };
+}
+
 interface AgentSpaceStatus {
     agentId: string;
     updatedAt?: string | null;
@@ -57,6 +78,9 @@ export default function DashboardPage() {
     const [agentStatus, setAgentStatus] = useState<Record<string, AgentSpaceStatus>>({});
     const [agentStatusLoading, setAgentStatusLoading] = useState(false);
     const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
+    const [weeklyKpi, setWeeklyKpi] = useState<WeeklyKpiSnapshot | null>(null);
+    const [weeklyKpiLoading, setWeeklyKpiLoading] = useState(false);
+    const [weeklyKpiError, setWeeklyKpiError] = useState<string | null>(null);
 
     const fetchAgentStatus = useCallback(async () => {
         if (!user) return;
@@ -88,6 +112,41 @@ export default function DashboardPage() {
         if (!user) return;
         fetchAgentStatus();
     }, [user, fetchAgentStatus]);
+
+    const fetchWeeklyKpi = useCallback(async () => {
+        if (!user || !internalRevenueUiEnabled) return;
+        setWeeklyKpiLoading(true);
+        setWeeklyKpiError(null);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const response = await fetch("/api/revenue/kpi/latest", {
+                method: "GET",
+                headers,
+            });
+            const payload = await readApiJson<{
+                ok?: boolean;
+                report?: WeeklyKpiSnapshot | null;
+                error?: string;
+            }>(response);
+            if (!response.ok) {
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    payload?.error ||
+                    `Failed to load weekly KPI snapshot (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setWeeklyKpi(payload?.report || null);
+        } catch (error: unknown) {
+            setWeeklyKpiError(error instanceof Error ? error.message : "Unable to load weekly KPI snapshot");
+        } finally {
+            setWeeklyKpiLoading(false);
+        }
+    }, [internalRevenueUiEnabled, user]);
+
+    useEffect(() => {
+        if (!user || !internalRevenueUiEnabled) return;
+        fetchWeeklyKpi();
+    }, [fetchWeeklyKpi, internalRevenueUiEnabled, user]);
 
     useEffect(() => {
         if (!user) {
@@ -223,6 +282,37 @@ export default function DashboardPage() {
             bgColor: "bg-amber-500/10",
         },
     ];
+
+    const weeklyKpiStats = weeklyKpi
+        ? [
+            {
+                title: "Weekly Leads",
+                value: weeklyKpi.summary.leadsSourced.toLocaleString(),
+                icon: "people" as AfroGlyphVariant,
+                color: "text-cyan-300",
+                bgColor: "bg-cyan-500/10",
+            },
+            {
+                title: "Weekly Deposits",
+                value: weeklyKpi.summary.depositsCollected.toLocaleString(),
+                icon: "activity" as AfroGlyphVariant,
+                color: "text-emerald-300",
+                bgColor: "bg-emerald-500/10",
+            },
+            {
+                title: "Weekly Close Rate",
+                value: `${weeklyKpi.summary.closeRatePct.toFixed(1)}%`,
+                icon: "trend" as AfroGlyphVariant,
+                color: "text-amber-300",
+                bgColor: "bg-amber-500/10",
+            },
+        ]
+        : [];
+
+    const weeklyKpiLabel =
+        weeklyKpi?.weekStartDate && weeklyKpi?.weekEndDate
+            ? `${weeklyKpi.weekStartDate} - ${weeklyKpi.weekEndDate}`
+            : "No report window";
 
     const activityItems = activities.length > 0 ? activities.map(activity => ({
         action: activity.action,
@@ -421,22 +511,83 @@ export default function DashboardPage() {
                         </div>
 
                         {internalRevenueUiEnabled && (
-                            <div className="grid gap-6 md:grid-cols-3">
-                                {revenueStats.map((stat) => (
-                                    <Card key={stat.title} className="bg-zinc-950 border-zinc-800 shadow-lg">
-                                        <CardContent className="p-6">
-                                            <div className="flex items-center justify-between">
-                                                <div className="space-y-1">
-                                                    <p className="text-sm font-medium text-zinc-400">{stat.title}</p>
-                                                    <p className="text-2xl font-bold text-white tracking-tight">{stat.value}</p>
+                            <div className="space-y-6">
+                                <div className="grid gap-6 md:grid-cols-3">
+                                    {revenueStats.map((stat) => (
+                                        <Card key={stat.title} className="bg-zinc-950 border-zinc-800 shadow-lg">
+                                            <CardContent className="p-6">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="space-y-1">
+                                                        <p className="text-sm font-medium text-zinc-400">{stat.title}</p>
+                                                        <p className="text-2xl font-bold text-white tracking-tight">{stat.value}</p>
+                                                    </div>
+                                                    <div className={`p-3 rounded-lg ${stat.bgColor}`}>
+                                                        <AfroGlyph variant={stat.icon} className={`h-6 w-6 ${stat.color}`} />
+                                                    </div>
                                                 </div>
-                                                <div className={`p-3 rounded-lg ${stat.bgColor}`}>
-                                                    <AfroGlyph variant={stat.icon} className={`h-6 w-6 ${stat.color}`} />
-                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+
+                                <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
+                                    <CardContent className="p-6 space-y-4">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="space-y-1">
+                                                <h3 className="text-lg font-semibold text-white">Weekly Revenue KPI</h3>
+                                                <p className="text-sm text-zinc-400">
+                                                    {weeklyKpiLabel}
+                                                </p>
                                             </div>
-                                        </CardContent>
-                                    </Card>
-                                ))}
+                                            <Button
+                                                onClick={fetchWeeklyKpi}
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-zinc-700 text-zinc-200 hover:bg-zinc-900"
+                                                disabled={weeklyKpiLoading}
+                                            >
+                                                Refresh
+                                            </Button>
+                                        </div>
+
+                                        {weeklyKpiLoading && (
+                                            <p className="text-xs text-zinc-500">Loading weekly KPI snapshot...</p>
+                                        )}
+
+                                        {weeklyKpiError && (
+                                            <p className="text-xs text-red-400">{weeklyKpiError}</p>
+                                        )}
+
+                                        {!weeklyKpiLoading && !weeklyKpiError && weeklyKpiStats.length === 0 && (
+                                            <p className="text-xs text-zinc-500">
+                                                No weekly KPI report found yet. Run `/api/revenue/kpi/weekly` to initialize.
+                                            </p>
+                                        )}
+
+                                        {weeklyKpiStats.length > 0 && (
+                                            <>
+                                                <div className="grid gap-4 md:grid-cols-3">
+                                                    {weeklyKpiStats.map((stat) => (
+                                                        <div key={stat.title} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+                                                            <div className="flex items-center justify-between">
+                                                                <div>
+                                                                    <p className="text-xs uppercase tracking-wide text-zinc-500">{stat.title}</p>
+                                                                    <p className="text-xl font-semibold text-white">{stat.value}</p>
+                                                                </div>
+                                                                <div className={`p-2 rounded-lg ${stat.bgColor}`}>
+                                                                    <AfroGlyph variant={stat.icon} className={`h-5 w-5 ${stat.color}`} />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <p className="text-xs text-zinc-500">
+                                                    Decisions: scale {weeklyKpi?.decisionSummary.scale || 0}, fix {weeklyKpi?.decisionSummary.fix || 0}, kill {weeklyKpi?.decisionSummary.kill || 0}, watch {weeklyKpi?.decisionSummary.watch || 0}
+                                                </p>
+                                            </>
+                                        )}
+                                    </CardContent>
+                                </Card>
                             </div>
                         )}
 

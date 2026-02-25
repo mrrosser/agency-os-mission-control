@@ -124,9 +124,11 @@ npm run dev
 ## Revenue Weekly KPI Rollup
 - Manual/authenticated route: `POST /api/revenue/kpi/weekly`
 - Scheduler/service route: `POST /api/revenue/kpi/weekly/worker-task`
+- Latest snapshot route: `GET /api/revenue/kpi/latest`
 - Worker auth: send `Authorization: Bearer <REVENUE_WEEKLY_KPI_WORKER_TOKEN>` (or `x-revenue-weekly-kpi-token`).
 - Writes weekly and latest KPI docs under `identities/{uid}/revenue_kpi_reports/*`.
 - Automation workflow: `.github/workflows/revenue-weekly-kpi.yml`
+- Dashboard surface (internal revenue UI flag): weekly KPI summary cards + decision counts.
 
 ## Square Deposit Webhook
 - Route: `POST /api/webhooks/square`
@@ -198,6 +200,8 @@ Notes:
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
+- Includes fail-closed post-deploy smoke and automatic Firebase Hosting rollback when smoke fails.
+- Dedicated CI gate for `npm test`: `.github/workflows/ci-tests.yml`.
 
 Local deploy (recommended: trims SSR bundle by omitting devDependencies during frameworks install):
 ```bash
@@ -208,9 +212,20 @@ If your npm version rewrites flags, this direct form always works:
 node scripts/firebase-deploy.mjs deploy --only hosting --project leadflow-review
 ```
 
-Required GitHub Actions secrets:
+Required GitHub Actions configuration:
 - `ENV_LOCAL` (full `.env.local` content)
-- `FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW` (Firebase Admin SDK JSON)
+- `vars.GCP_WIF_PROVIDER` (Workload Identity Provider resource name)
+- `vars.GCP_WIF_SERVICE_ACCOUNT` (service account email for GitHub OIDC auth)
+- Optional (defaults shown):
+  - `vars.GCP_PROJECT_ID` (`leadflow-review`)
+  - `vars.FIREBASE_HOSTING_SITE` (`leadflow-review`)
+  - `vars.CLOUD_RUN_REGION` (`us-central1`)
+  - `vars.FIREBASE_SSR_SERVICE` (`ssrleadflowreview`)
+  - `vars.PROD_SMOKE_BASE_URL` (`https://leadflow-review.web.app`)
+
+Production health monitor:
+- `.github/workflows/postdeploy-health-monitor.yml` runs authenticated smoke on a schedule.
+- Requires `vars.NEXT_PUBLIC_FIREBASE_API_KEY` plus the WIF vars above.
 
 Expected live URL (Firebase Hosting default):
 - `https://leadflow-review.web.app/`
@@ -244,7 +259,7 @@ Config (SSR runtime):
 - Optional: `TELEMETRY_ALLOWED_ORIGINS` (comma-separated allowlist for browser telemetry)
 
 Config (GitHub Action triage):
-- Uses `FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW` to read/write Firestore groups.
+- Uses Workload Identity Federation (`vars.GCP_WIF_PROVIDER` + `vars.GCP_WIF_SERVICE_ACCOUNT`) to read/write Firestore groups.
 - Uses `${{ github.token }}` to create issues in this repo.
 
 Config (retention cleanup):

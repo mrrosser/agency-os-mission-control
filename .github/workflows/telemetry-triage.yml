@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   issues: write
+  id-token: write
 
 jobs:
   triage:
@@ -25,17 +26,30 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Write Firebase service account
+      - name: Validate WIF config
         env:
-          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW }}
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
         run: |
-          node -e "require('fs').writeFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, process.env.FIREBASE_SERVICE_ACCOUNT_JSON)"
+          if [ -z "$GCP_WIF_PROVIDER" ] || [ -z "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars." >&2
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
 
       - name: Run triage
         env:
-          GCLOUD_PROJECT: leadflow-review
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           TELEMETRY_TRIAGE_MIN_COUNT: "3"

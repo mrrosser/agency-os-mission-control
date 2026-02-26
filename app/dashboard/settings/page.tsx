@@ -25,6 +25,7 @@ import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { DncList } from "@/components/settings/DncList";
 import { FollowupAutomationSettings } from "@/components/settings/FollowupAutomationSettings";
+import { SocialOnboardingChecklist } from "@/components/onboarding/SocialOnboardingChecklist";
 
 interface IdentityProfile {
     businessName: string;
@@ -516,6 +517,8 @@ export default function SettingsPage() {
                     {/* --- Integrations Tab --- */}
                     <TabsContent value="integrations">
                         <div className="space-y-6">
+                            <SocialOnboardingChecklist />
+
                             <Card className="bg-zinc-950 border-zinc-800">
                                 <CardHeader>
                                     <CardTitle className="flex items-center gap-2">

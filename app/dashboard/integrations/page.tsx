@@ -6,6 +6,7 @@ import { SmsSender } from "@/components/integrations/SmsSender";
 import { VoiceGenerator } from "@/components/integrations/VoiceGenerator";
 import { AvatarCreator } from "@/components/integrations/AvatarCreator";
 import { GoogleWorkspaceConnect } from "@/components/integrations/GoogleWorkspaceConnect";
+import { SocialOnboardingChecklist } from "@/components/onboarding/SocialOnboardingChecklist";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
@@ -65,6 +66,7 @@ export default function IntegrationsPage() {
                 )}
 
                 <GoogleWorkspaceConnect />
+                <SocialOnboardingChecklist />
 
                 {/* Feature Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

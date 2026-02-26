@@ -148,7 +148,8 @@ npm run dev
   - `SMAUTO_MCP_API_KEY` (required when `SMAUTO_MCP_AUTH_MODE=api_key`)
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional MCP tool name override; default `social.dispatch.enqueue`)
-  - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; default `true`)
+  - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; default `true`, set `false` for MCP-only/session endpoints)
+  - `SOCIAL_DISPATCH_RETRY_ENABLED` (optional scheduler helper flag; default `false` to reduce noisy retry spend)
 - Runbook + payload examples: `docs/runbook-social-draft-approvals.md`
 - Mobile workflow: operator receives Approve/Reject buttons in Google Chat Space and can complete the decision from phone browser without opening Mission Control UI.
 

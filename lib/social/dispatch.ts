@@ -469,6 +469,7 @@ export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs)
     queueId: args.task.queueId,
     draftId: args.task.draftId,
     status: mcpResponse.status,
+    body: mcpBody.snippet,
     correlationId: args.correlationId,
   });
 
@@ -484,6 +485,8 @@ export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs)
       status: webhookResponse.status,
       transport: "webhook",
       body: webhookBody.snippet,
+      mcpStatus: mcpResponse.status,
+      mcpBody: mcpBody.snippet,
     });
   }
 
@@ -688,6 +691,10 @@ function formatDispatchError(error: unknown): string {
     if (transport) parts.push(`transport=${transport}`);
     const body = asString(detail.body);
     if (body) parts.push(`body=${body}`);
+    const mcpStatus = asInt(detail.mcpStatus, 0);
+    if (mcpStatus > 0) parts.push(`mcpStatus=${mcpStatus}`);
+    const mcpBody = asString(detail.mcpBody);
+    if (mcpBody) parts.push(`mcpBody=${mcpBody}`);
     return parts.join(" | ");
   }
   if (error instanceof Error) return error.message;

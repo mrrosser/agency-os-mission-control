@@ -1,6 +1,8 @@
 param()
 
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
+Set-Alias -Name gcloud -Value gcloud.cmd -Scope Script
 
 function Read-Env {
   param(
@@ -63,10 +65,11 @@ if ([string]::IsNullOrWhiteSpace($uid)) {
 }
 
 $timeZone = Read-Env -Name "SOCIAL_DISPATCH_TIME_ZONE" -DefaultValue "America/Chicago"
-$drainCron = Read-Env -Name "SOCIAL_DISPATCH_DRAIN_CRON" -DefaultValue "*/10 * * * *"
-$retryCron = Read-Env -Name "SOCIAL_DISPATCH_RETRY_CRON" -DefaultValue "15 * * * *"
+$drainCron = Read-Env -Name "SOCIAL_DISPATCH_DRAIN_CRON" -DefaultValue "*/15 * * * *"
+$retryCron = Read-Env -Name "SOCIAL_DISPATCH_RETRY_CRON" -DefaultValue "0 3 * * *"
 $maxTasks = Read-Env -Name "SOCIAL_DISPATCH_MAX_TASKS" -DefaultValue "10"
 $retryMaxTasks = Read-Env -Name "SOCIAL_DISPATCH_RETRY_MAX_TASKS" -DefaultValue "10"
+$retryEnabled = (Read-Env -Name "SOCIAL_DISPATCH_RETRY_ENABLED" -DefaultValue "false").ToLower()
 
 if ([string]::IsNullOrWhiteSpace($projectId)) {
   throw "Missing GCP_PROJECT_ID"
@@ -139,6 +142,23 @@ $retryPayload = @{
 } | ConvertTo-Json -Compress
 
 Upsert-Job -Name "social-dispatch-drain" -Cron $drainCron -BodyJson $drainPayload
-Upsert-Job -Name "social-dispatch-retry-failed" -Cron $retryCron -BodyJson $retryPayload
+
+if ($retryEnabled -in @("true", "1", "yes")) {
+  Upsert-Job -Name "social-dispatch-retry-failed" -Cron $retryCron -BodyJson $retryPayload
+  try {
+    gcloud scheduler jobs resume social-dispatch-retry-failed --location $location --project $projectId 2>$null | Out-Null
+  } catch {
+    if ($_.Exception.Message -notmatch "already enabled|is already in state ENABLED") { throw }
+  }
+} else {
+  gcloud scheduler jobs describe social-dispatch-retry-failed --location $location --project $projectId 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) {
+    try {
+      gcloud scheduler jobs pause social-dispatch-retry-failed --location $location --project $projectId 2>$null | Out-Null
+    } catch {
+      if ($_.Exception.Message -notmatch "already paused|has been paused") { throw }
+    }
+  }
+}
 
 Write-Host "Configured social dispatch scheduler jobs in $timeZone."

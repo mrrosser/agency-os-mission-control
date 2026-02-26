@@ -49,6 +49,7 @@ No auto-posting is performed in this slice.
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required for `id_token`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional tool name override; default `social.dispatch.enqueue`)
   - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; defaults `true`)
+    - set to `false` when SMAuto endpoint is MCP-only (JSON-RPC session based) to avoid duplicate fallback calls/cost
 - Dispatch status notifications (optional):
   - `SOCIAL_DISPATCH_STATUS_NOTIFY` (`true`/`false`, default `true`)
   - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (default)
@@ -125,8 +126,8 @@ Scheduler setup helpers:
 - `scripts/social-dispatch-scheduler-setup.ps1`
 
 Default jobs created:
-- `social-dispatch-drain` (`*/10 * * * *`) for pending queue drain
-- `social-dispatch-retry-failed` (`15 * * * *`) for failed-item retries
+- `social-dispatch-drain` (`*/15 * * * *`) for pending queue drain
+- `social-dispatch-retry-failed` (`0 3 * * *`) only when `SOCIAL_DISPATCH_RETRY_ENABLED=true`; otherwise the helper pauses this job to reduce noisy retry spend
 
 ## Weekly scheduler trigger (all businesses)
 

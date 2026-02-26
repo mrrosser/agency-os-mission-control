@@ -8,10 +8,11 @@ WORKER_TOKEN="${SOCIAL_DRAFT_WORKER_TOKEN:-${REVENUE_DAY30_WORKER_TOKEN:-${REVEN
 UID="${SOCIAL_DISPATCH_UID:-${SOCIAL_DRAFT_UID:-${REVENUE_AUTOMATION_UID:-${REVENUE_DAY30_UID:-${REVENUE_DAY2_UID:-${REVENUE_DAY1_UID:-${VOICE_ACTIONS_DEFAULT_UID:-${SQUARE_WEBHOOK_DEFAULT_UID:-}}}}}}}}"
 TIME_ZONE="${SOCIAL_DISPATCH_TIME_ZONE:-America/Chicago}"
 
-DRAIN_CRON="${SOCIAL_DISPATCH_DRAIN_CRON:-*/10 * * * *}"
-RETRY_CRON="${SOCIAL_DISPATCH_RETRY_CRON:-15 * * * *}"
+DRAIN_CRON="${SOCIAL_DISPATCH_DRAIN_CRON:-*/15 * * * *}"
+RETRY_CRON="${SOCIAL_DISPATCH_RETRY_CRON:-0 3 * * *}"
 MAX_TASKS="${SOCIAL_DISPATCH_MAX_TASKS:-10}"
 RETRY_MAX_TASKS="${SOCIAL_DISPATCH_RETRY_MAX_TASKS:-10}"
+RETRY_ENABLED="${SOCIAL_DISPATCH_RETRY_ENABLED:-false}"
 
 if [[ -z "$PROJECT_ID" ]]; then
   echo "Missing GCP_PROJECT_ID"
@@ -67,6 +68,17 @@ drain_payload="{\"uid\":\"${UID}\",\"maxTasks\":${MAX_TASKS},\"retryFailed\":fal
 retry_payload="{\"uid\":\"${UID}\",\"maxTasks\":${RETRY_MAX_TASKS},\"retryFailed\":true,\"dryRun\":false}"
 
 job_upsert "social-dispatch-drain" "$DRAIN_CRON" "$drain_payload"
-job_upsert "social-dispatch-retry-failed" "$RETRY_CRON" "$retry_payload"
+
+case "${RETRY_ENABLED,,}" in
+  true|1|yes)
+    job_upsert "social-dispatch-retry-failed" "$RETRY_CRON" "$retry_payload"
+    gcloud scheduler jobs resume social-dispatch-retry-failed --location "$LOCATION" --project "$PROJECT_ID" >/dev/null 2>&1 || true
+    ;;
+  *)
+    if gcloud scheduler jobs describe social-dispatch-retry-failed --location "$LOCATION" --project "$PROJECT_ID" >/dev/null 2>&1; then
+      gcloud scheduler jobs pause social-dispatch-retry-failed --location "$LOCATION" --project "$PROJECT_ID" >/dev/null 2>&1 || true
+    fi
+    ;;
+esac
 
 echo "Configured social dispatch scheduler jobs in ${TIME_ZONE}."

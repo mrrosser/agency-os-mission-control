@@ -24,7 +24,7 @@ Close the remaining deployment reliability and governance gaps:
 - [x] `npm test`
 - [x] deployment arg regression tests updated
 - [x] docs updated with deploy flow changes
-- [ ] main branch protection re-locked to strict settings after green verification PR
+- [x] main branch protection re-locked to strict settings after green verification PR
 
 ## Implementation Notes
 - Smoke retries only apply to known transient 429 contention from lead-run job start.
@@ -42,7 +42,7 @@ Close the remaining deployment reliability and governance gaps:
 - Merge to `main`.
 - Confirm merge workflow passes with smoke + promotion.
 - Re-apply strict branch protection:
-  - required checks: `test`, `build_and_deploy`
+  - required checks: `test`, `build_and_preview`
   - required approvals: `1`
   - enforce admins: `true`
 
@@ -51,4 +51,4 @@ Close the remaining deployment reliability and governance gaps:
 - [x] Switched main deploy workflow to preview-channel deploy + smoke + promote.
 - [x] Added regression tests for `hosting:channel:deploy` + `hosting:clone` arg paths.
 - [x] Updated README deploy section.
-- [ ] Run final PR verification + restore strict branch protection.
+- [x] Run final PR verification + restore strict branch protection.

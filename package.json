@@ -25,6 +25,7 @@
     "revenue:day2:run": "node scripts/revenue-day2-run.mjs",
     "revenue:day30:run": "node scripts/revenue-day30-run.mjs",
     "social:draft:run": "node scripts/social-draft-run.mjs",
+    "social:dispatch:run": "node scripts/social-dispatch-run.mjs",
     "revenue:variant:report": "node scripts/revenue-variant-split-report.mjs",
     "revenue:day1:seed-templates": "node scripts/revenue-day1-seed-templates.mjs",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",

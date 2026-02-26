@@ -12,6 +12,7 @@ Adds a draft-first workflow for social posts (IG Stories/Posts + FB Stories/Post
 3. operator clicks Approve or Reject directly from the Space card
 4. decision is recorded on the draft in Firestore
 5. approved drafts are auto-queued for external social execution handoff
+6. dispatch worker drains queue to SMAuto MCP/webhook endpoint
 
 No auto-posting is performed in this slice.
 
@@ -21,6 +22,8 @@ No auto-posting is performed in this slice.
 - `POST /api/social/drafts` (auth required)  
 - `POST /api/social/drafts/worker-task` (worker token)  
 - `POST /api/social/drafts/rng-weekly/worker-task` (worker token, recurring-safe weekly idempotency)
+- `POST /api/social/drafts/weekly/worker-task` (worker token, recurring-safe weekly idempotency for `rts|rng|aicf`)
+- `POST /api/social/drafts/dispatch/worker-task` (worker token, drains `social_dispatch_queue` to SMAuto)
 - `GET /api/social/drafts/{draftId}/decision` (tokenized approval link)
 
 ## Required env vars
@@ -39,6 +42,13 @@ No auto-posting is performed in this slice.
   - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS`
   - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG`
   - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF`
+- SMAuto dispatch:
+  - `SMAUTO_MCP_SERVER_URL`
+  - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
+  - `SMAUTO_MCP_API_KEY` (required for `api_key`)
+  - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required for `id_token`)
+  - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional tool name override; default `social.dispatch.enqueue`)
+  - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; defaults `true`)
 
 ## Local worker example
 
@@ -64,7 +74,7 @@ curl -X POST http://localhost:3000/api/social/drafts/worker-task \
 Use the repo runner to trigger `POST /api/social/drafts/worker-task` with env-only secrets:
 
 ```bash
-SOCIAL_DRAFT_BASE_URL=https://ssrleadflowreview-450880825453.us-central1.run.app \
+SOCIAL_DRAFT_BASE_URL=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app \
 SOCIAL_DRAFT_WORKER_TOKEN=*** \
 SOCIAL_DRAFT_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
 SOCIAL_DRAFT_BUSINESS_KEY=rng \
@@ -75,23 +85,48 @@ npm run social:draft:run
 ```
 
 Notes:
-- Use the Cloud Run service URL for worker automation (current: `https://ssrleadflowreview-450880825453.us-central1.run.app`).
+- Use the Cloud Run service URL for worker automation (current: `https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app`).
 - Keep `https://leadflow-review.web.app` for operator/browser routes and approval callback base URL.
 - Keep `SOCIAL_DRAFT_REQUEST_APPROVAL=true` so every draft goes through Space approval.
 - Set `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG` to route RNG drafts into your phone-visible Space.
 
-## Weekly RNG scheduler trigger
+Dispatch drain runner:
+
+```bash
+SOCIAL_DISPATCH_BASE_URL=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app \
+SOCIAL_DRAFT_WORKER_TOKEN=*** \
+SOCIAL_DISPATCH_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
+SOCIAL_DISPATCH_MAX_TASKS=10 \
+SOCIAL_DISPATCH_RETRY_FAILED=false \
+npm run social:dispatch:run
+```
+
+Manual dispatch curl:
+
+```bash
+curl -X POST https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts/dispatch/worker-task \
+  -H "Authorization: Bearer ${SOCIAL_DRAFT_WORKER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "uid": "DM5ZZngePXXhNgN85Afi7W4Knoz2",
+    "maxTasks": 10,
+    "retryFailed": false
+  }'
+```
+
+## Weekly scheduler trigger (all businesses)
 
 Use the weekly worker route to avoid duplicate replays across recurring runs. It derives a week key (`YYYY-Wnn`) and uses it as idempotency scope.
 
 Manual token call:
 
 ```bash
-curl -X POST https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+curl -X POST https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts/weekly/worker-task \
   -H "Authorization: Bearer ${SOCIAL_DRAFT_WORKER_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{
     "uid": "DM5ZZngePXXhNgN85Afi7W4Knoz2",
+    "businessKey": "rng",
     "requestApproval": true,
     "source": "openclaw_social_orchestrator"
   }'
@@ -103,9 +138,9 @@ Cloud Scheduler OIDC hardening (recommended; removes static bearer header):
 gcloud scheduler jobs update http social-drafts-rng-weekly \
   --project=leadflow-review \
   --location=us-central1 \
-  --uri=https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+  --uri=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts/weekly/worker-task \
   --oidc-service-account-email=social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com \
-  --oidc-token-audience=https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+  --oidc-token-audience=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts/weekly/worker-task \
   --remove-headers=Authorization
 ```
 
@@ -115,10 +150,26 @@ Then set runtime env:
 SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com
 ```
 
+Durability note:
+- `.github/workflows/firebase-hosting-merge.yml` reapplies `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS` and `SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES` after each deploy.
+- Override those values through repo vars (`SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`, `SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES`) so deploys do not drift.
+
 Optional payload fields:
+- `businessKey`: one of `rts`, `rng`, `aicf` (defaults to `rng`).
 - `caption`: override generated weekly caption.
 - `channels`: defaults to `["instagram_post","facebook_post"]`.
 - `weekKey`: manual override for controlled replay/testing.
+
+Recommended weekly jobs (America/Chicago):
+- `social-drafts-rng-weekly`: `5 8 * * 1`
+- `social-drafts-rts-weekly`: `10 8 * * 1`
+- `social-drafts-aicf-weekly`: `15 8 * * 1`
+
+Business-specific timezone overrides:
+- `SOCIAL_DRAFT_WEEKLY_TIMEZONE` (global)
+- `SOCIAL_DRAFT_RTS_WEEKLY_TIMEZONE`
+- `SOCIAL_DRAFT_RNG_WEEKLY_TIMEZONE`
+- `SOCIAL_DRAFT_AICF_WEEKLY_TIMEZONE`
 
 ## Authenticated operator example
 
@@ -154,13 +205,15 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
   - `dispatch.status`
   - `dispatch.queueDocId`
   - `dispatch.queuedAt`
+  - `dispatch.transport`
+  - `dispatch.lastError`
 
 ## Safety
 
 - Tokenized links are hashed-at-rest (`approval.tokenHash`).
 - Approval links expire (default 168h).
 - Worker calls require either `SOCIAL_DRAFT_WORKER_TOKEN` (or configured fallback worker token) or allowlisted Scheduler OIDC service accounts.
-- External create action (Google Space post) is routed through idempotent API execution.
+- External create actions use idempotency keys (`queueId`) when dispatching to SMAuto.
 
 ## Phone approval UX
 
@@ -169,3 +222,4 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
 3. Tap **Approve Draft** or **Reject Draft**.
 4. Confirm success page in mobile browser (`Draft approved successfully.` or `Draft rejected successfully.`).
 5. Approved drafts move to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`.
+6. Dispatch worker posts queued approved drafts to SMAuto and marks queue + draft `dispatch.status` as `dispatched`/`failed`.

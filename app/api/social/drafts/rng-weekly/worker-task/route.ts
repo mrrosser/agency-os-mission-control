@@ -27,6 +27,7 @@ const bodySchema = z.object({
   source: z.string().trim().min(1).max(80).default("openclaw_social_orchestrator"),
   requestApproval: z.boolean().default(true),
   weekKey: z.string().trim().min(1).max(40).optional(),
+  idempotencyKey: z.string().trim().min(1).max(200).optional(),
 });
 
 function readBearerToken(request: Request): string {
@@ -142,7 +143,8 @@ export const POST = withApiHandler(
 
     const weekKey = resolveWeekKey(body.weekKey);
     const idempotencyKey =
-      getIdempotencyKey(request, body) || `social-draft-rng-weekly-${uid}-${weekKey}`;
+      getIdempotencyKey(request, { idempotencyKey: body.idempotencyKey }) ||
+      `social-draft-rng-weekly-${uid}-${weekKey}`;
 
     const result = await withIdempotency(
       {

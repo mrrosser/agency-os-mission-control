@@ -98,9 +98,83 @@ describe("social dispatch transport helpers", () => {
     expect(init.method).toBe("POST");
     const headers = (init.headers || {}) as Record<string, string>;
     expect(headers["X-Idempotency-Key"]).toBe("draft_123");
+    expect(headers.Accept).toBe("application/json,text/event-stream");
+    expect(headers["MCP-Protocol-Version"]).toBe("2025-03-26");
     const body = JSON.parse(String(init.body || "{}"));
     expect(body.method).toBe("tools/call");
     expect(body.params.arguments.draftId).toBe("draft-123");
+  });
+
+  it("bootstraps an MCP session and retries tools/call when session is missing", async () => {
+    process.env.SMAUTO_MCP_SERVER_URL = "https://smauto.example/mcp";
+    process.env.SMAUTO_MCP_AUTH_MODE = "none";
+    process.env.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED = "false";
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "server-error",
+            error: { code: -32600, message: "Bad Request: Missing session ID" },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "social-dispatch-init-draft_123",
+            result: { capabilities: {} },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json", "mcp-session-id": "session-123" },
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response("", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jsonrpc: "2.0", result: { ok: true } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      );
+
+    const result = await dispatchSocialQueueItemToSmAuto({
+      task,
+      correlationId: "corr-session",
+      log,
+    });
+
+    expect(result.transport).toBe("mcp_tools_call");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    const [, init1] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const firstBody = JSON.parse(String(init1.body || "{}"));
+    expect(firstBody.method).toBe("tools/call");
+
+    const [, init2] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const initializeBody = JSON.parse(String(init2.body || "{}"));
+    expect(initializeBody.method).toBe("initialize");
+    expect(initializeBody.params.protocolVersion).toBe("2025-03-26");
+
+    const [, init3] = fetchMock.mock.calls[2] as [string, RequestInit];
+    const initializedBody = JSON.parse(String(init3.body || "{}"));
+    expect(initializedBody.method).toBe("notifications/initialized");
+    const thirdHeaders = (init3.headers || {}) as Record<string, string>;
+    expect(thirdHeaders["Mcp-Session-Id"]).toBe("session-123");
+
+    const [, init4] = fetchMock.mock.calls[3] as [string, RequestInit];
+    const fourthHeaders = (init4.headers || {}) as Record<string, string>;
+    expect(fourthHeaders["Mcp-Session-Id"]).toBe("session-123");
+    const retryBody = JSON.parse(String(init4.body || "{}"));
+    expect(retryBody.method).toBe("tools/call");
   });
 
   it("falls back to webhook body when MCP call returns a fallback status", async () => {

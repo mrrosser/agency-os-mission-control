@@ -355,8 +355,11 @@ describe("email triage runtime v3 quality", () => {
     const aiDrafting = runtime.aiDrafting as Record<string, unknown>;
     expect(aiDrafting.enabled).toBe(true);
     expect(Number(aiDrafting.maxMessagesFromThread)).toBeGreaterThanOrEqual(10);
+    expect(Number(aiDrafting.maxMessagesFromThread)).toBeLessThanOrEqual(12);
     expect(Number(aiDrafting.maxContextChars)).toBeGreaterThanOrEqual(10000);
     expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("thread context");
+    expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("newest inbound message");
+    expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("other threads");
   });
 
   it("uses human-readable fallback template bodies (real newlines, no literal slash-n)", () => {

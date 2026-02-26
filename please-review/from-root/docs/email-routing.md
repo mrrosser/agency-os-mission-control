@@ -96,6 +96,12 @@ Draft quality/brain checks (when replies feel generic)
 - If drafts contain literal `\\n` text, runtime config likely has escaped newlines. Reinstall `email-triage.runtime.v3.json` and restart triage service.
 - If drafts ignore prior thread context, check `maxMessagesFromThread` and prompt content in `/etc/openclaw/email-triage.json`:
   - `sudo sed -n '320,420p' /etc/openclaw/email-triage.json`
+- If drafts answer the wrong topic from an older thread, enforce these checks in `aiDrafting.promptDefault`:
+  - anchor to the **newest inbound message** in the current thread,
+  - treat older messages as background only,
+  - do **not** pull memory from other sender threads unless explicitly quoted in the current thread.
+- Recommended baseline:
+  - `aiDrafting.maxMessagesFromThread=12` (reduces stale-context drift while keeping continuity).
 
 Fix Chat Digest Permissions (if logs show `chat.digest_failed` with `insufficientPermissions`)
 - Re-auth all Gmail accounts with Workspace scopes (including Chat when available):

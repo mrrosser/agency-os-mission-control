@@ -122,6 +122,12 @@ jobs:
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
           SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
           SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES || '' }}
+          SMAUTO_MCP_SERVER_URL: ${{ vars.SMAUTO_MCP_SERVER_URL || 'https://social-mcp-hau2jvawpa-uc.a.run.app/mcp' }}
+          SMAUTO_MCP_AUTH_MODE: ${{ vars.SMAUTO_MCP_AUTH_MODE || 'id_token' }}
+          SMAUTO_MCP_ID_TOKEN_AUDIENCE: ${{ vars.SMAUTO_MCP_ID_TOKEN_AUDIENCE || 'https://social-mcp-hau2jvawpa-uc.a.run.app' }}
+          SMAUTO_MCP_SOCIAL_DISPATCH_TOOL: ${{ vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL || 'social.dispatch.enqueue' }}
+          SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED: ${{ vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED || 'false' }}
+          SMAUTO_MCP_PROTOCOL_VERSION: ${{ vars.SMAUTO_MCP_PROTOCOL_VERSION || '2025-03-26' }}
         run: |
           set -euo pipefail
           SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
@@ -136,11 +142,25 @@ jobs:
           if [ -z "$OIDC_AUDIENCES" ]; then
             OIDC_AUDIENCES="$SERVICE_URL/api/social/drafts/weekly/worker-task,$SERVICE_URL/api/social/drafts/rng-weekly/worker-task"
           fi
+          ENV_UPDATES="SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=$SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS##SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES=$OIDC_AUDIENCES"
+          append_env_update() {
+            local name="$1"
+            local value="$2"
+            if [ -n "$value" ]; then
+              ENV_UPDATES="$ENV_UPDATES##$name=$value"
+            fi
+          }
+          append_env_update "SMAUTO_MCP_SERVER_URL" "$SMAUTO_MCP_SERVER_URL"
+          append_env_update "SMAUTO_MCP_AUTH_MODE" "$SMAUTO_MCP_AUTH_MODE"
+          append_env_update "SMAUTO_MCP_ID_TOKEN_AUDIENCE" "$SMAUTO_MCP_ID_TOKEN_AUDIENCE"
+          append_env_update "SMAUTO_MCP_SOCIAL_DISPATCH_TOOL" "$SMAUTO_MCP_SOCIAL_DISPATCH_TOOL"
+          append_env_update "SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED" "$SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED"
+          append_env_update "SMAUTO_MCP_PROTOCOL_VERSION" "$SMAUTO_MCP_PROTOCOL_VERSION"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --memory 512Mi \
-            --update-env-vars "^##^SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=$SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS##SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES=$OIDC_AUDIENCES" \
+            --update-env-vars "^##^$ENV_UPDATES" \
             --quiet
       - name: Post-deploy production smoke
         if: ${{ env.GCP_AUTH_READY == '1' }}

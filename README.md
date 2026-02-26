@@ -264,6 +264,12 @@ Required GitHub Actions configuration:
   - `vars.PROD_SMOKE_BASE_URL` (`https://leadflow-review.web.app`)
   - `vars.SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS` (defaults to `social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com`)
   - `vars.SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES` (optional; defaults to SSR service weekly worker audiences)
+  - `vars.SMAUTO_MCP_SERVER_URL` (defaults to `https://social-mcp-hau2jvawpa-uc.a.run.app/mcp`)
+  - `vars.SMAUTO_MCP_AUTH_MODE` (defaults to `id_token`)
+  - `vars.SMAUTO_MCP_ID_TOKEN_AUDIENCE` (defaults to `https://social-mcp-hau2jvawpa-uc.a.run.app`)
+  - `vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional; defaults to `social.dispatch.enqueue`)
+  - `vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (defaults to `false` for MCP session endpoints)
+  - `vars.SMAUTO_MCP_PROTOCOL_VERSION` (defaults to `2025-03-26`)
 
 Production health monitor:
 - `.github/workflows/postdeploy-health-monitor.yml` runs authenticated smoke on a schedule.

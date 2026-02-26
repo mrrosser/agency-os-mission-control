@@ -72,6 +72,29 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function readPositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function shouldRetryLeadRunStart(responseStatus, payload) {
+  if (responseStatus !== 429) return false;
+  const messageCandidates = [payload?.error, payload?.message, payload?.details]
+    .filter((value) => typeof value === "string")
+    .join(" ");
+  return /too many concurrent active runs/i.test(messageCandidates);
+}
+
+function leadRunStartBackoffMs(attempt) {
+  const baseMs = readPositiveInt(process.env.SMOKE_LEAD_RUN_START_RETRY_BASE_MS, 1500);
+  const maxMs = readPositiveInt(process.env.SMOKE_LEAD_RUN_START_RETRY_MAX_MS, 15000);
+  const exponent = Math.max(0, attempt - 1);
+  const withoutJitter = Math.min(maxMs, baseMs * 2 ** exponent);
+  const jitterMax = Math.min(750, Math.max(100, Math.floor(withoutJitter * 0.2)));
+  return withoutJitter + Math.floor(Math.random() * jitterMax);
+}
+
 async function requestJson(url, init = {}) {
   const response = await fetch(url, init);
   const text = await response.text();
@@ -227,11 +250,17 @@ async function main() {
 
     // 6) Start worker-backed lead run job
     {
-      const { response, payload } = await requestJson(
-        `${baseUrl}/api/lead-runs/${encodeURIComponent(runId)}/jobs`,
-        {
+      const startEndpoint = `${baseUrl}/api/lead-runs/${encodeURIComponent(runId)}/jobs`;
+      const maxStartAttempts = readPositiveInt(process.env.SMOKE_LEAD_RUN_START_MAX_ATTEMPTS, 5);
+      const startHeaders = {
+        ...authHeaders,
+        "X-Idempotency-Key": `smoke-lead-run-start-${runId}`,
+      };
+      let lastStartError = null;
+      for (let attempt = 1; attempt <= maxStartAttempts; attempt += 1) {
+        const { response, payload } = await requestJson(startEndpoint, {
           method: "POST",
-          headers: authHeaders,
+          headers: startHeaders,
           body: JSON.stringify({
             action: "start",
             config: {
@@ -240,13 +269,29 @@ async function main() {
               timeZone: "America/Chicago",
             },
           }),
+        });
+
+        if (response.ok) {
+          coreRouteChecks.jobStart = true;
+          console.log("[smoke] lead run start passed");
+          lastStartError = null;
+          break;
         }
-      );
-      if (!response.ok) {
-        throw new Error(`Lead run start failed (${response.status}): ${JSON.stringify(payload)}`);
+
+        const retryable = shouldRetryLeadRunStart(response.status, payload) && attempt < maxStartAttempts;
+        if (!retryable) {
+          throw new Error(`Lead run start failed (${response.status}): ${JSON.stringify(payload)}`);
+        }
+
+        const delayMs = leadRunStartBackoffMs(attempt);
+        lastStartError = `Lead run start retry ${attempt}/${maxStartAttempts} (${response.status})`;
+        console.warn(`[smoke] ${lastStartError}; retrying in ${delayMs}ms`);
+        await sleep(delayMs);
       }
-      coreRouteChecks.jobStart = true;
-      console.log("[smoke] lead run start passed");
+
+      if (lastStartError) {
+        throw new Error(`${lastStartError}; exhausted retries.`);
+      }
     }
 
     // 7) Poll worker until completion

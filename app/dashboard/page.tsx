@@ -51,6 +51,30 @@ interface AgentSpaceStatus {
     messageId?: string | null;
 }
 
+interface PosWorkerStatusSnapshot {
+    generatedAt: string;
+    uid: string;
+    policy: {
+        allowSideEffects: boolean;
+        autoApproveLowRisk: boolean;
+        requireApprovalForHighRisk: boolean;
+    };
+    summary: {
+        health: "operational" | "degraded" | "offline";
+        detail: string;
+        queuedEvents: number;
+        processingEvents: number;
+        blockedEvents: number;
+        deadLetterEvents: number;
+        completedEvents: number;
+        oldestPendingSeconds: number;
+        outboxQueued: number;
+        lastWebhookAt: string | null;
+        lastProcessedAt: string | null;
+        lastRunAt: string | null;
+    };
+}
+
 interface ActivityLog {
     id: string;
     action?: string;
@@ -81,6 +105,9 @@ export default function DashboardPage() {
     const [weeklyKpi, setWeeklyKpi] = useState<WeeklyKpiSnapshot | null>(null);
     const [weeklyKpiLoading, setWeeklyKpiLoading] = useState(false);
     const [weeklyKpiError, setWeeklyKpiError] = useState<string | null>(null);
+    const [posStatus, setPosStatus] = useState<PosWorkerStatusSnapshot | null>(null);
+    const [posStatusLoading, setPosStatusLoading] = useState(false);
+    const [posStatusError, setPosStatusError] = useState<string | null>(null);
 
     const fetchAgentStatus = useCallback(async () => {
         if (!user) return;
@@ -147,6 +174,41 @@ export default function DashboardPage() {
         if (!user || !internalRevenueUiEnabled) return;
         fetchWeeklyKpi();
     }, [fetchWeeklyKpi, internalRevenueUiEnabled, user]);
+
+    const fetchPosStatus = useCallback(async () => {
+        if (!user || !internalRevenueUiEnabled) return;
+        setPosStatusLoading(true);
+        setPosStatusError(null);
+        try {
+            const headers = await buildAuthHeaders(user);
+            const response = await fetch("/api/revenue/pos/status", {
+                method: "GET",
+                headers,
+            });
+            const payload = await readApiJson<{
+                ok?: boolean;
+                snapshot?: PosWorkerStatusSnapshot;
+                error?: string;
+            }>(response);
+            if (!response.ok) {
+                const cid = getResponseCorrelationId(response);
+                throw new Error(
+                    payload?.error ||
+                    `Failed to load POS worker status (status ${response.status}${cid ? ` cid=${cid}` : ""})`
+                );
+            }
+            setPosStatus(payload?.snapshot || null);
+        } catch (error: unknown) {
+            setPosStatusError(error instanceof Error ? error.message : "Unable to load POS worker status");
+        } finally {
+            setPosStatusLoading(false);
+        }
+    }, [internalRevenueUiEnabled, user]);
+
+    useEffect(() => {
+        if (!user || !internalRevenueUiEnabled) return;
+        fetchPosStatus();
+    }, [fetchPosStatus, internalRevenueUiEnabled, user]);
 
     useEffect(() => {
         if (!user) {
@@ -313,6 +375,19 @@ export default function DashboardPage() {
         weeklyKpi?.weekStartDate && weeklyKpi?.weekEndDate
             ? `${weeklyKpi.weekStartDate} - ${weeklyKpi.weekEndDate}`
             : "No report window";
+
+    const posHealthColor =
+        posStatus?.summary.health === "operational"
+            ? "text-emerald-300"
+            : posStatus?.summary.health === "degraded"
+                ? "text-amber-300"
+                : "text-red-300";
+    const posHealthLabel =
+        posStatus?.summary.health === "operational"
+            ? "Operational"
+            : posStatus?.summary.health === "degraded"
+                ? "Degraded"
+                : "Offline";
 
     const activityItems = activities.length > 0 ? activities.map(activity => ({
         action: activity.action,
@@ -583,6 +658,89 @@ export default function DashboardPage() {
                                                 </div>
                                                 <p className="text-xs text-zinc-500">
                                                     Decisions: scale {weeklyKpi?.decisionSummary.scale || 0}, fix {weeklyKpi?.decisionSummary.fix || 0}, kill {weeklyKpi?.decisionSummary.kill || 0}, watch {weeklyKpi?.decisionSummary.watch || 0}
+                                                </p>
+                                            </>
+                                        )}
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="bg-zinc-950 border-zinc-800 shadow-lg">
+                                    <CardContent className="p-6 space-y-4">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="space-y-1">
+                                                <h3 className="text-lg font-semibold text-white">POS Worker Status</h3>
+                                                <p className="text-sm text-zinc-400">
+                                                    Deterministic Square event ingestion and action queue health
+                                                </p>
+                                            </div>
+                                            <Button
+                                                onClick={fetchPosStatus}
+                                                variant="outline"
+                                                size="sm"
+                                                className="border-zinc-700 text-zinc-200 hover:bg-zinc-900"
+                                                disabled={posStatusLoading}
+                                            >
+                                                Refresh
+                                            </Button>
+                                        </div>
+
+                                        {posStatusLoading && (
+                                            <p className="text-xs text-zinc-500">Loading POS worker status...</p>
+                                        )}
+
+                                        {posStatusError && (
+                                            <p className="text-xs text-red-400">{posStatusError}</p>
+                                        )}
+
+                                        {!posStatusLoading && !posStatusError && !posStatus && (
+                                            <p className="text-xs text-zinc-500">
+                                                No POS worker status available yet.
+                                            </p>
+                                        )}
+
+                                        {posStatus && (
+                                            <>
+                                                <div className="flex flex-wrap items-center gap-3 text-sm">
+                                                    <span className={`font-medium ${posHealthColor}`}>● {posHealthLabel}</span>
+                                                    <span className="text-zinc-500">Queued {posStatus.summary.queuedEvents}</span>
+                                                    <span className="text-zinc-500">Blocked {posStatus.summary.blockedEvents}</span>
+                                                    <span className="text-zinc-500">Dead-letter {posStatus.summary.deadLetterEvents}</span>
+                                                    <span className="text-zinc-500">Outbox queued {posStatus.summary.outboxQueued}</span>
+                                                </div>
+
+                                                <p className="text-xs text-zinc-400">{posStatus.summary.detail}</p>
+
+                                                <div className="grid gap-3 md:grid-cols-3">
+                                                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Last Webhook</p>
+                                                        <p className="mt-1 text-sm text-white">
+                                                            {posStatus.summary.lastWebhookAt
+                                                                ? new Date(posStatus.summary.lastWebhookAt).toLocaleString()
+                                                                : "Never"}
+                                                        </p>
+                                                    </div>
+                                                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Last Processed</p>
+                                                        <p className="mt-1 text-sm text-white">
+                                                            {posStatus.summary.lastProcessedAt
+                                                                ? new Date(posStatus.summary.lastProcessedAt).toLocaleString()
+                                                                : "Never"}
+                                                        </p>
+                                                    </div>
+                                                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+                                                        <p className="text-[11px] uppercase tracking-wide text-zinc-500">Last Worker Run</p>
+                                                        <p className="mt-1 text-sm text-white">
+                                                            {posStatus.summary.lastRunAt
+                                                                ? new Date(posStatus.summary.lastRunAt).toLocaleString()
+                                                                : "Never"}
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <p className="text-xs text-zinc-500">
+                                                    Policy: side-effects {posStatus.policy.allowSideEffects ? "on" : "off"}, low-risk auto-approve{" "}
+                                                    {posStatus.policy.autoApproveLowRisk ? "on" : "off"}, high-risk approval required{" "}
+                                                    {posStatus.policy.requireApprovalForHighRisk ? "on" : "off"}.
                                                 </p>
                                             </>
                                         )}

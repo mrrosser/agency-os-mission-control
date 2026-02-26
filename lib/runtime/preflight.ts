@@ -52,6 +52,14 @@ function parsePositiveNumber(value: string | undefined): number | null {
   return parsed;
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (!value) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
+  if (normalized === "false" || normalized === "0" || normalized === "no") return false;
+  return fallback;
+}
+
 export function buildRuntimePreflightReport(): RuntimePreflightReport {
   const hasGooglePlaces = hasEnv("GOOGLE_PLACES_API_KEY");
   const hasApify = hasEnv("APIFY_TOKEN");
@@ -82,6 +90,13 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG") ||
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF") ||
     hasEnv("GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL");
+  const dispatchStatusNotifyEnabled = parseBoolean(process.env.SOCIAL_DISPATCH_STATUS_NOTIFY, true);
+  const hasDispatchStatusWebhook =
+    hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL") ||
+    hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS") ||
+    hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG") ||
+    hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF") ||
+    hasSocialDraftWebhook;
 
   const budgetCost = parsePositiveNumber(process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD);
   const budgetPages = parsePositiveNumber(process.env.LEAD_SOURCE_BUDGET_MAX_PAGES);
@@ -238,6 +253,17 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
       detail: hasSocialDraftWebhook
         ? "Social draft Google Space webhook configured."
         : "Set SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL (or business-specific webhook env vars).",
+    },
+    {
+      id: "social-dispatch-status-webhook",
+      label: "Social dispatch status webhook",
+      level: "recommended",
+      state: dispatchStatusNotifyEnabled ? (hasDispatchStatusWebhook ? "ok" : "warning") : "ok",
+      detail: dispatchStatusNotifyEnabled
+        ? hasDispatchStatusWebhook
+          ? "Social dispatch status notifications are configured."
+          : "Set SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL (or business-specific webhook env vars), or disable with SOCIAL_DISPATCH_STATUS_NOTIFY=false."
+        : "Dispatch status notifications are disabled (SOCIAL_DISPATCH_STATUS_NOTIFY=false).",
     },
   ];
 

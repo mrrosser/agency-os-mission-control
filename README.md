@@ -36,6 +36,8 @@ copy .env.local.example .env.local
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
 - Optional (social draft approvals + dispatch): `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist via `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`), `SMAUTO_MCP_SERVER_URL`
+- Optional (dispatch status updates in Google Chat): `SOCIAL_DISPATCH_STATUS_NOTIFY`, `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`)
+- Optional (social onboarding UX): `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (external SocialOps connections page URL shown in onboarding checklist)
 - Optional (service-to-service weekly KPI worker): `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
@@ -129,9 +131,14 @@ npm run dev
 - Multi-business weekly worker route (OpenCall/scheduler): `POST /api/social/drafts/weekly/worker-task`
 - Dispatch drain worker route (OpenCall/service/scheduler): `POST /api/social/drafts/dispatch/worker-task`
 - Approval link route: `GET /api/social/drafts/{draftId}/decision`
+- Social onboarding status route (UI + API): `GET/POST /api/social/onboarding/status`
 - Worker auth: `Authorization: Bearer <SOCIAL_DRAFT_WORKER_TOKEN>` (falls back to revenue worker token envs) or Cloud Scheduler OIDC bearer token from allowlisted service accounts (`SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`).
 - Runner script (service-safe): `npm run social:draft:run`
 - Dispatch runner script (service-safe): `npm run social:dispatch:run`
+- Dispatch smoke script (service-safe): `npm run social:dispatch:smoke`
+- Dispatch scheduler setup helpers:
+  - `scripts/social-dispatch-scheduler-setup.sh` (bash)
+  - `scripts/social-dispatch-scheduler-setup.ps1` (Windows PowerShell)
 - Recommended worker base URL: `https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app` (or resolve live URL with `gcloud run services describe ssrleadflowreview --project leadflow-review --region us-central1 --format='value(status.url)'`)
 - Required env:
   - `SOCIAL_DRAFT_WORKER_TOKEN`
@@ -144,7 +151,9 @@ npm run dev
   - `SMAUTO_MCP_API_KEY` (required when `SMAUTO_MCP_AUTH_MODE=api_key`)
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional MCP tool name override; default `social.dispatch.enqueue`)
-  - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; default `true`)
+  - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; default `true`, set `false` for MCP-only/session endpoints)
+  - `SOCIAL_DISPATCH_RETRY_ENABLED` (optional scheduler helper flag; default `false` to reduce noisy retry spend)
+  - `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (optional; shown as "Open Social Connections" in onboarding checklist)
 - Runbook + payload examples: `docs/runbook-social-draft-approvals.md`
 - Mobile workflow: operator receives Approve/Reject buttons in Google Chat Space and can complete the decision from phone browser without opening Mission Control UI.
 

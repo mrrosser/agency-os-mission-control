@@ -25,6 +25,8 @@ No auto-posting is performed in this slice.
 - `POST /api/social/drafts/weekly/worker-task` (worker token, recurring-safe weekly idempotency for `rts|rng|aicf`)
 - `POST /api/social/drafts/dispatch/worker-task` (worker token, drains `social_dispatch_queue` to SMAuto)
 - `GET /api/social/drafts/{draftId}/decision` (tokenized approval link)
+- `GET /api/social/onboarding/status` (auth required; onboarding checklist + social pipeline health)
+- `POST /api/social/onboarding/status` (auth required; mark manual onboarding step complete/incomplete)
 
 ## Required env vars
 
@@ -49,6 +51,15 @@ No auto-posting is performed in this slice.
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required for `id_token`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional tool name override; default `social.dispatch.enqueue`)
   - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; defaults `true`)
+    - set to `false` when SMAuto endpoint is MCP-only (JSON-RPC session based) to avoid duplicate fallback calls/cost
+- Dispatch status notifications (optional):
+  - `SOCIAL_DISPATCH_STATUS_NOTIFY` (`true`/`false`, default `true`)
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (default)
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS`
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG`
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF`
+- Optional onboarding helper link:
+  - `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (external SocialOps `/connections` URL shown in the onboarding checklist UI)
 
 ## Local worker example
 
@@ -101,6 +112,15 @@ SOCIAL_DISPATCH_RETRY_FAILED=false \
 npm run social:dispatch:run
 ```
 
+Dispatch smoke runner (safe default `dryRun=true`):
+
+```bash
+SOCIAL_DISPATCH_SERVICE_URL=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app \
+SOCIAL_DRAFT_WORKER_TOKEN=*** \
+SOCIAL_DRAFT_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
+npm run social:dispatch:smoke
+```
+
 Manual dispatch curl:
 
 ```bash
@@ -113,6 +133,14 @@ curl -X POST https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts
     "retryFailed": false
   }'
 ```
+
+Scheduler setup helpers:
+- `scripts/social-dispatch-scheduler-setup.sh`
+- `scripts/social-dispatch-scheduler-setup.ps1`
+
+Default jobs created:
+- `social-dispatch-drain` (`*/15 * * * *`) for pending queue drain
+- `social-dispatch-retry-failed` (`0 3 * * *`) only when `SOCIAL_DISPATCH_RETRY_ENABLED=true`; otherwise the helper pauses this job to reduce noisy retry spend
 
 ## Weekly scheduler trigger (all businesses)
 

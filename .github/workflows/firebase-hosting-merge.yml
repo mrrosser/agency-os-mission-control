@@ -66,12 +66,47 @@ jobs:
         run: |
           set -euo pipefail
           CHANNEL_ID="main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          LOG_FILE="$(mktemp)"
-          node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
-            --project "$FIREBASE_PROJECT_ID" \
-            --expires 7d \
-            --non-interactive 2>&1 | tee "$LOG_FILE"
-          PREVIEW_URL="$(grep -Eo 'https://[^[:space:]]+\.web\.app' "$LOG_FILE" | tail -n1 || true)"
+          MAX_ATTEMPTS=4
+          ATTEMPT=1
+          PREVIEW_URL=""
+          while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+            LOG_FILE="$(mktemp)"
+            echo "Firebase deploy attempt $ATTEMPT/$MAX_ATTEMPTS for channel $CHANNEL_ID"
+            if node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --expires 7d \
+              --non-interactive 2>&1 | tee "$LOG_FILE"; then
+              PREVIEW_URL="$(grep -Eo 'https://[^[:space:]]+\.(web\.app|firebaseapp\.com)' "$LOG_FILE" | tail -n1 || true)"
+              rm -f "$LOG_FILE"
+              if [ -n "$PREVIEW_URL" ]; then
+                break
+              fi
+              echo "Deploy succeeded but preview URL was not found in output."
+              if [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+                BACKOFF_SECONDS=$((ATTEMPT * 15))
+                echo "Retrying deploy to recover preview URL in ${BACKOFF_SECONDS}s..."
+                sleep "$BACKOFF_SECONDS"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+              echo "Failed to determine Firebase preview URL from channel deploy output."
+              exit 1
+            fi
+
+            if grep -qiE 'unable to queue the operation|http error: 409|status code 409|another operation is in progress|operation is currently in progress' "$LOG_FILE" && [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; then
+              BACKOFF_SECONDS=$((ATTEMPT * 30))
+              echo "Firebase operation conflict detected; retrying in ${BACKOFF_SECONDS}s..."
+              rm -f "$LOG_FILE"
+              sleep "$BACKOFF_SECONDS"
+              ATTEMPT=$((ATTEMPT + 1))
+              continue
+            fi
+
+            echo "Firebase deploy failed and was not retryable."
+            rm -f "$LOG_FILE"
+            exit 1
+          done
+
           if [ -z "$PREVIEW_URL" ]; then
             echo "Failed to determine Firebase preview URL from channel deploy output."
             exit 1

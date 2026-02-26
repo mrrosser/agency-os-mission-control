@@ -28,6 +28,11 @@ const KEYS = [
   "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG",
   "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF",
   "GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL",
+  "SOCIAL_DISPATCH_STATUS_NOTIFY",
+  "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL",
+  "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS",
+  "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG",
+  "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF",
   "REVENUE_DAY30_WORKER_TOKEN",
   "REVENUE_DAY2_WORKER_TOKEN",
   "REVENUE_DAY1_WORKER_TOKEN",
@@ -148,5 +153,38 @@ describe("buildRuntimePreflightReport", () => {
     expect(report.checks.find((check) => check.id === "social-draft-worker-token")?.state).toBe("ok");
     expect(report.checks.find((check) => check.id === "social-draft-approval-base-url")?.state).toBe("ok");
     expect(report.checks.find((check) => check.id === "social-draft-webhook")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "social-dispatch-status-webhook")?.state).toBe(
+      "ok"
+    );
+  });
+
+  it("warns when dispatch notifications are enabled but no webhook exists", () => {
+    process.env.GOOGLE_PLACES_API_KEY = "x";
+    process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD = "2";
+    process.env.LEAD_SOURCE_BUDGET_MAX_PAGES = "4";
+    process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC = "50";
+    process.env.LEAD_RUNS_TASK_QUEUE = "lead-run-worker";
+    process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
+    process.env.SOCIAL_DISPATCH_STATUS_NOTIFY = "true";
+
+    const report = buildRuntimePreflightReport();
+    expect(report.checks.find((check) => check.id === "social-dispatch-status-webhook")?.state).toBe(
+      "warning"
+    );
+  });
+
+  it("marks dispatch notification check ok when notifications are disabled", () => {
+    process.env.GOOGLE_PLACES_API_KEY = "x";
+    process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD = "2";
+    process.env.LEAD_SOURCE_BUDGET_MAX_PAGES = "4";
+    process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC = "50";
+    process.env.LEAD_RUNS_TASK_QUEUE = "lead-run-worker";
+    process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
+    process.env.SOCIAL_DISPATCH_STATUS_NOTIFY = "false";
+
+    const report = buildRuntimePreflightReport();
+    expect(report.checks.find((check) => check.id === "social-dispatch-status-webhook")?.state).toBe(
+      "ok"
+    );
   });
 });

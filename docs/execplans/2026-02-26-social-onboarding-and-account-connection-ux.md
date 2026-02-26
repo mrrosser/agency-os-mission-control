@@ -2,7 +2,7 @@
 
 Date: 2026-02-26  
 Owner: Mission Control + SMAuto  
-Status: Proposed
+Status: In Progress
 
 ## Goal
 
@@ -30,10 +30,10 @@ Make the end-to-end experience reliable and fast from first login to connected s
 
 ## Definition of Done (DoD Gates)
 
-- [ ] `npm run lint` passes.
-- [ ] `npm run test:unit` passes.
-- [ ] `npm run test:smoke` passes.
-- [ ] Social flow tests pass:
+- [x] `npm run lint` passes.
+- [x] `npm run test:unit` passes.
+- [x] `npm run test:smoke` passes.
+- [x] Social flow tests pass:
   - `npx vitest run tests/unit/social-drafts.test.ts tests/unit/social-dispatch.test.ts tests/unit/social-worker-auth.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts tests/smoke/social-drafts-dispatch-worker-task-route.test.ts`
 - [ ] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
 - [ ] `docs/runbook-social-draft-approvals.md` and this plan updated with final rollout notes.
@@ -93,6 +93,21 @@ Make the end-to-end experience reliable and fast from first login to connected s
 - Internal acceptance (RNG) for 7-day draft/approval/dispatch cycle.
 - External client acceptance (at least one non-admin user path).
 - Final runbook and escalation section updated.
+
+## Progress update (2026-02-26)
+
+- Added MCP protocol/session hardening in `lib/social/dispatch.ts`:
+  - default protocol header `MCP-Protocol-Version: 2025-03-26`
+  - `Accept: application/json,text/event-stream`
+  - session bootstrap flow (`initialize` -> `notifications/initialized` -> retry `tools/call`) when server reports missing session ID
+- Added/updated coverage in `tests/unit/social-dispatch.test.ts` for protocol headers and session bootstrap retry.
+- Added protocol-version env docs in `README.md` and `docs/runbook-social-draft-approvals.md`.
+- Ran local gates successfully:
+  - `npm run lint`
+  - `npm run test:unit`
+  - `npm run test:smoke`
+  - social flow vitest command from DoD
+- `npm run social:dispatch:smoke` currently blocked in this shell due missing runtime env vars (`SOCIAL_DISPATCH_SERVICE_URL`, worker token, uid).
 
 ## Files to touch (expected)
 

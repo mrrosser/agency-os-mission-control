@@ -246,6 +246,10 @@ function readSocialDispatchToolName(): string {
   return asString(process.env.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL) || "social.dispatch.enqueue";
 }
 
+function readSmAutoProtocolVersion(): string {
+  return asString(process.env.SMAUTO_MCP_PROTOCOL_VERSION) || "2025-03-26";
+}
+
 function readDispatchStatusNotificationsEnabled(): boolean {
   return readBoolEnv("SOCIAL_DISPATCH_STATUS_NOTIFY", true);
 }
@@ -411,16 +415,86 @@ function shouldFallbackToWebhook(status: number): boolean {
   return status === 400 || status === 404 || status === 405 || status === 415 || status === 422;
 }
 
+function isMissingSessionError(status: number, rawBody: string): boolean {
+  if (status !== 400) return false;
+  const parsed = safeParseJson(rawBody);
+  if (!parsed || typeof parsed !== "object") return false;
+  const payload = parsed as { error?: { message?: unknown } };
+  const message = asString(payload.error?.message);
+  return message.toLowerCase().includes("missing session id");
+}
+
+async function bootstrapSmAutoSession(args: {
+  endpoint: string;
+  headers: Record<string, string>;
+  queueId: string;
+  protocolVersion: string;
+}): Promise<string> {
+  const initializeResponse = await fetch(args.endpoint, {
+    method: "POST",
+    headers: args.headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `social-dispatch-init-${args.queueId}`,
+      method: "initialize",
+      params: {
+        protocolVersion: args.protocolVersion,
+        capabilities: {},
+        clientInfo: {
+          name: "mission-control",
+          version: "0.1.0",
+        },
+      },
+    }),
+  });
+  const initializeBody = await readResponseBody(initializeResponse);
+  const sessionId =
+    asString(initializeResponse.headers.get("mcp-session-id")) ||
+    asString(initializeResponse.headers.get("Mcp-Session-Id"));
+  if (!initializeResponse.ok || !sessionId) {
+    throw new ApiError(502, "SMAuto MCP initialize failed", {
+      status: initializeResponse.status,
+      body: initializeBody.snippet,
+      hasSessionId: Boolean(sessionId),
+    });
+  }
+
+  const initializedHeaders = {
+    ...args.headers,
+    "Mcp-Session-Id": sessionId,
+  };
+  const initializedResponse = await fetch(args.endpoint, {
+    method: "POST",
+    headers: initializedHeaders,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+      params: {},
+    }),
+  });
+  if (!initializedResponse.ok) {
+    const initializedBody = await readResponseBody(initializedResponse);
+    throw new ApiError(502, "SMAuto MCP initialized notification failed", {
+      status: initializedResponse.status,
+      body: initializedBody.snippet,
+    });
+  }
+
+  return sessionId;
+}
+
 export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs): Promise<SmAutoDispatchResult> {
   const endpoint = readSmAutoEndpoint();
   const authHeaders = await buildSmAutoAuthHeaders(endpoint);
   const payload = buildDispatchPayload(args.task, args.correlationId);
   const mcpRequest = buildSmAutoToolCallRequest(args.task, args.correlationId);
   const webhookFallbackEnabled = readBoolEnv("SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED", true);
+  const protocolVersion = readSmAutoProtocolVersion();
 
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
-    Accept: "application/json, text/event-stream",
+    Accept: "application/json,text/event-stream",
+    "MCP-Protocol-Version": protocolVersion,
     "X-Correlation-Id": args.correlationId,
     "X-Idempotency-Key": args.task.queueId,
     ...authHeaders,
@@ -457,7 +531,56 @@ export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs)
     };
   }
 
-  if (!webhookFallbackEnabled || !shouldFallbackToWebhook(mcpResponse.status)) {
+  if (isMissingSessionError(mcpResponse.status, mcpBody.raw)) {
+    const sessionId = await bootstrapSmAutoSession({
+      endpoint,
+      headers: baseHeaders,
+      queueId: args.task.queueId,
+      protocolVersion,
+    });
+    const sessionHeaders = {
+      ...baseHeaders,
+      "Mcp-Session-Id": sessionId,
+    };
+    const retryResponse = await fetch(endpoint, {
+      method: "POST",
+      headers: sessionHeaders,
+      body: JSON.stringify(mcpRequest),
+    });
+    const retryBody = await readResponseBody(retryResponse);
+    if (retryResponse.ok) {
+      const parsedRetry = safeParseJson(retryBody.raw);
+      if (parsedRetry && typeof parsedRetry === "object" && "error" in (parsedRetry as Record<string, unknown>)) {
+        const errorPayload = (parsedRetry as Record<string, unknown>).error;
+        throw new ApiError(502, "SMAuto MCP tools/call returned an error payload after session bootstrap", {
+          status: retryResponse.status,
+          transport: "mcp_tools_call",
+          error: errorPayload,
+        });
+      }
+      args.log.info("social.dispatch.smauto_call_ok", {
+        queueId: args.task.queueId,
+        draftId: args.task.draftId,
+        transport: "mcp_tools_call",
+        status: retryResponse.status,
+        correlationId: args.correlationId,
+        sessionBootstrapped: true,
+      });
+      return {
+        transport: "mcp_tools_call",
+        status: retryResponse.status,
+        responseSnippet: retryBody.snippet,
+      };
+    }
+
+    if (!webhookFallbackEnabled || !shouldFallbackToWebhook(retryResponse.status)) {
+      throw new ApiError(502, "SMAuto dispatch failed", {
+        status: retryResponse.status,
+        transport: "mcp_tools_call",
+        body: retryBody.snippet,
+      });
+    }
+  } else if (!webhookFallbackEnabled || !shouldFallbackToWebhook(mcpResponse.status)) {
     throw new ApiError(502, "SMAuto dispatch failed", {
       status: mcpResponse.status,
       transport: "mcp_tools_call",

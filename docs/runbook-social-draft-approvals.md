@@ -49,6 +49,7 @@ No auto-posting is performed in this slice.
   - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
   - `SMAUTO_MCP_API_KEY` (required for `api_key`)
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required for `id_token`)
+  - `SMAUTO_MCP_PROTOCOL_VERSION` (optional; default `2025-03-26`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional tool name override; default `social.dispatch.enqueue`)
   - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; defaults `true`)
     - set to `false` when SMAuto endpoint is MCP-only (JSON-RPC session based) to avoid duplicate fallback calls/cost

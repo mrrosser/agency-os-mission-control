@@ -1,6 +1,6 @@
 # Runtime Capability Matrix
 
-Last updated: 2026-02-24
+Last updated: 2026-02-26
 Owner: Mission Control
 
 ## Goal
@@ -11,7 +11,7 @@ Map business capabilities to the backend that serves them, with explicit connect
 | Capability | Primary backend/tool | Required runtime config | Fallback behavior |
 | --- | --- | --- | --- |
 | Lead sourcing + qualification | `agency-os-mission-control` APIs (`/api/lead-runs/*`) | `GOOGLE_PLACES_API_KEY` or `APIFY_TOKEN` | Run from CRM-only lead pool when providers are missing |
-| Social content orchestration | `SMAuto` MCP endpoint | `SMAUTO_MCP_SERVER_URL` + (`SMAUTO_MCP_AUTH_MODE` and auth creds) | Queue content tasks locally as `pending_external_tool` |
+| Social content orchestration | `SMAuto` MCP endpoint + Mission Control dispatch worker (`/api/social/drafts/dispatch/worker-task`) | `SMAUTO_MCP_SERVER_URL` + (`SMAUTO_MCP_AUTH_MODE` and auth creds), `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist) | Keep content tasks in `social_dispatch_queue` (`pending_external_tool`/`failed`) until worker drain succeeds |
 | Social draft approvals in Google Space | Mission Control Social Draft APIs (`/api/social/drafts*`) + Google Chat webhook | `SOCIAL_DRAFT_WORKER_TOKEN` (or Scheduler OIDC allowlist `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific webhook env) | Keep drafts in `pending_approval` when webhook is unavailable; approved drafts auto-queue as `pending_external_tool` in `social_dispatch_queue` |
 | Research intelligence pulls | OpenClaw research + Firecrawl | `FIRECRAWL_API_KEY` | Continue in reduced mode using standard web search sources |
 | Mission-control lead operations tools | LeadOps MCP endpoint | `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`) | Keep operator UI active; block external write actions |

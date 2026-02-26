@@ -79,18 +79,33 @@ jobs:
           echo "FIREBASE_DEPLOY_CHANNEL=$CHANNEL_ID" >> "$GITHUB_ENV"
           echo "SMOKE_BASE_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
           echo "DEPLOY_PERFORMED=1" >> $GITHUB_ENV
-      - name: Ensure SSR backend memory (webframeworks)
+      - name: Ensure SSR backend runtime config (webframeworks)
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+          SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
+          SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES || '' }}
         run: |
           set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format='value(status.url)')"
+          if [ -z "$SERVICE_URL" ]; then
+            echo "Unable to resolve Cloud Run service URL for $FIREBASE_SSR_SERVICE."
+            exit 1
+          fi
+          OIDC_AUDIENCES="$SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES"
+          if [ -z "$OIDC_AUDIENCES" ]; then
+            OIDC_AUDIENCES="$SERVICE_URL/api/social/drafts/weekly/worker-task,$SERVICE_URL/api/social/drafts/rng-weekly/worker-task"
+          fi
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --memory 512Mi \
+            --update-env-vars "^##^SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=$SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS##SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES=$OIDC_AUDIENCES" \
             --quiet
       - name: Post-deploy production smoke
         if: ${{ env.GCP_AUTH_READY == '1' }}

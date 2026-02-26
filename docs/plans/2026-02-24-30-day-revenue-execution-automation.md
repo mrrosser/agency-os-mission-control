@@ -94,6 +94,9 @@ Owner: Mission Control
   - `GET /api/social/drafts/{draftId}/decision`
 - Added approval auto-handoff queue for external social execution:
   - approved drafts now enqueue to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`
+- Added social dispatch drain worker:
+  - `POST /api/social/drafts/dispatch/worker-task`
+  - drains queued approved drafts to SMAuto MCP/webhook endpoint and records `dispatch.status=dispatched|failed`
 - Added social approval runbook:
   - `docs/runbook-social-draft-approvals.md`
 

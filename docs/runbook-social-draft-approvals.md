@@ -25,6 +25,8 @@ No auto-posting is performed in this slice.
 - `POST /api/social/drafts/weekly/worker-task` (worker token, recurring-safe weekly idempotency for `rts|rng|aicf`)
 - `POST /api/social/drafts/dispatch/worker-task` (worker token, drains `social_dispatch_queue` to SMAuto)
 - `GET /api/social/drafts/{draftId}/decision` (tokenized approval link)
+- `GET /api/social/onboarding/status` (auth required; onboarding checklist + social pipeline health)
+- `POST /api/social/onboarding/status` (auth required; mark manual onboarding step complete/incomplete)
 
 ## Required env vars
 
@@ -56,6 +58,8 @@ No auto-posting is performed in this slice.
   - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS`
   - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG`
   - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF`
+- Optional onboarding helper link:
+  - `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (external SocialOps `/connections` URL shown in the onboarding checklist UI)
 
 ## Local worker example
 
@@ -106,6 +110,15 @@ SOCIAL_DISPATCH_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
 SOCIAL_DISPATCH_MAX_TASKS=10 \
 SOCIAL_DISPATCH_RETRY_FAILED=false \
 npm run social:dispatch:run
+```
+
+Dispatch smoke runner (safe default `dryRun=true`):
+
+```bash
+SOCIAL_DISPATCH_SERVICE_URL=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app \
+SOCIAL_DRAFT_WORKER_TOKEN=*** \
+SOCIAL_DRAFT_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
+npm run social:dispatch:smoke
 ```
 
 Manual dispatch curl:

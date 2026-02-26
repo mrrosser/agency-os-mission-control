@@ -31,5 +31,42 @@ describe("normalizeFirebaseDeployArgs", () => {
       normalizeFirebaseDeployArgs(["deploy", "--only", "hosting", "--project", "leadflow-review"])
     ).toEqual(["deploy", "--only", "hosting", "--project", "leadflow-review"]);
   });
-});
 
+  it("preserves hosting channel deploy commands", () => {
+    expect(
+      normalizeFirebaseDeployArgs([
+        "hosting:channel:deploy",
+        "main-123",
+        "--project",
+        "leadflow-review",
+        "--expires",
+        "7d",
+      ])
+    ).toEqual([
+      "hosting:channel:deploy",
+      "main-123",
+      "--project",
+      "leadflow-review",
+      "--expires",
+      "7d",
+    ]);
+  });
+
+  it("preserves hosting clone promotion commands", () => {
+    expect(
+      normalizeFirebaseDeployArgs([
+        "hosting:clone",
+        "leadflow-review:main-123",
+        "leadflow-review:live",
+        "--project",
+        "leadflow-review",
+      ])
+    ).toEqual([
+      "hosting:clone",
+      "leadflow-review:main-123",
+      "leadflow-review:live",
+      "--project",
+      "leadflow-review",
+    ]);
+  });
+});

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Logger } from "@/lib/logging";
 import type { LeadCandidate } from "@/lib/leads/types";
-import { firecrawlScrape } from "@/lib/firecrawl/client";
+import { firecrawlScrape, isFirecrawlQuotaError } from "@/lib/firecrawl/client";
 
 const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 // Fairly permissive US-first phone matcher. We keep extraction conservative by
@@ -155,7 +155,10 @@ async function poolMap<T, R>(
 export async function enrichLeadWithFirecrawl(
   lead: LeadCandidate,
   apiKey: string,
-  log?: Logger
+  log?: Logger,
+  options: {
+    onQuotaExceeded?: () => void;
+  } = {}
 ): Promise<LeadCandidate> {
   if (!lead.website || !isHttpUrl(lead.website)) return lead;
 
@@ -251,6 +254,13 @@ export async function enrichLeadWithFirecrawl(
 
     return next;
   } catch (error) {
+    if (isFirecrawlQuotaError(error)) {
+      options.onQuotaExceeded?.();
+      log?.warn("lead.enrich.firecrawl.quota_exhausted", {
+        leadId: base.id,
+        website: base.website,
+      });
+    }
     log?.warn("lead.enrich.firecrawl.failed", {
       leadId: base.id,
       website: base.website,
@@ -282,9 +292,25 @@ export async function enrichLeadsWithFirecrawl(
 
   if (candidates.length === 0) return leads;
 
-  const enriched = await poolMap(candidates, concurrency, (lead) =>
-    enrichLeadWithFirecrawl(lead, apiKey, log)
-  );
+  let quotaExhausted = false;
+  const enriched = await poolMap(candidates, concurrency, async (lead) => {
+    if (quotaExhausted) {
+      log?.info("lead.enrich.firecrawl.skipped_after_quota", {
+        leadId: lead.id,
+      });
+      return lead;
+    }
+    return enrichLeadWithFirecrawl(
+      lead,
+      apiKey,
+      log,
+      {
+        onQuotaExceeded: () => {
+          quotaExhausted = true;
+        },
+      }
+    );
+  });
 
   const byId = new Map(enriched.map((lead) => [lead.id, lead]));
   return leads.map((lead) => byId.get(lead.id) || lead);

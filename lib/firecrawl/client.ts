@@ -21,11 +21,28 @@ interface FirecrawlScrapeResponse {
   error?: string;
 }
 
+export class FirecrawlHttpError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 export interface FirecrawlScrapeResult {
   markdown?: string;
   links?: string[];
   metadata?: FirecrawlScrapeMetadata;
   warning?: string;
+}
+
+export function isFirecrawlQuotaError(error: unknown): boolean {
+  if (error instanceof FirecrawlHttpError) {
+    return error.statusCode === 402;
+  }
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /insufficient credits|quota|402/i.test(message);
 }
 
 export interface FirecrawlScrapeMetadata {
@@ -107,7 +124,7 @@ export async function firecrawlScrape(
             (payload as FirecrawlErrorResponse | null)?.message ||
             `Firecrawl scrape failed (${response.status})`;
       log?.warn("firecrawl.scrape.failed", { url, status: response.status, message });
-      throw new Error(message);
+      throw new FirecrawlHttpError(message, response.status);
     }
 
     if (!payload || typeof payload !== "object") {

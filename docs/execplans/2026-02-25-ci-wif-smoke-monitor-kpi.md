@@ -35,7 +35,8 @@ Deliver the approved 1-5 hardening batch:
 ## Deploy Notes
 - Main deploy workflow: `.github/workflows/firebase-hosting-merge.yml`
 - Production smoke gate: `npm run test:postdeploy`
-- Automatic rollback on smoke failure: Firebase Hosting live channel rollback.
+- Main deploy now uses preview-channel deploy + smoke + promote-to-live flow.
+- If smoke fails, live remains unchanged because promotion is skipped.
 
 ## Progress
 - [x] Added dedicated CI test workflow.

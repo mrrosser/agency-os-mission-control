@@ -70,6 +70,18 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
   const hasSmAutoAudience = hasEnv("SMAUTO_MCP_ID_TOKEN_AUDIENCE");
   const leadOpsMcpUrl = readHttpUrlEnv("LEADOPS_MCP_SERVER_URL");
   const hasLeadOpsMcpKey = hasEnv("LEADOPS_MCP_API_KEY");
+  const socialDraftApprovalBaseUrl = readHttpUrlEnv("SOCIAL_DRAFT_APPROVAL_BASE_URL");
+  const hasSocialDraftWorkerToken =
+    hasEnv("SOCIAL_DRAFT_WORKER_TOKEN") ||
+    hasEnv("REVENUE_DAY30_WORKER_TOKEN") ||
+    hasEnv("REVENUE_DAY2_WORKER_TOKEN") ||
+    hasEnv("REVENUE_DAY1_WORKER_TOKEN");
+  const hasSocialDraftWebhook =
+    hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL") ||
+    hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS") ||
+    hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG") ||
+    hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF") ||
+    hasEnv("GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL");
 
   const budgetCost = parsePositiveNumber(process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD);
   const budgetPages = parsePositiveNumber(process.env.LEAD_SOURCE_BUDGET_MAX_PAGES);
@@ -197,6 +209,35 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
             : "LEADOPS_MCP_SERVER_URL set without LEADOPS_MCP_API_KEY; only use if endpoint is trusted without auth."
           : "LEADOPS_MCP_SERVER_URL is invalid; provide an absolute http(s) URL."
         : "Set LEADOPS_MCP_SERVER_URL to wire mission-control/LeadOps tools.",
+    },
+    {
+      id: "social-draft-worker-token",
+      label: "Social draft worker token",
+      level: "recommended",
+      state: hasSocialDraftWorkerToken ? "ok" : "warning",
+      detail: hasSocialDraftWorkerToken
+        ? "Worker token configured (direct or revenue-token fallback)."
+        : "Set SOCIAL_DRAFT_WORKER_TOKEN (or revenue worker token fallback) for /api/social/drafts/worker-task.",
+    },
+    {
+      id: "social-draft-approval-base-url",
+      label: "Social draft approval base URL",
+      level: "recommended",
+      state: socialDraftApprovalBaseUrl.valid ? "ok" : "warning",
+      detail: socialDraftApprovalBaseUrl.configured
+        ? socialDraftApprovalBaseUrl.valid
+          ? "SOCIAL_DRAFT_APPROVAL_BASE_URL configured."
+          : "SOCIAL_DRAFT_APPROVAL_BASE_URL is invalid; provide an absolute http(s) URL."
+        : "Set SOCIAL_DRAFT_APPROVAL_BASE_URL to generate approval links for Google Space cards.",
+    },
+    {
+      id: "social-draft-webhook",
+      label: "Social draft Google Space webhook",
+      level: "recommended",
+      state: hasSocialDraftWebhook ? "ok" : "warning",
+      detail: hasSocialDraftWebhook
+        ? "Social draft Google Space webhook configured."
+        : "Set SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL (or business-specific webhook env vars).",
     },
   ];
 

@@ -35,6 +35,7 @@ copy .env.local.example .env.local
 - Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
+- Optional (social draft approvals): `SOCIAL_DRAFT_WORKER_TOKEN`, `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`)
 - Optional (service-to-service weekly KPI worker): `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
@@ -121,6 +122,21 @@ npm run dev
   - `scripts/revenue-day2-scheduler-setup.ps1` (Windows PowerShell)
 - Full setup/runbook: `docs/runbook-day2-revenue-automation.md`
 
+## Social Draft Approvals (Google Space + Phone)
+- Authenticated route: `POST /api/social/drafts`
+- Worker route (OpenCall/service): `POST /api/social/drafts/worker-task`
+- RNG weekly worker route (OpenCall/scheduler): `POST /api/social/drafts/rng-weekly/worker-task`
+- Approval link route: `GET /api/social/drafts/{draftId}/decision`
+- Worker auth: `Authorization: Bearer <SOCIAL_DRAFT_WORKER_TOKEN>` (falls back to revenue worker token envs).
+- Runner script (service-safe): `npm run social:draft:run`
+- Recommended worker base URL: `https://ssrleadflowreview-450880825453.us-central1.run.app`
+- Required env:
+  - `SOCIAL_DRAFT_WORKER_TOKEN`
+  - `SOCIAL_DRAFT_APPROVAL_BASE_URL`
+  - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG` (or default webhook)
+- Runbook + payload examples: `docs/runbook-social-draft-approvals.md`
+- Mobile workflow: operator receives Approve/Reject buttons in Google Chat Space and can complete the decision from phone browser without opening Mission Control UI.
+
 ## Revenue Weekly KPI Rollup
 - Manual/authenticated route: `POST /api/revenue/kpi/weekly`
 - Scheduler/service route: `POST /api/revenue/kpi/weekly/worker-task`
@@ -200,7 +216,10 @@ Notes:
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
-- Includes fail-closed post-deploy smoke and automatic Firebase Hosting rollback when smoke fails.
+- Uses a safe channel promotion flow:
+  1) deploy candidate to a preview channel,
+  2) run fail-closed post-deploy smoke against preview URL,
+  3) promote preview channel to `live` only on smoke success.
 - Dedicated CI gate for `npm test`: `.github/workflows/ci-tests.yml`.
 
 Local deploy (recommended: trims SSR bundle by omitting devDependencies during frameworks install):

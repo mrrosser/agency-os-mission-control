@@ -82,6 +82,21 @@ Owner: Mission Control
   - `tests/smoke/revenue-day30-worker-task-route.test.ts`
   - `tests/unit/revenue-day30-automation.test.ts`
 
+### Variant + social approval status (2026-02-25)
+- Added 7-day variant split reporting script and npm command:
+  - `scripts/revenue-variant-split-report.mjs`
+  - `npm run revenue:variant:report`
+- Generated initial baseline report:
+  - `docs/reports/2026-02-25-variant-split-7d.md`
+- Added social draft approval workflow for IG/FB drafts with Google Space approval links:
+  - `POST /api/social/drafts`
+  - `POST /api/social/drafts/worker-task`
+  - `GET /api/social/drafts/{draftId}/decision`
+- Added approval auto-handoff queue for external social execution:
+  - approved drafts now enqueue to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`
+- Added social approval runbook:
+  - `docs/runbook-social-draft-approvals.md`
+
 ## Week 2 (Days 8-14): Outbound + Follow-up Automation
 1. Activate daily lead scouting cadence (geo + niche rotations).
 2. Generate demo assets and outreach drafts in batches.

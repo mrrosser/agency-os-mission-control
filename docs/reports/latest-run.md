@@ -1,20 +1,11 @@
-﻿# RT Loop Report
+# RT Loop Report
 
-- RUN_ID: 20260215-040600-5537
-- Artifacts: .tmp/artifacts/rt-loop-20260215-040600-5537
+- RUN_ID: 20260226-social-dispatch-mcp-session
+- Scope: Social dispatch transport hardening + verification gates
 
-[2026-02-15T04:06:00.5193705-06:00] RUN_ID=20260215-040600-5537 start artifacts_dir=.tmp/artifacts/rt-loop-20260215-040600-5537
-[2026-02-15T04:06:00.6077320-06:00] RUN_ID=20260215-040600-5537 tool=node version="v22.17.1"
-[2026-02-15T04:06:01.1384863-06:00] RUN_ID=20260215-040600-5537 tool=npm version="11.6.2"
-[2026-02-15T04:06:01.1454867-06:00] RUN_ID=20260215-040600-5537 gate=format_lint cmd=npm run lint
-[2026-02-15T04:06:12.5470622-06:00] RUN_ID=20260215-040600-5537 gate=format_lint result=PASS
-[2026-02-15T04:06:12.5500654-06:00] RUN_ID=20260215-040600-5537 gate=unit cmd=npm run test:unit
-[2026-02-15T04:06:20.3124819-06:00] RUN_ID=20260215-040600-5537 gate=unit result=PASS
-[2026-02-15T04:06:20.3154830-06:00] RUN_ID=20260215-040600-5537 gate=smoke cmd=npm run test:smoke
-[2026-02-15T04:06:31.7871393-06:00] RUN_ID=20260215-040600-5537 gate=smoke result=PASS
-[2026-02-15T04:06:31.7951440-06:00] RUN_ID=20260215-040600-5537 gate=build attempt=1 cmd=npm run build
-[2026-02-15T04:08:22.5352741-06:00] RUN_ID=20260215-040600-5537 gate=build result=PASS attempts=1
-[2026-02-15T04:08:22.5372745-06:00] RUN_ID=20260215-040600-5537 gate=security cmd=npm audit --audit-level=high
-[2026-02-15T04:08:24.5785216-06:00] RUN_ID=20260215-040600-5537 gate=security result=PASS
-[2026-02-15T04:08:24.6881425-06:00] RUN_ID=20260215-040600-5537 gate=secrets result=SKIP reason=gitleaks_not_installed
-[2026-02-15T04:08:24.6901435-06:00] RUN_ID=20260215-040600-5537 end status=PASS artifacts_dir=.tmp/artifacts/rt-loop-20260215-040600-5537
+[2026-02-26T19:43:03Z] gate=unit-social-dispatch cmd=npm run test:unit -- tests/unit/social-dispatch.test.ts result=FAIL
+[2026-02-26T19:44:26Z] gate=unit-social-dispatch cmd=npm run test:unit -- tests/unit/social-dispatch.test.ts result=PASS
+[2026-02-26T19:44:56Z] gate=smoke cmd=npm run test:smoke result=PASS
+[2026-02-26T19:45:22Z] gate=lint cmd=npm run lint result=PASS
+[2026-02-26T19:45:41Z] gate=social-flow cmd=npx vitest run tests/unit/social-drafts.test.ts tests/unit/social-dispatch.test.ts tests/unit/social-worker-auth.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts tests/smoke/social-drafts-dispatch-worker-task-route.test.ts result=PASS
+[2026-02-26T19:46:02Z] gate=social-dispatch-smoke cmd=npm run social:dispatch:smoke result=BLOCKED reason=missing SOCIAL_DISPATCH_SERVICE_URL/SOCIAL_DRAFT_WORKER_TOKEN/SOCIAL_DRAFT_UID in local env

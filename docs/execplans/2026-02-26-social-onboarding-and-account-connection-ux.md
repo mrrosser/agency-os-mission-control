@@ -37,7 +37,7 @@ Make the end-to-end experience reliable and fast from first login to connected s
   - `npx vitest run tests/unit/social-drafts.test.ts tests/unit/social-dispatch.test.ts tests/unit/social-worker-auth.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts tests/smoke/social-drafts-dispatch-worker-task-route.test.ts`
 - [ ] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
 - [ ] `docs/runbook-social-draft-approvals.md` and this plan updated with final rollout notes.
-- [ ] `docs/reports/latest-run.md` updated with RUN_ID + gate results.
+- [x] `docs/reports/latest-run.md` updated with RUN_ID + gate results.
 
 ## No Feature Creep (Hard Stop)
 

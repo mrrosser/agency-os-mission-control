@@ -90,9 +90,11 @@ Make the end-to-end experience reliable and fast from first login to connected s
 - Add one smoke check script for social pipeline end-to-end health.
 
 ### M5) Rollout and acceptance
-- Internal acceptance (RNG) for 7-day draft/approval/dispatch cycle.
-- External client acceptance (at least one non-admin user path).
-- Final runbook and escalation section updated.
+- [~] Internal acceptance (RNG) for 7-day draft/approval/dispatch cycle.
+  - Started 2026-02-26 via `POST /api/social/drafts/rng-weekly/worker-task`.
+  - Evidence: `draftId=7YtG8loIMcTehGWmAuaj`, `weekKey=2026-W09`, approval card sent.
+- [ ] External client acceptance (at least one non-admin user path).
+- [ ] Final runbook and escalation section updated.
 
 ## Progress update (2026-02-26)
 
@@ -107,7 +109,18 @@ Make the end-to-end experience reliable and fast from first login to connected s
   - `npm run test:unit`
   - `npm run test:smoke`
   - social flow vitest command from DoD
-- `npm run social:dispatch:smoke` currently blocked in this shell due missing runtime env vars (`SOCIAL_DISPATCH_SERVICE_URL`, worker token, uid).
+- Ran dispatch smoke against deployed Mission Control service (`ssrleadflowreview`):
+  - dry-run: PASS (`scanned=0`, `attempted=0`, `failed=0`)
+  - live mode: PASS (`dryRun=false`, `scanned=0`, `attempted=0`, `failed=0`)
+- Ran authenticated runtime preflight (`GET /api/runtime/preflight`) against deployed service:
+  - status: `fail`
+  - required missing checks:
+    - `lead-source-budget-defaults`
+    - `lead-run-queue`
+  - recommended warnings include missing `SMAUTO_MCP_SERVER_URL` and `SOCIAL_DRAFT_APPROVAL_BASE_URL`
+- Started M5 internal acceptance cycle:
+  - triggered RNG weekly draft worker on deployed service
+  - result: `draftId=7YtG8loIMcTehGWmAuaj`, `weekKey=2026-W09`, `approvalNotified=true`
 
 ## Files to touch (expected)
 

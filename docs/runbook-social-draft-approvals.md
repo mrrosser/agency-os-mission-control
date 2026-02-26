@@ -122,6 +122,29 @@ SOCIAL_DRAFT_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
 npm run social:dispatch:smoke
 ```
 
+Non-admin acceptance probe (authenticated user route + approval link + dispatch drain):
+
+```bash
+SOCIAL_ACCEPTANCE_BASE_URL=https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app \
+SOCIAL_ACCEPTANCE_AUTH_MODE=user \
+SOCIAL_ACCEPTANCE_FIREBASE_API_KEY=${NEXT_PUBLIC_FIREBASE_API_KEY} \
+SOCIAL_DRAFT_WORKER_TOKEN=*** \
+SOCIAL_ACCEPTANCE_UID=external-acceptance-20260226150304 \
+SOCIAL_ACCEPTANCE_BUSINESS_KEY=rng \
+SOCIAL_ACCEPTANCE_CHANNELS=instagram_post,facebook_post \
+SOCIAL_ACCEPTANCE_DECISION=approve \
+SOCIAL_ACCEPTANCE_DISPATCH_DRY_RUN=false \
+npm run social:acceptance:nonadmin
+```
+
+Notes:
+- This exercises a non-admin flow end-to-end:
+  - user-authenticated draft creation (`POST /api/social/drafts`)
+  - tokenized decision URL approval
+  - dispatch drain verification via worker token.
+- Set `SOCIAL_ACCEPTANCE_DISPATCH_DRY_RUN=false` for live dispatch verification.
+- Use `SOCIAL_ACCEPTANCE_AUTO_DECISION=false` when you want manual approval tap-through instead of script-driven decision.
+
 Manual dispatch curl:
 
 ```bash
@@ -252,3 +275,24 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
 4. Confirm success page in mobile browser (`Draft approved successfully.` or `Draft rejected successfully.`).
 5. Approved drafts move to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`.
 6. Dispatch worker posts queued approved drafts to SMAuto and marks queue + draft `dispatch.status` as `dispatched`/`failed`.
+
+## Production handoff checklist (M5 closeout)
+
+- Runtime preflight: `GET /api/runtime/preflight` returns `status=ok` (no required/recommended failures).
+- Dispatch schedulers enabled:
+  - `social-dispatch-drain` (`*/15 * * * *`)
+  - `social-dispatch-retry-failed` (`15 * * * *`)
+- End-to-end live dispatch proof complete:
+  - approved draft queued + drained with `attempted>0` and `dispatched>0`.
+- External/non-admin acceptance proof complete:
+  - authenticated user route creates draft (`POST /api/social/drafts`)
+  - tokenized approval link decision works from browser/mobile
+  - draft state transitions to `approved`
+  - dispatch worker drains queue for that UID.
+
+### Escalation path
+
+1. If approval card does not arrive in Google Space, verify business webhook env vars and run `npm run social:draft:run`.
+2. If approved drafts are not dispatching, run `npm run social:dispatch:smoke` (dry-run first, then live).
+3. If dispatch fails with auth/connector errors, inspect runtime preflight + `SMAUTO_MCP_*` envs.
+4. If scheduler drift occurs after deploy, re-verify jobs and Cloud Run envs using this runbook commands.

@@ -262,6 +262,13 @@ Required GitHub Actions configuration:
   - `vars.CLOUD_RUN_REGION` (`us-central1`)
   - `vars.FIREBASE_SSR_SERVICE` (`ssrleadflowreview`)
   - `vars.PROD_SMOKE_BASE_URL` (`https://leadflow-review.web.app`)
+  - `vars.LEAD_RUNS_TASK_QUEUE` (`lead-runs-worker`)
+  - `vars.LEAD_RUNS_TASK_LOCATION` (`us-central1`)
+  - `vars.LEAD_RUNS_TASK_SERVICE_ACCOUNT` (`social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com`)
+  - `vars.LEAD_SOURCE_BUDGET_MAX_COST_USD` (`2`)
+  - `vars.LEAD_SOURCE_BUDGET_MAX_PAGES` (`4`)
+  - `vars.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC` (`50`)
+  - `vars.SOCIAL_DRAFT_APPROVAL_BASE_URL` (`https://leadflow-review.web.app`)
   - `vars.SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS` (defaults to `social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com`)
   - `vars.SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES` (optional; defaults to SSR service weekly worker audiences)
   - `vars.SMAUTO_MCP_SERVER_URL` (defaults to `https://social-mcp-hau2jvawpa-uc.a.run.app/mcp`)
@@ -270,6 +277,8 @@ Required GitHub Actions configuration:
   - `vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional; defaults to `social.dispatch.enqueue`)
   - `vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (defaults to `false` for MCP session endpoints)
   - `vars.SMAUTO_MCP_PROTOCOL_VERSION` (defaults to `2025-03-26`)
+  - `vars.LEADOPS_MCP_SERVER_URL` (defaults to `https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp`)
+  - `secrets.LEADOPS_MCP_API_KEY` (optional but recommended; required for preflight-ready LeadOps MCP auth)
 
 Production health monitor:
 - `.github/workflows/postdeploy-health-monitor.yml` runs authenticated smoke on a schedule.

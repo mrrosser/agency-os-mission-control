@@ -52,6 +52,9 @@ Default timezone:
   - `identities/{uid}/closer_queue_state/latest`
 - Service lab candidates:
   - `identities/{uid}/service_lab_candidates/{candidateId}`
+- Variant decision snapshots (optional write mode):
+  - `identities/{uid}/revenue_variant_decisions/{date-dN}`
+  - `identities/{uid}/revenue_variant_decisions/latest`
 
 ## Local execution
 
@@ -78,6 +81,19 @@ npm run revenue:day30:run
 - `closerQueue.queueSize`
 - `serviceLab.generated`
 - `dailyDigest.summary`
+
+5. Generate deterministic keep/fix/kill/watch decision artifact from last 7 days:
+
+```bash
+npm run revenue:variant:decide
+```
+
+Optional env for decision tuning/persistence:
+- `REVENUE_VARIANT_DAYS` (default `7`)
+- `REVENUE_VARIANT_DECISION_MIN_RUNS` (default `3`)
+- `REVENUE_VARIANT_DECISION_MIN_PROCESSED` (default `12`)
+- `REVENUE_VARIANT_DECISION_PATH` (JSON output path)
+- `REVENUE_VARIANT_WRITE_FIRESTORE=true` (persist to `revenue_variant_decisions`)
 
 ## Cloud Run / Scheduler deployment pattern
 

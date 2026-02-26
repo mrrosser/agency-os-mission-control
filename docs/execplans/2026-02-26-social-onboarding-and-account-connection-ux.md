@@ -2,7 +2,7 @@
 
 Date: 2026-02-26  
 Owner: Mission Control + SMAuto  
-Status: In Progress
+Status: Completed
 
 ## Goal
 
@@ -35,8 +35,8 @@ Make the end-to-end experience reliable and fast from first login to connected s
 - [x] `npm run test:smoke` passes.
 - [x] Social flow tests pass:
   - `npx vitest run tests/unit/social-drafts.test.ts tests/unit/social-dispatch.test.ts tests/unit/social-worker-auth.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts tests/smoke/social-drafts-dispatch-worker-task-route.test.ts`
-- [ ] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
-- [ ] `docs/runbook-social-draft-approvals.md` and this plan updated with final rollout notes.
+- [x] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
+- [x] `docs/runbook-social-draft-approvals.md` and this plan updated with final rollout notes.
 - [x] `docs/reports/latest-run.md` updated with RUN_ID + gate results.
 
 ## No Feature Creep (Hard Stop)
@@ -90,11 +90,22 @@ Make the end-to-end experience reliable and fast from first login to connected s
 - Add one smoke check script for social pipeline end-to-end health.
 
 ### M5) Rollout and acceptance
-- [~] Internal acceptance (RNG) for 7-day draft/approval/dispatch cycle.
+- [x] Internal acceptance (RNG) for 7-day draft/approval/dispatch cycle.
   - Started 2026-02-26 via `POST /api/social/drafts/rng-weekly/worker-task`.
   - Evidence: `draftId=7YtG8loIMcTehGWmAuaj`, `weekKey=2026-W09`, approval card sent.
-- [ ] External client acceptance (at least one non-admin user path).
-- [ ] Final runbook and escalation section updated.
+  - End-to-end dispatch proof: `draftId=AENAHk5dOtcAUTswhNG1`, dispatch `attempted=1`, `dispatched=1`, `failed=0`.
+- [x] External client acceptance (at least one non-admin user path).
+  - Executed non-admin authenticated route path + tokenized approval + dispatch drain:
+    - `uid=external-acceptance-1772139588584`
+    - `draftId=7N7oICwtbo5VeCsaHxWt`
+    - draft states: `pending_approval -> approved`
+    - dispatch result: `attempted=1`, `dispatched=1`, `failed=0`.
+  - Re-ran via scripted npm command for reproducible handoff:
+    - `npm run social:acceptance:nonadmin`
+    - `uid=external-acceptance-20260226150448-npm`
+    - `draftId=KWx3P6fowuLp8TqSWR4B`
+    - dispatch result: `attempted=1`, `dispatched=1`, `failed=0`.
+- [x] Final runbook and escalation section updated.
 
 ## Progress update (2026-02-26)
 
@@ -113,14 +124,44 @@ Make the end-to-end experience reliable and fast from first login to connected s
   - dry-run: PASS (`scanned=0`, `attempted=0`, `failed=0`)
   - live mode: PASS (`dryRun=false`, `scanned=0`, `attempted=0`, `failed=0`)
 - Ran authenticated runtime preflight (`GET /api/runtime/preflight`) against deployed service:
-  - status: `fail`
-  - required missing checks:
-    - `lead-source-budget-defaults`
-    - `lead-run-queue`
-  - recommended warnings include missing `SMAUTO_MCP_SERVER_URL` and `SOCIAL_DRAFT_APPROVAL_BASE_URL`
+  - initial status: `fail` (missing required env)
+  - applied Cloud Run env remediation on `ssrleadflowreview`:
+    - `LEAD_RUNS_TASK_QUEUE=lead-runs-worker`
+    - `LEAD_RUNS_TASK_LOCATION=us-central1`
+    - `LEAD_SOURCE_BUDGET_MAX_COST_USD=2`
+    - `LEAD_SOURCE_BUDGET_MAX_PAGES=4`
+    - `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC=50`
+    - `SMAUTO_MCP_SERVER_URL=https://social-mcp-hau2jvawpa-uc.a.run.app/mcp`
+    - `SMAUTO_MCP_AUTH_MODE=id_token`
+    - `SMAUTO_MCP_ID_TOKEN_AUDIENCE=https://social-mcp-hau2jvawpa-uc.a.run.app`
+    - `SMAUTO_MCP_PROTOCOL_VERSION=2025-03-26`
+    - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED=false`
+    - `SOCIAL_DRAFT_APPROVAL_BASE_URL=https://leadflow-review.web.app`
+  - post-remediation status: `warn` (no required failures)
+  - remaining warnings: `lead-run-queue-oidc` and `leadops-mcp-connector`
+- Applied final warning remediation on `ssrleadflowreview`:
+  - `LEAD_RUNS_TASK_SERVICE_ACCOUNT=social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com`
+  - `LEADOPS_MCP_SERVER_URL=https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp`
+  - `LEADOPS_MCP_API_KEY` configured in runtime env
+- Final runtime preflight status: `ok` (no issues).
+- Confirmed scheduler jobs active for dispatch reliability:
+  - `social-dispatch-drain` = `ENABLED`
+  - `social-dispatch-retry-failed` = `ENABLED`
 - Started M5 internal acceptance cycle:
   - triggered RNG weekly draft worker on deployed service
   - result: `draftId=7YtG8loIMcTehGWmAuaj`, `weekKey=2026-W09`, `approvalNotified=true`
+- Added `scripts/social-nonadmin-acceptance.mjs` + npm command `social:acceptance:nonadmin`:
+  - supports user-auth mode for true non-admin path (`POST /api/social/drafts`) -> approval decision URL -> dispatch worker verification
+  - supports `SOCIAL_ACCEPTANCE_DISPATCH_DRY_RUN=true|false` for safe/live verification
+- Extended Agent Nexus control-plane snapshot + dashboard with operations cards:
+  - queue health (`lead-run/followups/competitor` runtime checks)
+  - social dispatch health (pending approval/pending external tool/failed dispatch)
+  - weekly revenue KPI health (close/deposit/decision split)
+  - POS worker health (queue, blocked, dead-letter, outbox)
+- Upgraded `scripts/revenue-variant-split-report.mjs` into deterministic week-window decision tooling:
+  - classifies keep/fix/kill/watch per variant against control thresholds
+  - emits markdown + JSON artifacts for operator review
+  - optional Firestore persistence for downstream KPI dashboards (`REVENUE_VARIANT_WRITE_FIRESTORE=true`)
 
 ## Files to touch (expected)
 

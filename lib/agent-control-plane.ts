@@ -75,6 +75,40 @@ export interface ControlPlanePosWorkerInput {
   outboxQueued: number;
 }
 
+export type ControlPlaneRuntimeCheckState = "ok" | "warning" | "missing";
+
+export interface ControlPlaneRuntimeCheckInput {
+  id: string;
+  label: string;
+  state: ControlPlaneRuntimeCheckState;
+  detail: string;
+}
+
+export interface ControlPlaneSocialPipelineInput {
+  draftsPendingApproval: number;
+  dispatchPendingExternalTool: number;
+  dispatchFailed: number;
+  lastDispatchSuccessAt: string | null;
+  lastDispatchFailureAt: string | null;
+}
+
+export interface ControlPlaneRevenueKpiInput {
+  weekStartDate: string | null;
+  weekEndDate: string | null;
+  generatedAt: string | null;
+  leadsSourced: number;
+  closeRatePct: number;
+  depositsCollected: number;
+  dealsWon: number;
+  pipelineValueUsd: number;
+  decisionSummary: {
+    scale: number;
+    fix: number;
+    kill: number;
+    watch: number;
+  };
+}
+
 export interface ControlPlaneServiceSnapshot {
   id: string;
   label: string;
@@ -123,6 +157,63 @@ export interface ControlPlaneAlertSnapshot {
   createdAt: string | null;
 }
 
+export interface ControlPlaneQueueCheckSnapshot {
+  id: string;
+  label: string;
+  state: ControlPlaneHealth;
+  detail: string;
+}
+
+export interface ControlPlaneQueueHealthSnapshot {
+  state: ControlPlaneHealth;
+  degradedChecks: number;
+  offlineChecks: number;
+  checks: ControlPlaneQueueCheckSnapshot[];
+}
+
+export interface ControlPlaneSocialDispatchSnapshot {
+  state: ControlPlaneHealth;
+  pendingApproval: number;
+  pendingExternalTool: number;
+  failedDispatch: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+}
+
+export interface ControlPlaneRevenueKpiSnapshot {
+  state: ControlPlaneHealth;
+  weekStartDate: string | null;
+  weekEndDate: string | null;
+  generatedAt: string | null;
+  leadsSourced: number;
+  closeRatePct: number;
+  depositsCollected: number;
+  dealsWon: number;
+  pipelineValueUsd: number;
+  decisionSummary: {
+    scale: number;
+    fix: number;
+    kill: number;
+    watch: number;
+  };
+}
+
+export interface ControlPlaneOperationsSnapshot {
+  queueHealth: ControlPlaneQueueHealthSnapshot;
+  socialDispatch: ControlPlaneSocialDispatchSnapshot;
+  revenueKpi: ControlPlaneRevenueKpiSnapshot;
+  posWorker: {
+    state: ControlPlaneHealth;
+    detail: string;
+    queuedEvents: number;
+    blockedEvents: number;
+    deadLetterEvents: number;
+    outboxQueued: number;
+    oldestPendingSeconds: number;
+    lastWebhookAt: string | null;
+  };
+}
+
 export interface ControlPlaneSnapshot {
   generatedAt: string;
   summary: {
@@ -151,6 +242,7 @@ export interface ControlPlaneSnapshot {
     alerts: ControlPlaneAlertSnapshot[];
     recommendations: string[];
   };
+  operations: ControlPlaneOperationsSnapshot;
   costModel: {
     method: "heuristic-v1" | "hybrid-v1" | "live-v1";
     assumptions: string[];
@@ -174,6 +266,9 @@ interface BuildControlPlaneSnapshotInput {
   externalTools?: ControlPlaneExternalToolInput;
   billing?: ControlPlaneBillingInput;
   posWorker?: ControlPlanePosWorkerInput | null;
+  socialPipeline?: ControlPlaneSocialPipelineInput | null;
+  weeklyKpi?: ControlPlaneRevenueKpiInput | null;
+  runtimeChecks?: ControlPlaneRuntimeCheckInput[] | null;
 }
 
 type ServiceKey =
@@ -275,6 +370,18 @@ const ACTIVITY_MULTIPLIER: Record<AgentRuntimeState, number> = {
   degraded: 0.8,
   inactive: 0.28,
 };
+
+const QUEUE_CHECK_IDS = [
+  "lead-run-queue",
+  "lead-run-queue-oidc",
+  "followups-queue",
+  "competitor-monitor-queue",
+] as const;
+
+function asNonNegativeInt(value: number | null | undefined): number {
+  if (!Number.isFinite(value ?? NaN)) return 0;
+  return Math.max(0, Math.round(value as number));
+}
 
 function roundUsd(value: number): number {
   return Math.round(value * 100) / 100;
@@ -617,12 +724,180 @@ function createSkillSnapshots(input: ControlPlaneSkillHealthInput): ControlPlane
   ];
 }
 
+function runtimeCheckToHealth(state: ControlPlaneRuntimeCheckState): ControlPlaneHealth {
+  if (state === "ok") return "operational";
+  if (state === "warning") return "degraded";
+  return "offline";
+}
+
+function buildQueueHealthSnapshot(
+  runtimeChecks: ControlPlaneRuntimeCheckInput[] | null | undefined
+): ControlPlaneQueueHealthSnapshot {
+  const checks: ControlPlaneQueueCheckSnapshot[] = [];
+  for (const checkId of QUEUE_CHECK_IDS) {
+    const found = runtimeChecks?.find((check) => check.id === checkId);
+    if (found) {
+      checks.push({
+        id: found.id,
+        label: found.label,
+        state: runtimeCheckToHealth(found.state),
+        detail: found.detail,
+      });
+      continue;
+    }
+
+    checks.push({
+      id: checkId,
+      label: checkId,
+      state: "degraded",
+      detail: "Runtime check not available in this snapshot.",
+    });
+  }
+
+  const offlineChecks = checks.filter((check) => check.state === "offline").length;
+  const degradedChecks = checks.filter((check) => check.state === "degraded").length;
+  let state: ControlPlaneHealth = "operational";
+  if (offlineChecks > 0) {
+    state = "offline";
+  } else if (degradedChecks > 0) {
+    state = "degraded";
+  }
+
+  return {
+    state,
+    degradedChecks,
+    offlineChecks,
+    checks,
+  };
+}
+
+function buildSocialDispatchSnapshot(
+  socialPipeline: ControlPlaneSocialPipelineInput | null | undefined
+): ControlPlaneSocialDispatchSnapshot {
+  if (!socialPipeline) {
+    return {
+      state: "degraded",
+      pendingApproval: 0,
+      pendingExternalTool: 0,
+      failedDispatch: 0,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+    };
+  }
+
+  const pendingApproval = asNonNegativeInt(socialPipeline.draftsPendingApproval);
+  const pendingExternalTool = asNonNegativeInt(socialPipeline.dispatchPendingExternalTool);
+  const failedDispatch = asNonNegativeInt(socialPipeline.dispatchFailed);
+  const state: ControlPlaneHealth =
+    failedDispatch > 0 || pendingExternalTool > 25 || pendingApproval > 25
+      ? "degraded"
+      : "operational";
+
+  return {
+    state,
+    pendingApproval,
+    pendingExternalTool,
+    failedDispatch,
+    lastSuccessAt: socialPipeline.lastDispatchSuccessAt || null,
+    lastFailureAt: socialPipeline.lastDispatchFailureAt || null,
+  };
+}
+
+function buildRevenueKpiSnapshot(
+  weeklyKpi: ControlPlaneRevenueKpiInput | null | undefined
+): ControlPlaneRevenueKpiSnapshot {
+  if (!weeklyKpi) {
+    return {
+      state: "degraded",
+      weekStartDate: null,
+      weekEndDate: null,
+      generatedAt: null,
+      leadsSourced: 0,
+      closeRatePct: 0,
+      depositsCollected: 0,
+      dealsWon: 0,
+      pipelineValueUsd: 0,
+      decisionSummary: { scale: 0, fix: 0, kill: 0, watch: 0 },
+    };
+  }
+
+  const decisionSummary = {
+    scale: asNonNegativeInt(weeklyKpi.decisionSummary.scale),
+    fix: asNonNegativeInt(weeklyKpi.decisionSummary.fix),
+    kill: asNonNegativeInt(weeklyKpi.decisionSummary.kill),
+    watch: asNonNegativeInt(weeklyKpi.decisionSummary.watch),
+  };
+  const closeRatePct = roundUsd(Math.max(0, Number(weeklyKpi.closeRatePct) || 0));
+  const leadsSourced = asNonNegativeInt(weeklyKpi.leadsSourced);
+  const depositsCollected = asNonNegativeInt(weeklyKpi.depositsCollected);
+  const dealsWon = asNonNegativeInt(weeklyKpi.dealsWon);
+  const pipelineValueUsd = roundUsd(Math.max(0, Number(weeklyKpi.pipelineValueUsd) || 0));
+  const hasRecentReport = Boolean(weeklyKpi.generatedAt);
+
+  let state: ControlPlaneHealth = "degraded";
+  if (hasRecentReport && decisionSummary.kill === 0 && (depositsCollected > 0 || closeRatePct > 0 || leadsSourced > 0)) {
+    state = "operational";
+  } else if (hasRecentReport && decisionSummary.kill === 0 && decisionSummary.fix === 0) {
+    state = "operational";
+  }
+
+  return {
+    state,
+    weekStartDate: weeklyKpi.weekStartDate || null,
+    weekEndDate: weeklyKpi.weekEndDate || null,
+    generatedAt: weeklyKpi.generatedAt || null,
+    leadsSourced,
+    closeRatePct,
+    depositsCollected,
+    dealsWon,
+    pipelineValueUsd,
+    decisionSummary,
+  };
+}
+
+function buildOperationsSnapshot(args: {
+  runtimeChecks: ControlPlaneRuntimeCheckInput[] | null | undefined;
+  socialPipeline: ControlPlaneSocialPipelineInput | null | undefined;
+  weeklyKpi: ControlPlaneRevenueKpiInput | null | undefined;
+  posWorker: ControlPlanePosWorkerInput | null | undefined;
+}): ControlPlaneOperationsSnapshot {
+  return {
+    queueHealth: buildQueueHealthSnapshot(args.runtimeChecks),
+    socialDispatch: buildSocialDispatchSnapshot(args.socialPipeline),
+    revenueKpi: buildRevenueKpiSnapshot(args.weeklyKpi),
+    posWorker: args.posWorker
+      ? {
+          state: args.posWorker.health,
+          detail: args.posWorker.detail,
+          queuedEvents: asNonNegativeInt(args.posWorker.queuedEvents),
+          blockedEvents: asNonNegativeInt(args.posWorker.blockedEvents),
+          deadLetterEvents: asNonNegativeInt(args.posWorker.deadLetterEvents),
+          outboxQueued: asNonNegativeInt(args.posWorker.outboxQueued),
+          oldestPendingSeconds: asNonNegativeInt(args.posWorker.oldestPendingSeconds),
+          lastWebhookAt: args.posWorker.lastWebhookAt || null,
+        }
+      : {
+          state: "degraded",
+          detail: "No POS worker snapshot available yet.",
+          queuedEvents: 0,
+          blockedEvents: 0,
+          deadLetterEvents: 0,
+          outboxQueued: 0,
+          oldestPendingSeconds: 0,
+          lastWebhookAt: null,
+        },
+  };
+}
+
 function buildRecommendations(args: {
   services: ControlPlaneServiceSnapshot[];
   alerts: LeadRunAlert[];
   unresolvedBugs: number;
   agents: ControlPlaneAgentSnapshot[];
   driveSummary: ControlPlaneDriveSummary;
+  queueHealth: ControlPlaneQueueHealthSnapshot;
+  socialDispatch: ControlPlaneSocialDispatchSnapshot;
+  revenueKpi: ControlPlaneRevenueKpiSnapshot;
 }): string[] {
   const recommendations: string[] = [];
   const serviceById = new Map(args.services.map((service) => [service.id, service]));
@@ -660,6 +935,24 @@ function buildRecommendations(args: {
   const squarePos = serviceById.get("square_pos");
   if (squarePos?.state !== "operational") {
     recommendations.push("Review Square POS worker queue/dead-letter status before enabling fully autonomous invoice/refund actions.");
+  }
+
+  if (args.queueHealth.state !== "operational") {
+    recommendations.push(
+      `Resolve queue configuration drift (${args.queueHealth.offlineChecks} offline, ${args.queueHealth.degradedChecks} degraded queue checks).`
+    );
+  }
+
+  if (args.socialDispatch.failedDispatch > 0) {
+    recommendations.push(
+      `Clear ${args.socialDispatch.failedDispatch} failed social dispatch item(s) before scaling autonomous publishing.`
+    );
+  }
+
+  if (args.revenueKpi.decisionSummary.kill > 0) {
+    recommendations.push(
+      `Retire or replace ${args.revenueKpi.decisionSummary.kill} underperforming revenue variant(s) this week.`
+    );
   }
 
   if (args.driveSummary.staleDays !== null && args.driveSummary.staleDays > 7) {
@@ -828,12 +1121,21 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     health = "offline";
   }
 
+  const operations = buildOperationsSnapshot({
+    runtimeChecks: input.runtimeChecks,
+    socialPipeline: input.socialPipeline,
+    weeklyKpi: input.weeklyKpi,
+    posWorker: input.posWorker,
+  });
   const recommendations = buildRecommendations({
     services: serviceList,
     alerts: input.alerts,
     unresolvedBugs,
     agents,
     driveSummary: input.driveSummary,
+    queueHealth: operations.queueHealth,
+    socialDispatch: operations.socialDispatch,
+    revenueKpi: operations.revenueKpi,
   });
 
   return {
@@ -864,6 +1166,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
       alerts: alerts.slice(0, 8),
       recommendations,
     },
+    operations,
     costModel: {
       method: costMethod,
       assumptions: costAssumptions,

@@ -146,6 +146,35 @@ describe("buildControlPlaneSnapshot", () => {
         deadLetterEvents: 0,
         outboxQueued: 0,
       },
+      runtimeChecks: [
+        { id: "lead-run-queue", label: "Lead run queue", state: "ok", detail: "ready" },
+        { id: "lead-run-queue-oidc", label: "Lead run OIDC", state: "ok", detail: "ready" },
+        { id: "followups-queue", label: "Followups queue", state: "ok", detail: "ready" },
+        { id: "competitor-monitor-queue", label: "Competitor queue", state: "ok", detail: "ready" },
+      ],
+      socialPipeline: {
+        draftsPendingApproval: 1,
+        dispatchPendingExternalTool: 0,
+        dispatchFailed: 0,
+        lastDispatchSuccessAt: "2026-02-16T17:58:00.000Z",
+        lastDispatchFailureAt: null,
+      },
+      weeklyKpi: {
+        weekStartDate: "2026-02-10",
+        weekEndDate: "2026-02-16",
+        generatedAt: "2026-02-16T17:59:00.000Z",
+        leadsSourced: 12,
+        closeRatePct: 16.6,
+        depositsCollected: 2,
+        dealsWon: 2,
+        pipelineValueUsd: 7300,
+        decisionSummary: {
+          scale: 1,
+          fix: 0,
+          kill: 0,
+          watch: 1,
+        },
+      },
       billing: {
         capturedAt: "2026-02-16T18:00:00.000Z",
         providers: [
@@ -193,6 +222,10 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("operational");
     expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("operational");
+    expect(snapshot.operations.queueHealth.state).toBe("operational");
+    expect(snapshot.operations.socialDispatch.state).toBe("operational");
+    expect(snapshot.operations.revenueKpi.state).toBe("operational");
+    expect(snapshot.operations.revenueKpi.decisionSummary.scale).toBe(1);
   });
 
   it("marks connector services degraded when endpoint format is invalid", () => {

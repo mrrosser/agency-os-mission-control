@@ -89,6 +89,54 @@ interface ControlPlaneSnapshot {
     alerts: DiagnosticAlert[];
     recommendations: string[];
   };
+  operations: {
+    queueHealth: {
+      state: Health;
+      degradedChecks: number;
+      offlineChecks: number;
+      checks: Array<{
+        id: string;
+        label: string;
+        state: Health;
+        detail: string;
+      }>;
+    };
+    socialDispatch: {
+      state: Health;
+      pendingApproval: number;
+      pendingExternalTool: number;
+      failedDispatch: number;
+      lastSuccessAt: string | null;
+      lastFailureAt: string | null;
+    };
+    revenueKpi: {
+      state: Health;
+      weekStartDate: string | null;
+      weekEndDate: string | null;
+      generatedAt: string | null;
+      leadsSourced: number;
+      closeRatePct: number;
+      depositsCollected: number;
+      dealsWon: number;
+      pipelineValueUsd: number;
+      decisionSummary: {
+        scale: number;
+        fix: number;
+        kill: number;
+        watch: number;
+      };
+    };
+    posWorker: {
+      state: Health;
+      detail: string;
+      queuedEvents: number;
+      blockedEvents: number;
+      deadLetterEvents: number;
+      outboxQueued: number;
+      oldestPendingSeconds: number;
+      lastWebhookAt: string | null;
+    };
+  };
   costModel: {
     method: string;
     assumptions: string[];
@@ -433,6 +481,101 @@ export default function AgentNexusPage() {
                   </div>
                   <p className="text-2xl font-semibold">${snapshot.summary.projectedMonthlyCostUsd.toFixed(2)}</p>
                   <p className="text-xs text-zinc-400">{costMethodLabel(snapshot.costModel.method)}</p>
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">POS Worker</p>
+                    <Badge className={HEALTH_BADGE[snapshot.operations.posWorker.state]}>
+                      {snapshot.operations.posWorker.state}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.operations.posWorker.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Queue {snapshot.operations.posWorker.queuedEvents} • Blocked {snapshot.operations.posWorker.blockedEvents} • Dead-letter{" "}
+                    {snapshot.operations.posWorker.deadLetterEvents}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Outbox {snapshot.operations.posWorker.outboxQueued} • Oldest pending {snapshot.operations.posWorker.oldestPendingSeconds}s
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Last webhook: {formatTimestamp(snapshot.operations.posWorker.lastWebhookAt)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Social Dispatch</p>
+                    <Badge className={HEALTH_BADGE[snapshot.operations.socialDispatch.state]}>
+                      {snapshot.operations.socialDispatch.state}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Pending approvals {snapshot.operations.socialDispatch.pendingApproval} • Queue pending{" "}
+                    {snapshot.operations.socialDispatch.pendingExternalTool}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Failed dispatch {snapshot.operations.socialDispatch.failedDispatch}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Last success: {formatTimestamp(snapshot.operations.socialDispatch.lastSuccessAt)}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Last failure: {formatTimestamp(snapshot.operations.socialDispatch.lastFailureAt)}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Queue Health</p>
+                    <Badge className={HEALTH_BADGE[snapshot.operations.queueHealth.state]}>
+                      {snapshot.operations.queueHealth.state}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Offline {snapshot.operations.queueHealth.offlineChecks} • Degraded {snapshot.operations.queueHealth.degradedChecks}
+                  </p>
+                  <div className="space-y-1">
+                    {snapshot.operations.queueHealth.checks.map((check) => (
+                      <p key={check.id} className="text-xs text-zinc-400">
+                        <span className="text-zinc-200">{check.label}</span>: {check.state}
+                      </p>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Revenue KPI</p>
+                    <Badge className={HEALTH_BADGE[snapshot.operations.revenueKpi.state]}>
+                      {snapshot.operations.revenueKpi.state}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-500">
+                    Week: {snapshot.operations.revenueKpi.weekStartDate || "n/a"} -{" "}
+                    {snapshot.operations.revenueKpi.weekEndDate || "n/a"}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Leads {snapshot.operations.revenueKpi.leadsSourced} • Close {snapshot.operations.revenueKpi.closeRatePct.toFixed(1)}% • Deposits{" "}
+                    {snapshot.operations.revenueKpi.depositsCollected}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Decisions: scale {snapshot.operations.revenueKpi.decisionSummary.scale} / fix{" "}
+                    {snapshot.operations.revenueKpi.decisionSummary.fix} / kill {snapshot.operations.revenueKpi.decisionSummary.kill}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    KPI snapshot: {formatTimestamp(snapshot.operations.revenueKpi.generatedAt)}
+                  </p>
                 </CardContent>
               </Card>
             </section>

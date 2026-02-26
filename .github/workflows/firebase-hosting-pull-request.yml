@@ -74,12 +74,65 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+          LEAD_RUNS_TASK_QUEUE: ${{ vars.LEAD_RUNS_TASK_QUEUE || 'lead-runs-worker' }}
+          LEAD_RUNS_TASK_LOCATION: ${{ vars.LEAD_RUNS_TASK_LOCATION || 'us-central1' }}
+          LEAD_RUNS_TASK_SERVICE_ACCOUNT: ${{ vars.LEAD_RUNS_TASK_SERVICE_ACCOUNT || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
+          LEAD_SOURCE_BUDGET_MAX_COST_USD: ${{ vars.LEAD_SOURCE_BUDGET_MAX_COST_USD || '2' }}
+          LEAD_SOURCE_BUDGET_MAX_PAGES: ${{ vars.LEAD_SOURCE_BUDGET_MAX_PAGES || '4' }}
+          LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC: ${{ vars.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC || '50' }}
+          SOCIAL_DRAFT_APPROVAL_BASE_URL: ${{ vars.SOCIAL_DRAFT_APPROVAL_BASE_URL || vars.PROD_SMOKE_BASE_URL || 'https://leadflow-review.web.app' }}
+          SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
+          SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES: ${{ vars.SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES || '' }}
+          SMAUTO_MCP_SERVER_URL: ${{ vars.SMAUTO_MCP_SERVER_URL || 'https://social-mcp-hau2jvawpa-uc.a.run.app/mcp' }}
+          SMAUTO_MCP_AUTH_MODE: ${{ vars.SMAUTO_MCP_AUTH_MODE || 'id_token' }}
+          SMAUTO_MCP_ID_TOKEN_AUDIENCE: ${{ vars.SMAUTO_MCP_ID_TOKEN_AUDIENCE || 'https://social-mcp-hau2jvawpa-uc.a.run.app' }}
+          SMAUTO_MCP_SOCIAL_DISPATCH_TOOL: ${{ vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL || 'social.dispatch.enqueue' }}
+          SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED: ${{ vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED || 'false' }}
+          SMAUTO_MCP_PROTOCOL_VERSION: ${{ vars.SMAUTO_MCP_PROTOCOL_VERSION || '2025-03-26' }}
+          LEADOPS_MCP_SERVER_URL: ${{ vars.LEADOPS_MCP_SERVER_URL || 'https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp' }}
+          LEADOPS_MCP_API_KEY: ${{ secrets.LEADOPS_MCP_API_KEY || '' }}
         run: |
           set -euo pipefail
+          SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format='value(status.url)')"
+          if [ -z "$SERVICE_URL" ]; then
+            echo "Unable to resolve Cloud Run service URL for $FIREBASE_SSR_SERVICE."
+            exit 1
+          fi
+          OIDC_AUDIENCES="$SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES"
+          if [ -z "$OIDC_AUDIENCES" ]; then
+            OIDC_AUDIENCES="$SERVICE_URL/api/social/drafts/weekly/worker-task,$SERVICE_URL/api/social/drafts/rng-weekly/worker-task"
+          fi
+          ENV_UPDATES="SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=$SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS##SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES=$OIDC_AUDIENCES"
+          append_env_update() {
+            local name="$1"
+            local value="$2"
+            if [ -n "$value" ]; then
+              ENV_UPDATES="$ENV_UPDATES##$name=$value"
+            fi
+          }
+          append_env_update "LEAD_RUNS_TASK_QUEUE" "$LEAD_RUNS_TASK_QUEUE"
+          append_env_update "LEAD_RUNS_TASK_LOCATION" "$LEAD_RUNS_TASK_LOCATION"
+          append_env_update "LEAD_RUNS_TASK_SERVICE_ACCOUNT" "$LEAD_RUNS_TASK_SERVICE_ACCOUNT"
+          append_env_update "LEAD_SOURCE_BUDGET_MAX_COST_USD" "$LEAD_SOURCE_BUDGET_MAX_COST_USD"
+          append_env_update "LEAD_SOURCE_BUDGET_MAX_PAGES" "$LEAD_SOURCE_BUDGET_MAX_PAGES"
+          append_env_update "LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC" "$LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC"
+          append_env_update "SOCIAL_DRAFT_APPROVAL_BASE_URL" "$SOCIAL_DRAFT_APPROVAL_BASE_URL"
+          append_env_update "SMAUTO_MCP_SERVER_URL" "$SMAUTO_MCP_SERVER_URL"
+          append_env_update "SMAUTO_MCP_AUTH_MODE" "$SMAUTO_MCP_AUTH_MODE"
+          append_env_update "SMAUTO_MCP_ID_TOKEN_AUDIENCE" "$SMAUTO_MCP_ID_TOKEN_AUDIENCE"
+          append_env_update "SMAUTO_MCP_SOCIAL_DISPATCH_TOOL" "$SMAUTO_MCP_SOCIAL_DISPATCH_TOOL"
+          append_env_update "SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED" "$SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED"
+          append_env_update "SMAUTO_MCP_PROTOCOL_VERSION" "$SMAUTO_MCP_PROTOCOL_VERSION"
+          append_env_update "LEADOPS_MCP_SERVER_URL" "$LEADOPS_MCP_SERVER_URL"
+          append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --memory 512Mi \
+            --update-env-vars "^##^$ENV_UPDATES" \
             --quiet
       - name: Firebase preview deploy skipped (missing WIF config)
         if: ${{ env.GCP_AUTH_READY != '1' }}

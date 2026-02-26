@@ -286,6 +286,10 @@ describe("agents control-plane route", () => {
     expect(Array.isArray(payload.skills)).toBe(true);
     expect(Array.isArray(payload.diagnostics.alerts)).toBe(true);
     expect(Array.isArray(payload.diagnostics.bugs)).toBe(true);
+    expect(typeof payload.operations?.queueHealth?.state).toBe("string");
+    expect(typeof payload.operations?.socialDispatch?.state).toBe("string");
+    expect(typeof payload.operations?.revenueKpi?.state).toBe("string");
+    expect(typeof payload.operations?.posWorker?.state).toBe("string");
     expect(typeof payload.summary.projectedMonthlyCostUsd).toBe("number");
     expect(payload.costModel.method).toBe("live-v1");
     expect(Array.isArray(payload.costModel.providerBilling)).toBe(true);

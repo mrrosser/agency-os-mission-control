@@ -17,12 +17,17 @@ import {
   type ControlPlaneDriveSummary,
   type ControlPlaneExternalToolInput,
   type ControlPlanePosWorkerInput,
+  type ControlPlaneRevenueKpiInput,
+  type ControlPlaneRuntimeCheckInput,
   type ControlPlaneSkillHealthInput,
+  type ControlPlaneSocialPipelineInput,
   type ControlPlaneTelemetryGroup,
 } from "@/lib/agent-control-plane";
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
 import type { Logger } from "@/lib/logging";
 import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
+import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
+import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
 
 const TELEMETRY_GROUP_LIMIT = 8;
 const KNOWLEDGE_PACK_PATH = path.join(
@@ -61,6 +66,15 @@ function staleDays(lastRunAtIso: string | null): number | null {
   const parsed = Date.parse(lastRunAtIso);
   if (!Number.isFinite(parsed)) return null;
   return Math.max(0, Math.floor((Date.now() - parsed) / (24 * 60 * 60 * 1000)));
+}
+
+function asNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 async function readDriveSummary(uid: string): Promise<ControlPlaneDriveSummary> {
@@ -223,11 +237,87 @@ async function readPosWorkerSummary(
   }
 }
 
+function readRuntimeChecks(): ControlPlaneRuntimeCheckInput[] {
+  const report = buildRuntimePreflightReport();
+  return report.checks.map((check) => ({
+    id: check.id,
+    label: check.label,
+    state: check.state,
+    detail: check.detail,
+  }));
+}
+
+async function readSocialPipelineSummary(
+  uid: string,
+  log: Logger
+): Promise<ControlPlaneSocialPipelineInput | null> {
+  try {
+    const pipeline = await getSocialPipelineHealthSummary(uid);
+    return {
+      draftsPendingApproval: pipeline.drafts.pendingApproval,
+      dispatchPendingExternalTool: pipeline.dispatch.pendingExternalTool,
+      dispatchFailed: pipeline.dispatch.failed,
+      lastDispatchSuccessAt: pipeline.dispatch.lastSuccessAt,
+      lastDispatchFailureAt: pipeline.dispatch.lastFailureAt,
+    };
+  } catch (error) {
+    log.warn("agents.control_plane.social_pipeline_unavailable", {
+      uid,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function readWeeklyKpiSummary(uid: string): Promise<ControlPlaneRevenueKpiInput | null> {
+  const snap = await getAdminDb()
+    .collection("identities")
+    .doc(uid)
+    .collection("revenue_kpi_reports")
+    .doc("latest")
+    .get();
+
+  if (!snap.exists) return null;
+  const row = (snap.data() || {}) as Record<string, unknown>;
+  const summary = (row.summary || {}) as Record<string, unknown>;
+  const decisionSummary = (row.decisionSummary || {}) as Record<string, unknown>;
+
+  return {
+    weekStartDate: asString(row.weekStartDate) || null,
+    weekEndDate: asString(row.weekEndDate) || null,
+    generatedAt: toIso(row.generatedAt),
+    leadsSourced: asNumber(summary.leadsSourced),
+    closeRatePct: asNumber(summary.closeRatePct),
+    depositsCollected: asNumber(summary.depositsCollected),
+    dealsWon: asNumber(summary.dealsWon),
+    pipelineValueUsd: asNumber(summary.pipelineValueUsd),
+    decisionSummary: {
+      scale: asNumber(decisionSummary.scale),
+      fix: asNumber(decisionSummary.fix),
+      kill: asNumber(decisionSummary.kill),
+      watch: asNumber(decisionSummary.watch),
+    },
+  };
+}
+
 export const GET = withApiHandler(
   async ({ request, log }) => {
     const user = await requireFirebaseAuth(request, log);
 
-    const [spaces, secretStatus, googleTokens, orgId, driveSummary, skillHealth, telemetryGroups, billing, posWorker] =
+    const [
+      spaces,
+      secretStatus,
+      googleTokens,
+      orgId,
+      driveSummary,
+      skillHealth,
+      telemetryGroups,
+      billing,
+      posWorker,
+      socialPipeline,
+      weeklyKpi,
+      runtimeChecks,
+    ] =
       await Promise.all([
         getAgentSpaceStatus(user.uid, log),
         getSecretStatus(user.uid),
@@ -238,6 +328,9 @@ export const GET = withApiHandler(
         listTelemetryGroups(user.uid, TELEMETRY_GROUP_LIMIT),
         pullProviderBilling({ uid: user.uid, log }),
         readPosWorkerSummary(user.uid, log),
+        readSocialPipelineSummary(user.uid, log),
+        readWeeklyKpiSummary(user.uid),
+        Promise.resolve(readRuntimeChecks()),
       ]);
 
     const [quota, alerts] = await Promise.all([
@@ -263,6 +356,9 @@ export const GET = withApiHandler(
       externalTools,
       billing,
       posWorker,
+      socialPipeline,
+      weeklyKpi,
+      runtimeChecks,
     });
 
     log.info("agents.control_plane.snapshot", {
@@ -276,6 +372,11 @@ export const GET = withApiHandler(
       leadOpsConfigured: isValidHttpUrl(externalTools.leadOpsEndpoint),
       posWorkerHealth: posWorker?.health || "unknown",
       posWorkerQueued: posWorker?.queuedEvents ?? null,
+      socialDispatchPending: snapshot.operations.socialDispatch.pendingExternalTool,
+      socialDispatchFailed: snapshot.operations.socialDispatch.failedDispatch,
+      queueHealth: snapshot.operations.queueHealth.state,
+      revenueKpiState: snapshot.operations.revenueKpi.state,
+      revenueKpiWeek: snapshot.operations.revenueKpi.weekStartDate,
     });
 
     return NextResponse.json(snapshot);

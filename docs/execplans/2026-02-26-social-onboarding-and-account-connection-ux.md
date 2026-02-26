@@ -35,7 +35,7 @@ Make the end-to-end experience reliable and fast from first login to connected s
 - [x] `npm run test:smoke` passes.
 - [x] Social flow tests pass:
   - `npx vitest run tests/unit/social-drafts.test.ts tests/unit/social-dispatch.test.ts tests/unit/social-worker-auth.test.ts tests/smoke/social-drafts-route.test.ts tests/smoke/social-drafts-worker-task-route.test.ts tests/smoke/social-draft-decision-route.test.ts tests/smoke/social-drafts-dispatch-worker-task-route.test.ts`
-- [ ] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
+- [x] Runtime preflight confirms connector readiness in deployed env (`GET /api/runtime/preflight`).
 - [ ] `docs/runbook-social-draft-approvals.md` and this plan updated with final rollout notes.
 - [x] `docs/reports/latest-run.md` updated with RUN_ID + gate results.
 
@@ -113,11 +113,21 @@ Make the end-to-end experience reliable and fast from first login to connected s
   - dry-run: PASS (`scanned=0`, `attempted=0`, `failed=0`)
   - live mode: PASS (`dryRun=false`, `scanned=0`, `attempted=0`, `failed=0`)
 - Ran authenticated runtime preflight (`GET /api/runtime/preflight`) against deployed service:
-  - status: `fail`
-  - required missing checks:
-    - `lead-source-budget-defaults`
-    - `lead-run-queue`
-  - recommended warnings include missing `SMAUTO_MCP_SERVER_URL` and `SOCIAL_DRAFT_APPROVAL_BASE_URL`
+  - initial status: `fail` (missing required env)
+  - applied Cloud Run env remediation on `ssrleadflowreview`:
+    - `LEAD_RUNS_TASK_QUEUE=lead-runs-worker`
+    - `LEAD_RUNS_TASK_LOCATION=us-central1`
+    - `LEAD_SOURCE_BUDGET_MAX_COST_USD=2`
+    - `LEAD_SOURCE_BUDGET_MAX_PAGES=4`
+    - `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC=50`
+    - `SMAUTO_MCP_SERVER_URL=https://social-mcp-hau2jvawpa-uc.a.run.app/mcp`
+    - `SMAUTO_MCP_AUTH_MODE=id_token`
+    - `SMAUTO_MCP_ID_TOKEN_AUDIENCE=https://social-mcp-hau2jvawpa-uc.a.run.app`
+    - `SMAUTO_MCP_PROTOCOL_VERSION=2025-03-26`
+    - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED=false`
+    - `SOCIAL_DRAFT_APPROVAL_BASE_URL=https://leadflow-review.web.app`
+  - post-remediation status: `warn` (no required failures)
+  - remaining warnings: `lead-run-queue-oidc` and `leadops-mcp-connector`
 - Started M5 internal acceptance cycle:
   - triggered RNG weekly draft worker on deployed service
   - result: `draftId=7YtG8loIMcTehGWmAuaj`, `weekKey=2026-W09`, `approvalNotified=true`

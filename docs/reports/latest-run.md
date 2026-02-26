@@ -12,3 +12,6 @@
 [2026-02-26T19:58:47Z] gate=social-dispatch-smoke-live cmd=npm run social:dispatch:smoke result=PASS service=ssrleadflowreview dryRun=false scanned=0 attempted=0 failed=0
 [2026-02-26T20:00:37Z] gate=runtime-preflight-auth cmd=GET /api/runtime/preflight result=FAIL status=fail missing_required=lead-source-budget-defaults,lead-run-queue warnings=followups-queue,competitor-monitor-queue,smauto-mcp-connector,smauto-mcp-auth,leadops-mcp-connector,social-draft-approval-base-url
 [2026-02-26T20:01:07Z] gate=m5-internal-acceptance-start cmd=POST /api/social/drafts/rng-weekly/worker-task result=PASS draftId=7YtG8loIMcTehGWmAuaj weekKey=2026-W09 approvalNotified=true
+[2026-02-26T20:21:54Z] gate=runtime-preflight-auth-remediated cmd=GET /api/runtime/preflight result=PASS_WITH_WARN status=warn missing_required=none warnings=lead-run-queue-oidc,leadops-mcp-connector
+[2026-02-26T20:22:12Z] gate=social-dispatch-smoke-remediated cmd=npm run social:dispatch:smoke result=PASS service=ssrleadflowreview dryRun=true scanned=0 attempted=0 failed=0
+[2026-02-26T20:22:29Z] gate=social-dispatch-smoke-live-remediated cmd=npm run social:dispatch:smoke result=PASS service=ssrleadflowreview dryRun=false scanned=0 attempted=0 failed=0

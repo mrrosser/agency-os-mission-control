@@ -49,6 +49,12 @@ No auto-posting is performed in this slice.
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required for `id_token`)
   - `SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional tool name override; default `social.dispatch.enqueue`)
   - `SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (optional; defaults `true`)
+- Dispatch status notifications (optional):
+  - `SOCIAL_DISPATCH_STATUS_NOTIFY` (`true`/`false`, default `true`)
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (default)
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS`
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG`
+  - `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF`
 
 ## Local worker example
 
@@ -113,6 +119,14 @@ curl -X POST https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app/api/social/drafts
     "retryFailed": false
   }'
 ```
+
+Scheduler setup helpers:
+- `scripts/social-dispatch-scheduler-setup.sh`
+- `scripts/social-dispatch-scheduler-setup.ps1`
+
+Default jobs created:
+- `social-dispatch-drain` (`*/10 * * * *`) for pending queue drain
+- `social-dispatch-retry-failed` (`15 * * * *`) for failed-item retries
 
 ## Weekly scheduler trigger (all businesses)
 

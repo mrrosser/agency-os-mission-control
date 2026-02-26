@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildSocialDispatchStatusCard,
   buildSmAutoToolCallRequest,
   dispatchSocialQueueItemToSmAuto,
   type SocialDispatchQueueTask,
@@ -51,6 +52,27 @@ describe("social dispatch transport helpers", () => {
     expect(request.params.name).toBe("social.dispatch.enqueue");
     expect(request.params.arguments.taskType).toBe("social_draft_dispatch");
     expect(request.params.arguments.queueId).toBe("draft_123");
+  });
+
+  it("builds a business status card for Google Space notifications", () => {
+    const card = buildSocialDispatchStatusCard({
+      uid: "uid-1",
+      correlationId: "corr-status",
+      summary: {
+        businessKey: "rts",
+        attempted: 3,
+        dispatched: 2,
+        failed: 1,
+        skipped: 0,
+        dryRun: false,
+        failures: [{ queueId: "draft_1", draftId: "draft-1", error: "timeout" }],
+      },
+    });
+    const serialized = JSON.stringify(card);
+    expect(serialized).toContain("Social Dispatch Status");
+    expect(serialized).toContain("RTS dispatch: 2 dispatched, 1 failed");
+    expect(serialized).toContain("draft-1");
+    expect(serialized).toContain("corr-status");
   });
 
   it("dispatches through MCP tools/call by default", async () => {

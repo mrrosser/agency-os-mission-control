@@ -36,6 +36,7 @@ copy .env.local.example .env.local
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
 - Optional (social draft approvals + dispatch): `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist via `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`), `SMAUTO_MCP_SERVER_URL`
+- Optional (dispatch status updates in Google Chat): `SOCIAL_DISPATCH_STATUS_NOTIFY`, `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`)
 - Optional (service-to-service weekly KPI worker): `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
@@ -132,6 +133,9 @@ npm run dev
 - Worker auth: `Authorization: Bearer <SOCIAL_DRAFT_WORKER_TOKEN>` (falls back to revenue worker token envs) or Cloud Scheduler OIDC bearer token from allowlisted service accounts (`SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`).
 - Runner script (service-safe): `npm run social:draft:run`
 - Dispatch runner script (service-safe): `npm run social:dispatch:run`
+- Dispatch scheduler setup helpers:
+  - `scripts/social-dispatch-scheduler-setup.sh` (bash)
+  - `scripts/social-dispatch-scheduler-setup.ps1` (Windows PowerShell)
 - Recommended worker base URL: `https://ssrleadflowreview-gdyt2qma6a-uc.a.run.app` (or resolve live URL with `gcloud run services describe ssrleadflowreview --project leadflow-review --region us-central1 --format='value(status.url)'`)
 - Required env:
   - `SOCIAL_DRAFT_WORKER_TOKEN`

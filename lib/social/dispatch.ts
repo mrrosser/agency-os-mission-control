@@ -5,7 +5,11 @@ import { FieldValue } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import type { Logger } from "@/lib/logging";
-import type { SocialDraftChannel, SocialDraftMediaAsset } from "@/lib/social/drafts";
+import {
+  resolveSocialDraftWebhookUrl,
+  type SocialDraftChannel,
+  type SocialDraftMediaAsset,
+} from "@/lib/social/drafts";
 
 type SocialDispatchQueueStatus = "pending_external_tool" | "dispatched" | "failed";
 type SmAutoAuthMode = "none" | "api_key" | "id_token";
@@ -66,6 +70,16 @@ export interface SocialDispatchWorkerResult {
     transport: "mcp_tools_call" | "webhook" | null;
     error: string | null;
   }>;
+}
+
+interface SocialDispatchBusinessSummary {
+  businessKey: "aicf" | "rng" | "rts";
+  attempted: number;
+  dispatched: number;
+  failed: number;
+  skipped: number;
+  dryRun: boolean;
+  failures: Array<{ queueId: string; draftId: string; error: string }>;
 }
 
 interface RunSocialDispatchWorkerArgs {
@@ -232,6 +246,20 @@ function readSocialDispatchToolName(): string {
   return asString(process.env.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL) || "social.dispatch.enqueue";
 }
 
+function readDispatchStatusNotificationsEnabled(): boolean {
+  return readBoolEnv("SOCIAL_DISPATCH_STATUS_NOTIFY", true);
+}
+
+function resolveSocialDispatchStatusWebhookUrl(businessKey: "aicf" | "rng" | "rts"): string | null {
+  const businessSpecific = asString(
+    process.env[`SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_${businessKey.toUpperCase()}`]
+  );
+  if (businessSpecific) return businessSpecific;
+  const defaultWebhook = asString(process.env.SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL);
+  if (defaultWebhook) return defaultWebhook;
+  return resolveSocialDraftWebhookUrl(businessKey);
+}
+
 async function buildSmAutoAuthHeaders(serverUrl: string): Promise<Record<string, string>> {
   const mode = readSmAutoAuthMode();
   if (mode === "none") return {};
@@ -295,6 +323,70 @@ export function buildSmAutoToolCallRequest(task: SocialDispatchQueueTask, correl
   };
 }
 
+export function buildSocialDispatchStatusCard(args: {
+  summary: SocialDispatchBusinessSummary;
+  uid: string;
+  correlationId: string;
+}): Record<string, unknown> {
+  const headline = `${args.summary.businessKey.toUpperCase()} dispatch: ${args.summary.dispatched} dispatched, ${args.summary.failed} failed`;
+  const failureLines = args.summary.failures
+    .slice(0, 5)
+    .map(
+      (item) =>
+        `- ${item.draftId} (${item.queueId}): ${String(item.error || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 180)}`
+    );
+  return {
+    text: `Social dispatch run (${args.summary.businessKey.toUpperCase()})`,
+    cardsV2: [
+      {
+        cardId: "social_dispatch_status",
+        card: {
+          header: {
+            title: "Social Dispatch Status",
+            subtitle: headline,
+          },
+          sections: [
+            {
+              widgets: [
+                {
+                  textParagraph: {
+                    text: `<b>UID:</b> ${args.uid}<br><b>Attempted:</b> ${args.summary.attempted}<br><b>Dispatched:</b> ${args.summary.dispatched}<br><b>Failed:</b> ${args.summary.failed}<br><b>Skipped:</b> ${args.summary.skipped}<br><b>Dry run:</b> ${args.summary.dryRun ? "true" : "false"}`,
+                  },
+                },
+              ],
+            },
+            ...(failureLines.length
+              ? [
+                  {
+                    widgets: [
+                      {
+                        textParagraph: {
+                          text: `<b>Failures</b><br>${failureLines.join("<br>")}`,
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
+            {
+              widgets: [
+                {
+                  textParagraph: {
+                    text: `<b>Correlation ID:</b> ${args.correlationId}`,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 function snippet(value: string, maxLength = 800): string | null {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (!normalized) return null;
@@ -328,6 +420,7 @@ export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs)
 
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
     "X-Correlation-Id": args.correlationId,
     "X-Idempotency-Key": args.task.queueId,
     ...authHeaders,
@@ -585,6 +678,74 @@ async function markDispatchFailed(args: {
   });
 }
 
+function formatDispatchError(error: unknown): string {
+  if (error instanceof ApiError) {
+    const detail = (error.details || {}) as Record<string, unknown>;
+    const parts = [error.message];
+    const status = asInt(detail.status, 0);
+    if (status > 0) parts.push(`status=${status}`);
+    const transport = asString(detail.transport);
+    if (transport) parts.push(`transport=${transport}`);
+    const body = asString(detail.body);
+    if (body) parts.push(`body=${body}`);
+    return parts.join(" | ");
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+async function postBusinessDispatchSummary(args: {
+  summary: SocialDispatchBusinessSummary;
+  uid: string;
+  correlationId: string;
+  log: Logger;
+}): Promise<void> {
+  if (!readDispatchStatusNotificationsEnabled()) return;
+  if (args.summary.attempted === 0) return;
+
+  const webhookUrl = resolveSocialDispatchStatusWebhookUrl(args.summary.businessKey);
+  if (!webhookUrl) return;
+
+  const payload = buildSocialDispatchStatusCard({
+    summary: args.summary,
+    uid: args.uid,
+    correlationId: args.correlationId,
+  });
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      args.log.warn("social.dispatch.status_notify_failed", {
+        businessKey: args.summary.businessKey,
+        status: response.status,
+        body: snippet(body),
+        correlationId: args.correlationId,
+      });
+      return;
+    }
+    args.log.info("social.dispatch.status_notified", {
+      businessKey: args.summary.businessKey,
+      attempted: args.summary.attempted,
+      dispatched: args.summary.dispatched,
+      failed: args.summary.failed,
+      correlationId: args.correlationId,
+    });
+  } catch (error) {
+    args.log.warn("social.dispatch.status_notify_error", {
+      businessKey: args.summary.businessKey,
+      message: error instanceof Error ? error.message : String(error),
+      correlationId: args.correlationId,
+    });
+  }
+}
+
 export async function runSocialDispatchWorker(
   args: RunSocialDispatchWorkerArgs
 ): Promise<SocialDispatchWorkerResult> {
@@ -609,6 +770,35 @@ export async function runSocialDispatchWorker(
     failed: 0,
     skipped: 0,
     items: [],
+  };
+  const byBusiness: Record<"aicf" | "rng" | "rts", SocialDispatchBusinessSummary> = {
+    aicf: {
+      businessKey: "aicf",
+      attempted: 0,
+      dispatched: 0,
+      failed: 0,
+      skipped: 0,
+      dryRun,
+      failures: [],
+    },
+    rng: {
+      businessKey: "rng",
+      attempted: 0,
+      dispatched: 0,
+      failed: 0,
+      skipped: 0,
+      dryRun,
+      failures: [],
+    },
+    rts: {
+      businessKey: "rts",
+      attempted: 0,
+      dispatched: 0,
+      failed: 0,
+      skipped: 0,
+      dryRun,
+      failures: [],
+    },
   };
 
   args.log.info("social.dispatch.worker.started", {
@@ -645,9 +835,11 @@ export async function runSocialDispatchWorker(
       }
       continue;
     }
+    const businessSummary = byBusiness[rawTask.businessKey];
 
     if (dryRun) {
       result.attempted += 1;
+      businessSummary.attempted += 1;
       result.items.push({
         queueId: rawTask.queueId,
         draftId: rawTask.draftId,
@@ -666,6 +858,7 @@ export async function runSocialDispatchWorker(
     });
     if (claim.state === "skip") {
       result.skipped += 1;
+      businessSummary.skipped += 1;
       result.items.push({
         queueId: rawTask.queueId,
         draftId: rawTask.draftId,
@@ -677,6 +870,12 @@ export async function runSocialDispatchWorker(
     }
     if (claim.state === "invalid") {
       result.failed += 1;
+      businessSummary.failed += 1;
+      businessSummary.failures.push({
+        queueId: rawTask.queueId,
+        draftId: rawTask.draftId,
+        error: claim.reason,
+      });
       result.items.push({
         queueId: rawTask.queueId,
         draftId: rawTask.draftId,
@@ -688,6 +887,7 @@ export async function runSocialDispatchWorker(
     }
 
     result.attempted += 1;
+    businessSummary.attempted += 1;
     try {
       const dispatchResult = await dispatchSocialQueueItemToSmAuto({
         task: claim.task,
@@ -703,6 +903,7 @@ export async function runSocialDispatchWorker(
         correlationId: args.correlationId,
       });
       result.dispatched += 1;
+      businessSummary.dispatched += 1;
       result.items.push({
         queueId: claim.task.queueId,
         draftId: claim.task.draftId,
@@ -711,7 +912,7 @@ export async function runSocialDispatchWorker(
         error: null,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = formatDispatchError(error);
       await markDispatchFailed({
         uid: args.uid,
         task: claim.task,
@@ -721,6 +922,12 @@ export async function runSocialDispatchWorker(
         correlationId: args.correlationId,
       });
       result.failed += 1;
+      businessSummary.failed += 1;
+      businessSummary.failures.push({
+        queueId: claim.task.queueId,
+        draftId: claim.task.draftId,
+        error: message,
+      });
       result.items.push({
         queueId: claim.task.queueId,
         draftId: claim.task.draftId,
@@ -749,6 +956,17 @@ export async function runSocialDispatchWorker(
     skipped: result.skipped,
     correlationId: args.correlationId,
   });
+
+  await Promise.all(
+    Object.values(byBusiness).map((summary) =>
+      postBusinessDispatchSummary({
+        summary,
+        uid: args.uid,
+        correlationId: args.correlationId,
+        log: args.log,
+      })
+    )
+  );
 
   return result;
 }

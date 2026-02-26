@@ -20,6 +20,7 @@ No auto-posting is performed in this slice.
 - `GET /api/social/drafts` (auth required)  
 - `POST /api/social/drafts` (auth required)  
 - `POST /api/social/drafts/worker-task` (worker token)  
+- `POST /api/social/drafts/rng-weekly/worker-task` (worker token, recurring-safe weekly idempotency)
 - `GET /api/social/drafts/{draftId}/decision` (tokenized approval link)
 
 ## Required env vars
@@ -53,6 +54,47 @@ curl -X POST http://localhost:3000/api/social/drafts/worker-task \
     "requestApproval": true
   }'
 ```
+
+## OpenCall service runner (recommended)
+
+Use the repo runner to trigger `POST /api/social/drafts/worker-task` with env-only secrets:
+
+```bash
+SOCIAL_DRAFT_BASE_URL=https://ssrleadflowreview-450880825453.us-central1.run.app \
+SOCIAL_DRAFT_WORKER_TOKEN=*** \
+SOCIAL_DRAFT_UID=DM5ZZngePXXhNgN85Afi7W4Knoz2 \
+SOCIAL_DRAFT_BUSINESS_KEY=rng \
+SOCIAL_DRAFT_CHANNELS=instagram_post,facebook_post \
+SOCIAL_DRAFT_CAPTION="RNG weekly drop teaser with CTA to profile link." \
+SOCIAL_DRAFT_MEDIA_JSON='[{"type":"image","url":"https://cdn.example.com/rng-weekly.jpg"}]' \
+npm run social:draft:run
+```
+
+Notes:
+- Use the Cloud Run service URL for worker automation (current: `https://ssrleadflowreview-450880825453.us-central1.run.app`).
+- Keep `https://leadflow-review.web.app` for operator/browser routes and approval callback base URL.
+- Keep `SOCIAL_DRAFT_REQUEST_APPROVAL=true` so every draft goes through Space approval.
+- Set `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG` to route RNG drafts into your phone-visible Space.
+
+## Weekly RNG scheduler trigger
+
+Use the weekly worker route to avoid duplicate replays across recurring runs. It derives a week key (`YYYY-Wnn`) and uses it as idempotency scope.
+
+```bash
+curl -X POST https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+  -H "Authorization: Bearer ${SOCIAL_DRAFT_WORKER_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "uid": "DM5ZZngePXXhNgN85Afi7W4Knoz2",
+    "requestApproval": true,
+    "source": "openclaw_social_orchestrator"
+  }'
+```
+
+Optional payload fields:
+- `caption`: override generated weekly caption.
+- `channels`: defaults to `["instagram_post","facebook_post"]`.
+- `weekKey`: manual override for controlled replay/testing.
 
 ## Authenticated operator example
 
@@ -95,3 +137,11 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
 - Approval links expire (default 168h).
 - Worker calls require `SOCIAL_DRAFT_WORKER_TOKEN` (or configured fallback worker token).
 - External create action (Google Space post) is routed through idempotent API execution.
+
+## Phone approval UX
+
+1. Open Google Chat app (same Space webhook destination).
+2. Open the Social Draft card and review caption/media previews.
+3. Tap **Approve Draft** or **Reject Draft**.
+4. Confirm success page in mobile browser (`Draft approved successfully.` or `Draft rejected successfully.`).
+5. Approved drafts move to `identities/{uid}/social_dispatch_queue/*` with `status=pending_external_tool`.

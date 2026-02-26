@@ -1,12 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   buildGoogleChatSocialDraftCard,
   buildSocialDispatchQueuePayload,
   buildSocialDraftDecisionUrl,
   hashSocialDraftApprovalToken,
+  resolveSocialDraftWebhookUrl,
   socialDispatchQueueDocId,
   type SocialDraftRecord,
 } from "@/lib/social/drafts";
+
+afterEach(() => {
+  delete process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL;
+  delete process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF;
+  delete process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG;
+  delete process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS;
+  delete process.env.GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL;
+});
 
 describe("social drafts helpers", () => {
   it("hashes approval tokens deterministically", () => {
@@ -121,5 +130,18 @@ describe("social drafts helpers", () => {
     expect(payload.status).toBe("pending_external_tool");
     expect(payload.externalTool).toBe("SMAuto");
     expect(payload.channels).toEqual(["instagram_story", "facebook_post"]);
+  });
+
+  it("resolves business-specific Google Space webhook before default webhook", () => {
+    process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL = "https://chat.example.com/default";
+    process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG = "https://chat.example.com/rng";
+
+    expect(resolveSocialDraftWebhookUrl("rng")).toBe("https://chat.example.com/rng");
+    expect(resolveSocialDraftWebhookUrl("rts")).toBe("https://chat.example.com/default");
+  });
+
+  it("falls back to legacy social webhook env when draft webhook envs are unset", () => {
+    process.env.GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL = "https://chat.example.com/legacy";
+    expect(resolveSocialDraftWebhookUrl("aicf")).toBe("https://chat.example.com/legacy");
   });
 });

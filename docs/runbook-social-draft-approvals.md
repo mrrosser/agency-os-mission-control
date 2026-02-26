@@ -30,6 +30,10 @@ No auto-posting is performed in this slice.
   - Example: `https://leadflow-review.web.app`
 - `SOCIAL_DRAFT_WORKER_TOKEN`  
   - Token for worker-task route.
+- `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS` (recommended for Scheduler OIDC)  
+  - Comma-separated service account emails allowed to call worker routes with Google OIDC bearer tokens.
+- `SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES` (optional)  
+  - Comma-separated OIDC audience allowlist. Defaults to exact request URL when omitted.
 - Google Space webhook (one of):
   - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (default for all businesses)
   - `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS`
@@ -80,6 +84,8 @@ Notes:
 
 Use the weekly worker route to avoid duplicate replays across recurring runs. It derives a week key (`YYYY-Wnn`) and uses it as idempotency scope.
 
+Manual token call:
+
 ```bash
 curl -X POST https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
   -H "Authorization: Bearer ${SOCIAL_DRAFT_WORKER_TOKEN}" \
@@ -89,6 +95,24 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker
     "requestApproval": true,
     "source": "openclaw_social_orchestrator"
   }'
+```
+
+Cloud Scheduler OIDC hardening (recommended; removes static bearer header):
+
+```bash
+gcloud scheduler jobs update http social-drafts-rng-weekly \
+  --project=leadflow-review \
+  --location=us-central1 \
+  --uri=https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+  --oidc-service-account-email=social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com \
+  --oidc-token-audience=https://leadflow-review.web.app/api/social/drafts/rng-weekly/worker-task \
+  --remove-headers=Authorization
+```
+
+Then set runtime env:
+
+```bash
+SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com
 ```
 
 Optional payload fields:
@@ -135,7 +159,7 @@ curl -X POST https://leadflow-review.web.app/api/social/drafts \
 
 - Tokenized links are hashed-at-rest (`approval.tokenHash`).
 - Approval links expire (default 168h).
-- Worker calls require `SOCIAL_DRAFT_WORKER_TOKEN` (or configured fallback worker token).
+- Worker calls require either `SOCIAL_DRAFT_WORKER_TOKEN` (or configured fallback worker token) or allowlisted Scheduler OIDC service accounts.
 - External create action (Google Space post) is routed through idempotent API execution.
 
 ## Phone approval UX

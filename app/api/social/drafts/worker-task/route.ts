@@ -1,10 +1,11 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ApiError, withApiHandler } from "@/lib/api/handler";
+import { withApiHandler } from "@/lib/api/handler";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { parseJson } from "@/lib/api/validation";
 import { createSocialDraftWithApprovalDispatch } from "@/lib/social/drafts";
+import { authorizeSocialDraftWorker } from "@/lib/social/worker-auth";
 
 const mediaSchema = z.object({
   type: z.enum(["image", "video"]),
@@ -27,38 +28,6 @@ const bodySchema = z.object({
   requestApproval: z.boolean().default(true),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
 });
-
-function readBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return "";
-  return auth.slice(7).trim();
-}
-
-function readConfiguredWorkerToken(): string {
-  const primary = String(process.env.SOCIAL_DRAFT_WORKER_TOKEN || "").trim();
-  if (primary) return primary;
-  const day30 = String(process.env.REVENUE_DAY30_WORKER_TOKEN || "").trim();
-  if (day30) return day30;
-  const day2 = String(process.env.REVENUE_DAY2_WORKER_TOKEN || "").trim();
-  if (day2) return day2;
-  return String(process.env.REVENUE_DAY1_WORKER_TOKEN || "").trim();
-}
-
-function authorizeWorker(request: Request): void {
-  const configured = readConfiguredWorkerToken();
-  if (!configured) {
-    throw new ApiError(
-      503,
-      "SOCIAL_DRAFT_WORKER_TOKEN is not configured (or fallback revenue worker token)"
-    );
-  }
-  const candidate =
-    String(request.headers.get("x-social-draft-token") || "").trim() ||
-    readBearerToken(request);
-  if (!candidate || candidate !== configured) {
-    throw new ApiError(403, "Forbidden");
-  }
-}
 
 function stableDraftIdempotencyKey(body: z.infer<typeof bodySchema>): string {
   const digest = createHash("sha256")
@@ -88,7 +57,7 @@ function resolveApprovalBaseUrl(request: { url: string; nextUrl?: { origin?: str
 
 export const POST = withApiHandler(
   async ({ request, log, correlationId }) => {
-    authorizeWorker(request);
+    await authorizeSocialDraftWorker({ request, log, route: "social.drafts.worker_task.create" });
     const body = await parseJson(request, bodySchema);
     const idempotencyKey =
       getIdempotencyKey(request, body) || stableDraftIdempotencyKey(body);

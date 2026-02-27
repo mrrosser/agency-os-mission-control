@@ -44,6 +44,7 @@ type OutreachConfig = {
   useAvatar?: boolean;
   useOutboundCall?: boolean;
   draftFirst?: boolean;
+  requireBookingConfirmation?: boolean;
 };
 
 type LeadRunTemplateDoc = {
@@ -87,6 +88,7 @@ export interface Day1RevenueAutomationResult {
     totalLeads: number;
     dryRun: boolean;
     draftFirst: boolean;
+    requireBookingConfirmation: boolean;
     useAvatar: boolean;
     useSMS: boolean;
     useOutboundCall: boolean;
@@ -148,6 +150,7 @@ export function buildDay1JobConfig(args: {
   return {
     dryRun: Boolean(args.dryRun),
     draftFirst: args.outreach?.draftFirst ?? true,
+    requireBookingConfirmation: args.outreach?.requireBookingConfirmation ?? true,
     timeZone: String(args.timeZone || "UTC").trim() || "UTC",
     businessKey,
     businessUnit: args.businessUnit,
@@ -344,6 +347,7 @@ export async function runDay1RevenueAutomation(
         totalLeads: total,
         dryRun: config.dryRun,
         draftFirst: config.draftFirst,
+        requireBookingConfirmation: config.requireBookingConfirmation !== false,
         useAvatar: config.useAvatar,
         useSMS: config.useSMS,
         useOutboundCall: config.useOutboundCall,
@@ -478,6 +482,7 @@ export async function runDay1RevenueAutomation(
         totalLeads: 0,
         dryRun: config.dryRun,
         draftFirst: config.draftFirst,
+        requireBookingConfirmation: config.requireBookingConfirmation !== false,
         useAvatar: config.useAvatar,
         useSMS: config.useSMS,
         useOutboundCall: config.useOutboundCall,
@@ -580,6 +585,7 @@ export async function runDay1RevenueAutomation(
       totalLeads: scored.length,
       dryRun: config.dryRun,
       draftFirst: config.draftFirst,
+      requireBookingConfirmation: config.requireBookingConfirmation !== false,
       useAvatar: config.useAvatar,
       useSMS: config.useSMS,
       useOutboundCall: config.useOutboundCall,

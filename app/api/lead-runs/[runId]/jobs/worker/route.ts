@@ -31,6 +31,7 @@ import { recordLeadRunOutcome, releaseLeadRunConcurrencySlot } from "@/lib/lead-
 import { availabilityDraftHtml, runScheduleAttempt, type ScheduleAttemptResult } from "@/lib/lead-runs/worker/scheduling";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
 import { findDncMatch } from "@/lib/outreach/dnc";
+import { normalizeCrmPipelineStage } from "@/lib/revenue/offers";
 
 const bodySchema = z.object({
   workerToken: z.string().min(1),
@@ -45,6 +46,12 @@ interface LeadDoc {
   industry?: string;
   source?: string;
   score?: number;
+  status?: string;
+  pipelineStage?: string;
+  bookingConfirmed?: boolean;
+  bookingConfirmedAt?: string;
+  bookingConfirmationChannel?: string;
+  bookingConfirmationSource?: string;
   stageProgress?: LeadRunStageProgress;
 }
 
@@ -90,6 +97,22 @@ const CHANNEL_RETRY_POLICY = {
   call: { maxAttempts: 2, initialDelayMs: 500 },
   avatar: { maxAttempts: 2, initialDelayMs: 700 },
 } as const;
+
+function hasBookingConfirmationSignal(lead: LeadDoc): boolean {
+  if (lead.bookingConfirmed === true) return true;
+  if (typeof lead.bookingConfirmationChannel === "string" && lead.bookingConfirmationChannel.trim()) {
+    return true;
+  }
+  if (typeof lead.bookingConfirmationSource === "string" && lead.bookingConfirmationSource.trim()) {
+    return true;
+  }
+  if (typeof lead.bookingConfirmedAt === "string" && Number.isFinite(Date.parse(lead.bookingConfirmedAt))) {
+    return true;
+  }
+
+  const stage = normalizeCrmPipelineStage(lead.pipelineStage || lead.status);
+  return stage === "booking" || stage === "proposal" || stage === "deposit_received" || stage === "won";
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -356,49 +379,9 @@ async function processLead(
 
   let meetingTime: string | undefined;
   let meetLink: string | undefined;
-  let scheduleResult: ScheduleAttemptResult = { kind: "no_slot" };
-  for (let attempt = 1; attempt <= CALENDAR_RETRY_POLICY.maxAttempts; attempt += 1) {
-    scheduleResult = await runScheduleAttempt(
-      {
-        accessToken,
-        config: args.config,
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        lead: args.lead,
-        leadEmail,
-        correlationId: args.correlationId,
-        uid: args.uid,
-        retryAttempt: attempt,
-      },
-      log
-    );
-    if (scheduleResult.kind === "scheduled") break;
-    if (attempt < CALENDAR_RETRY_POLICY.maxAttempts) {
-      diag.calendarRetries = (diag.calendarRetries || 0) + 1;
-      log.warn("lead_runs.calendar.retrying_after_no_slot", {
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        attempt,
-        maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-      });
-      await sleep(CALENDAR_RETRY_POLICY.baseBackoffMs * attempt);
-    }
-  }
-
-  if (scheduleResult.kind === "scheduled") {
-    diag.meetingsScheduled = 1;
-    meetingTime = scheduleResult.scheduledStart;
-    meetLink = scheduleResult.meetLink;
-  } else {
-    diag.noSlot = 1;
-    log.warn("lead_runs.calendar.no_slot", {
-      runId: args.runId,
-      leadDocId: args.leadDocId,
-      maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-      checkedCandidates: scheduleResult.checkedCandidates ?? 0,
-      busyCount: scheduleResult.busyCount ?? 0,
-      windowsTried: scheduleResult.windowsTried ?? 0,
-    });
+  const requireBookingConfirmation = args.config.requireBookingConfirmation !== false;
+  const bookingConfirmed = hasBookingConfirmationSignal(args.lead);
+  if (requireBookingConfirmation && !bookingConfirmed) {
     const calendarKey = buildLeadActionIdempotencyKey({
       runId: args.runId,
       leadDocId: args.leadDocId,
@@ -412,81 +395,155 @@ async function processLead(
         uid: args.uid,
         correlationId: args.correlationId,
         status: "skipped",
-        dryRun: false,
+        dryRun: args.config.dryRun,
         replayed: false,
         idempotencyKey: calendarKey,
         data: {
-          reason: "no_slot",
-          maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-          checked: scheduleResult.checkedCandidates,
-          busyCount: scheduleResult.busyCount,
-          windowsTried: scheduleResult.windowsTried,
+          reason: "awaiting_confirmation",
+          requireBookingConfirmation: true,
+          pipelineStage: normalizeCrmPipelineStage(args.lead.pipelineStage || args.lead.status),
         },
       },
       log
     );
-    if (leadEmail) {
-      const draftKey = buildLeadActionIdempotencyKey({
+    log.info("lead_runs.calendar.awaiting_confirmation", {
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      pipelineStage: normalizeCrmPipelineStage(args.lead.pipelineStage || args.lead.status),
+    });
+  } else {
+    let scheduleResult: ScheduleAttemptResult = { kind: "no_slot" };
+    for (let attempt = 1; attempt <= CALENDAR_RETRY_POLICY.maxAttempts; attempt += 1) {
+      scheduleResult = await runScheduleAttempt(
+        {
+          accessToken,
+          config: args.config,
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          lead: args.lead,
+          leadEmail,
+          correlationId: args.correlationId,
+          uid: args.uid,
+          retryAttempt: attempt,
+        },
+        log
+      );
+      if (scheduleResult.kind === "scheduled") break;
+      if (attempt < CALENDAR_RETRY_POLICY.maxAttempts) {
+        diag.calendarRetries = (diag.calendarRetries || 0) + 1;
+        log.warn("lead_runs.calendar.retrying_after_no_slot", {
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          attempt,
+          maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+        });
+        await sleep(CALENDAR_RETRY_POLICY.baseBackoffMs * attempt);
+      }
+    }
+
+    if (scheduleResult.kind === "scheduled") {
+      diag.meetingsScheduled = 1;
+      meetingTime = scheduleResult.scheduledStart;
+      meetLink = scheduleResult.meetLink;
+    } else {
+      diag.noSlot = 1;
+      log.warn("lead_runs.calendar.no_slot", {
         runId: args.runId,
         leadDocId: args.leadDocId,
-        action: "gmail.availability-draft",
+        maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+        checkedCandidates: scheduleResult.checkedCandidates ?? 0,
+        busyCount: scheduleResult.busyCount ?? 0,
+        windowsTried: scheduleResult.windowsTried ?? 0,
       });
-
-      if (args.config.dryRun) {
-        await recordLeadActionReceipt(
-          {
-            runId: args.runId,
-            leadDocId: args.leadDocId,
-            actionId: "gmail.availability_draft",
-            uid: args.uid,
-            correlationId: args.correlationId,
-            status: "simulated",
-            dryRun: true,
-            replayed: false,
-            idempotencyKey: draftKey,
-            data: { subject: `Quick scheduling question - ${args.lead.companyName || "your team"}` },
+      const calendarKey = buildLeadActionIdempotencyKey({
+        runId: args.runId,
+        leadDocId: args.leadDocId,
+        action: "calendar.schedule",
+      });
+      await recordLeadActionReceipt(
+        {
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          actionId: "calendar.booking",
+          uid: args.uid,
+          correlationId: args.correlationId,
+          status: "skipped",
+          dryRun: false,
+          replayed: false,
+          idempotencyKey: calendarKey,
+          data: {
+            reason: "no_slot",
+            maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+            checked: scheduleResult.checkedCandidates,
+            busyCount: scheduleResult.busyCount,
+            windowsTried: scheduleResult.windowsTried,
           },
-          log
-        );
-      } else {
-        const availabilityDraft = await withIdempotency(
-          { uid: args.uid, route: "gmail.draft", key: draftKey, log },
-          () =>
-            createDraftEmail(
-              accessToken,
-              {
-                to: [leadEmail],
-                subject: `Quick scheduling question - ${args.lead.companyName || "your team"}`,
-                body: availabilityDraftHtml(leadName, founderName, businessName),
-                isHtml: true,
-              },
-              log
-            )
-        );
+        },
+        log
+      );
+      if (leadEmail) {
+        const draftKey = buildLeadActionIdempotencyKey({
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          action: "gmail.availability-draft",
+        });
 
-        await recordLeadActionReceipt(
-          {
-            runId: args.runId,
-            leadDocId: args.leadDocId,
-            actionId: "gmail.availability_draft",
-            uid: args.uid,
-            correlationId: args.correlationId,
-            status: "complete",
-            dryRun: false,
-            replayed: availabilityDraft.replayed,
-            idempotencyKey: draftKey,
-            data: {
-              draftId: availabilityDraft.data.draftId,
-              messageId: availabilityDraft.data.messageId,
-              threadId: availabilityDraft.data.threadId,
+        if (args.config.dryRun) {
+          await recordLeadActionReceipt(
+            {
+              runId: args.runId,
+              leadDocId: args.leadDocId,
+              actionId: "gmail.availability_draft",
+              uid: args.uid,
+              correlationId: args.correlationId,
+              status: "simulated",
+              dryRun: true,
+              replayed: false,
+              idempotencyKey: draftKey,
+              data: { subject: `Quick scheduling question - ${args.lead.companyName || "your team"}` },
             },
-          },
-          log
-        );
-      }
+            log
+          );
+        } else {
+          const availabilityDraft = await withIdempotency(
+            { uid: args.uid, route: "gmail.draft", key: draftKey, log },
+            () =>
+              createDraftEmail(
+                accessToken,
+                {
+                  to: [leadEmail],
+                  subject: `Quick scheduling question - ${args.lead.companyName || "your team"}`,
+                  body: availabilityDraftHtml(leadName, founderName, businessName),
+                  isHtml: true,
+                },
+                log
+              )
+          );
 
-      diag.meetingsDrafted = 1;
-      diag.emailsDrafted = 1;
+          await recordLeadActionReceipt(
+            {
+              runId: args.runId,
+              leadDocId: args.leadDocId,
+              actionId: "gmail.availability_draft",
+              uid: args.uid,
+              correlationId: args.correlationId,
+              status: "complete",
+              dryRun: false,
+              replayed: availabilityDraft.replayed,
+              idempotencyKey: draftKey,
+              data: {
+                draftId: availabilityDraft.data.draftId,
+                messageId: availabilityDraft.data.messageId,
+                threadId: availabilityDraft.data.threadId,
+              },
+            },
+            log
+          );
+        }
+
+        diag.meetingsDrafted = 1;
+        diag.emailsDrafted = 1;
+      }
     }
   }
 

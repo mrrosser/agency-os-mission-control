@@ -176,6 +176,28 @@ What the script configures:
 - `revenue-day1-aicf-followup-seed-d10` (D+10, sequence 3)
 - `revenue-day1-aicf-followup-seed-d14` (D+14, sequence 4, recycle lane)
 
+### Verify scheduler lock (recommended)
+
+After creating/updating cadence jobs, run the audit script:
+
+```bash
+export GCP_PROJECT_ID=leadflow-review
+export GCP_SCHEDULER_LOCATION=us-central1
+export REVENUE_CADENCE_EXPECT_BASE_URL=https://ssrleadflowreview-<hash>-uc.a.run.app
+export REVENUE_CADENCE_EXPECT_TIMEZONE=America/Chicago
+npm run revenue:cadence:audit
+```
+
+PowerShell:
+
+```powershell
+$env:GCP_PROJECT_ID = "leadflow-review"
+$env:GCP_SCHEDULER_LOCATION = "us-central1"
+$env:REVENUE_CADENCE_EXPECT_BASE_URL = "https://ssrleadflowreview-<hash>-uc.a.run.app"
+$env:REVENUE_CADENCE_EXPECT_TIMEZONE = "America/Chicago"
+npm run revenue:cadence:audit
+```
+
 Second-pass behavior:
 - Calls the same Day1 worker with `forceRun=false`.
 - If the run already exists for the day, it does not create a new run.
@@ -194,5 +216,6 @@ Second-pass behavior:
 ## Safety
 
 - Keep `draftFirst=true` for outbound messages unless explicitly approved otherwise.
+- Keep `requireBookingConfirmation=true` (default) so lead-run workers do **not** auto-book calendar events until the lead is explicitly confirmed (status/stage/confirmation signal).
 - Keep pricing/payment/contract steps approval-gated.
 - Never put API keys/tokens in request payloads or git-tracked files.

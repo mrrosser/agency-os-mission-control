@@ -185,6 +185,19 @@ describe("lead run worker SMS handling", () => {
     const actionIds = recordLeadActionReceiptMock.mock.calls.map(([input]) => String(input.actionId));
     expect(actionIds).toContain("twilio.sms");
     expect(actionIds).not.toContain("twilio.call");
+    expect(
+      recordLeadActionReceiptMock.mock.calls.some(
+        ([input]) =>
+          input.actionId === "calendar.booking" &&
+          input.status === "skipped" &&
+          input.data?.reason === "awaiting_confirmation"
+      )
+    ).toBe(true);
+    expect(
+      recordLeadActionReceiptMock.mock.calls.some(
+        ([input]) => input.actionId === "calendar.booking" && input.status === "simulated"
+      )
+    ).toBe(false);
 
     expect(
       recordLeadActionReceiptMock.mock.calls.some(

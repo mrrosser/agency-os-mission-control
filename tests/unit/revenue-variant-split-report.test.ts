@@ -1,8 +1,23 @@
-import { describe, expect, it } from "vitest";
-import {
-  classifyVariantDecisions,
-  parseDecisionThresholdsFromEnv,
-} from "@/scripts/revenue-variant-split-report.mjs";
+import { beforeAll, describe, expect, it } from "vitest";
+
+let classifyVariantDecisions: (args: {
+  aggregated: Array<Record<string, unknown>>;
+  thresholds: Record<string, unknown>;
+}) => {
+  decisions: Array<Record<string, unknown>>;
+  decisionSummary: Record<string, unknown>;
+};
+
+let parseDecisionThresholdsFromEnv: (env: Record<string, unknown>) => Record<string, unknown>;
+
+beforeAll(async () => {
+  const mod = (await import("../../scripts/revenue-variant-split-report.mjs")) as {
+    classifyVariantDecisions: typeof classifyVariantDecisions;
+    parseDecisionThresholdsFromEnv: typeof parseDecisionThresholdsFromEnv;
+  };
+  classifyVariantDecisions = mod.classifyVariantDecisions;
+  parseDecisionThresholdsFromEnv = mod.parseDecisionThresholdsFromEnv;
+});
 
 function row(overrides: Partial<Record<string, unknown>>) {
   return {

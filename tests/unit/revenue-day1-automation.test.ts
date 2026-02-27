@@ -32,6 +32,7 @@ describe("revenue day1 automation helpers", () => {
       timeZone: "America/Chicago",
       outreach: {
         draftFirst: false,
+        requireBookingConfirmation: false,
         useAvatar: true,
         useSMS: true,
         useOutboundCall: true,
@@ -44,6 +45,7 @@ describe("revenue day1 automation helpers", () => {
     expect(config.timeZone).toBe("America/Chicago");
     expect(config.dryRun).toBe(true);
     expect(config.draftFirst).toBe(false);
+    expect(config.requireBookingConfirmation).toBe(false);
     expect(config.useAvatar).toBe(true);
     expect(config.useSMS).toBe(true);
     expect(config.useOutboundCall).toBe(true);

@@ -95,6 +95,16 @@ Optional env for decision tuning/persistence:
 - `REVENUE_VARIANT_DECISION_PATH` (JSON output path)
 - `REVENUE_VARIANT_WRITE_FIRESTORE=true` (persist to `revenue_variant_decisions`)
 
+GitHub automation:
+- `.github/workflows/revenue-variant-decisions.yml` runs every Monday after KPI rollup.
+- Requires:
+  - repo vars: `GCP_WIF_PROVIDER`, `GCP_WIF_SERVICE_ACCOUNT`, optional `REVENUE_VARIANT_DAYS`, optional `REVENUE_VARIANT_WRITE_FIRESTORE`
+  - secret: `REVENUE_VARIANT_UID` (or fallback `REVENUE_WEEKLY_KPI_UID`)
+- Uploads artifacts:
+  - `revenue-variant-split-7d.md`
+  - `revenue-variant-decisions-7d.json`
+  - run summary JSON
+
 ## Cloud Run / Scheduler deployment pattern
 
 1. Set worker token on service:
@@ -152,6 +162,16 @@ Jobs created:
 - `revenue-day30-rng-daily`
 - `revenue-day30-aicf-daily`
 - `revenue-day30-weekly-brain`
+
+### Verify scheduler lock (recommended)
+
+```bash
+export GCP_PROJECT_ID=leadflow-review
+export GCP_SCHEDULER_LOCATION=us-central1
+export REVENUE_CADENCE_EXPECT_BASE_URL=https://ssrleadflowreview-<hash>-uc.a.run.app
+export REVENUE_CADENCE_EXPECT_TIMEZONE=America/Chicago
+npm run revenue:cadence:audit
+```
 
 ## Safety notes
 

@@ -107,14 +107,14 @@
     "maxDurationMinutes": 180,
     "timezoneRequired": true,
     "meetingIntentKeywordsAny": [
-      "book us",
-      "studio visit",
-      "discovery call",
-      "consultation",
-      "availability this week",
-      "book a call",
-      "hold this time",
-      "book us event"
+      "confirm this time",
+      "confirmed for",
+      "that time works",
+      "this slot works",
+      "yes book it",
+      "please finalize the meeting",
+      "approved time",
+      "lock this meeting"
     ],
     "checkAccounts": [
       "mrosser@rossernftgallery.com",
@@ -127,7 +127,7 @@
       "allowFromEmails": [],
       "allowFromDomains": [],
       "blockFreeEmailDomains": false,
-      "maxBookingsPerSenderPerDay": 2,
+      "maxBookingsPerSenderPerDay": 1,
       "businessHours": {
         "enabled": true,
         "weekdaysOnly": true,
@@ -346,10 +346,10 @@
     "maxReplyChars": 2200,
     "maxContextChars": 20000,
     "maxKnowledgeChars": 8000,
-    "maxMessagesFromThread": 12,
+    "maxMessagesFromThread": 8,
     "temperature": 0.1,
     "fallbackToTemplate": true,
-    "promptDefault": "Write exactly in Marcus's voice: warm, direct, practical, concise. Read the full thread context first (latest message + prior thread history) and continue the conversation, do not restart intake. Anchor the response to the newest inbound message in this thread and treat older messages as background only. Do not use memory from other threads for this sender unless that detail is explicitly quoted in the current thread. If old and new details conflict, trust the newest inbound message. Always reference at least one concrete detail already present in-thread (name, role, timeline, scope, budget, school, org, or intro context). Never ask for information that already exists in the thread. If this is an active thread, acknowledge continuity in one sentence and move to next action. Keep to 4 short paragraphs max. Ask at most one focused question only when a true blocker exists. Prefer action paths (book call vs async next step). End with one clear next step and a single booking link only when relevant. Output plain text with real line breaks; never output escaped newline sequences like \\n or \\r\\n. Never mention AI.",
+    "promptDefault": "Write exactly in Marcus's voice: warm, direct, practical, concise. Read the full thread context first and continue the conversation, do not restart intake. Anchor the response to the newest inbound message in this thread and treat older messages as background only. First resolve what the newest inbound sender message is asking, and answer that ask directly. Ignore Gmail AI overview summaries, signatures, legal footers, and older quoted blocks unless the newest inbound message explicitly asks about them. Do not use memory from other threads for this sender unless that detail is explicitly quoted in the current thread. If old and new details conflict, trust the newest inbound message. Always reference at least one concrete detail already present in-thread (name, role, timeline, scope, budget, school, org, or intro context). Never ask for information that already exists in the thread. If this is an active thread, acknowledge continuity in one sentence and move to next action. Keep to 4 short paragraphs max. Ask at most one focused question only when a true blocker exists. Prefer action paths (book call vs async next step). End with one clear next step and a single booking link only when relevant. Output plain text with real line breaks; never output escaped newline sequences like \\n or \\r\\n. Never mention AI.",
     "promptByRoute": {
       "rt_solutions": "Brand: RT Solutions. Tone: calm, security-conscious, systems-builder. Prioritize scope, timeline, budget band, and operational clarity. Straightforward, no hype. Start from the newest inbound ask in this thread, then use older thread context only to support next steps. If prior workshop, school, district, website, or implementation context exists in-thread, continue from that context directly and propose concrete next steps.",
       "rosser_nft_gallery": "Brand: Rosser NFT Gallery. Tone: human, curated, community-centered. Focus on artistic fit, medium, dimensions, timeline, and budget range. Keep language creative but grounded. Avoid investment/speculation framing. Start from the newest inbound ask in this thread, then use older thread context only to support next steps. If prior commission, event, exhibit, or intro details exist in-thread, continue from them without repeating intake questions.",

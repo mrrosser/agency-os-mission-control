@@ -33,6 +33,13 @@ const KEYS = [
   "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS",
   "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG",
   "SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF",
+  "REVENUE_AUTOMATION_UID",
+  "REVENUE_DAY30_UID",
+  "REVENUE_DAY2_UID",
+  "REVENUE_DAY1_UID",
+  "VOICE_ACTIONS_DEFAULT_UID",
+  "SQUARE_WEBHOOK_DEFAULT_UID",
+  "REVENUE_WEEKLY_KPI_WORKER_TOKEN",
   "REVENUE_DAY30_WORKER_TOKEN",
   "REVENUE_DAY2_WORKER_TOKEN",
   "REVENUE_DAY1_WORKER_TOKEN",
@@ -83,6 +90,11 @@ describe("buildRuntimePreflightReport", () => {
     expect(report.checks.find((check) => check.id === "smauto-mcp-connector")?.state).toBe("warning");
     expect(report.checks.find((check) => check.id === "smauto-mcp-auth")?.state).toBe("warning");
     expect(report.checks.find((check) => check.id === "leadops-mcp-connector")?.state).toBe("warning");
+    expect(report.checks.find((check) => check.id === "revenue-worker-token")?.state).toBe("warning");
+    expect(report.checks.find((check) => check.id === "revenue-automation-uid")?.state).toBe("warning");
+    expect(report.checks.find((check) => check.id === "revenue-weekly-kpi-worker-token")?.state).toBe(
+      "warning"
+    );
   });
 
   it("marks MCP connector checks ok when endpoint and key are provided", () => {
@@ -154,6 +166,26 @@ describe("buildRuntimePreflightReport", () => {
     expect(report.checks.find((check) => check.id === "social-draft-approval-base-url")?.state).toBe("ok");
     expect(report.checks.find((check) => check.id === "social-draft-webhook")?.state).toBe("ok");
     expect(report.checks.find((check) => check.id === "social-dispatch-status-webhook")?.state).toBe(
+      "ok"
+    );
+  });
+
+  it("marks revenue cadence checks ok when worker auth + uid are configured", () => {
+    process.env.GOOGLE_PLACES_API_KEY = "x";
+    process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD = "2";
+    process.env.LEAD_SOURCE_BUDGET_MAX_PAGES = "4";
+    process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC = "50";
+    process.env.LEAD_RUNS_TASK_QUEUE = "lead-run-worker";
+    process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
+    process.env.REVENUE_DAY30_WORKER_TOKEN = "token";
+    process.env.REVENUE_AUTOMATION_UID = "uid-1";
+    process.env.REVENUE_WEEKLY_KPI_WORKER_TOKEN = "token-kpi";
+
+    const report = buildRuntimePreflightReport();
+
+    expect(report.checks.find((check) => check.id === "revenue-worker-token")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "revenue-automation-uid")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "revenue-weekly-kpi-worker-token")?.state).toBe(
       "ok"
     );
   });

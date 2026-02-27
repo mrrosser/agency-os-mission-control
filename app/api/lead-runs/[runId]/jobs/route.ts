@@ -31,6 +31,7 @@ const startBodySchema = z.object({
   config: z.object({
     dryRun: z.boolean().optional(),
     draftFirst: z.boolean().optional(),
+    requireBookingConfirmation: z.boolean().optional(),
     timeZone: z.string().min(1).max(80).optional(),
     businessKey: z.enum(["aicf", "rng", "rts", "rt"]).optional(),
     businessUnit: z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional(),
@@ -62,6 +63,7 @@ function serializeJob(job: LeadRunJobDoc) {
     config: {
       dryRun: Boolean(job.config?.dryRun),
       draftFirst: Boolean(job.config?.draftFirst),
+      requireBookingConfirmation: job.config?.requireBookingConfirmation !== false,
       timeZone: job.config?.timeZone || "UTC",
       businessKey: job.config?.businessKey || null,
       businessUnit: job.config?.businessUnit || null,
@@ -183,6 +185,7 @@ export const POST = withApiHandler(
       const config: LeadRunJobConfig = {
         dryRun: Boolean(body.config?.dryRun),
         draftFirst: Boolean(body.config?.draftFirst),
+        requireBookingConfirmation: body.config?.requireBookingConfirmation ?? true,
         timeZone: body.config?.timeZone || "UTC",
         useSMS: Boolean(body.config?.useSMS),
         useAvatar: Boolean(body.config?.useAvatar),

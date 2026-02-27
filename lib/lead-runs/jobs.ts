@@ -35,6 +35,7 @@ export interface LeadRunJobDiagnostics {
 export interface LeadRunJobConfig {
   dryRun: boolean;
   draftFirst: boolean;
+  requireBookingConfirmation?: boolean;
   timeZone: string;
   useSMS: boolean;
   useAvatar: boolean;

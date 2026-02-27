@@ -116,6 +116,16 @@ Jobs created:
 - `revenue-day2-rng-loop`
 - `revenue-day2-aicf-loop`
 
+### Verify scheduler lock (recommended)
+
+```bash
+export GCP_PROJECT_ID=leadflow-review
+export GCP_SCHEDULER_LOCATION=us-central1
+export REVENUE_CADENCE_EXPECT_BASE_URL=https://ssrleadflowreview-<hash>-uc.a.run.app
+export REVENUE_CADENCE_EXPECT_TIMEZONE=America/Chicago
+npm run revenue:cadence:audit
+```
+
 ## Safety
 
 - Keep `requireApprovalGates=true` unless explicitly approved to disable.

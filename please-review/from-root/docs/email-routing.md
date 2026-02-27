@@ -73,6 +73,7 @@ Triage Runtime v3 (recommended)
 - Includes:
   - suppression and actionable-signal guardrails
   - strict calendar rules with per-business booking links + `withMeet=true`
+  - confirmation-only meeting intent keywords (no broad "book a call" auto-booking)
   - AI drafting with thread-aware prompts and knowledge-pack context
   - fallback templates per business (used only if AI draft cannot be produced)
 
@@ -99,9 +100,10 @@ Draft quality/brain checks (when replies feel generic)
 - If drafts answer the wrong topic from an older thread, enforce these checks in `aiDrafting.promptDefault`:
   - anchor to the **newest inbound message** in the current thread,
   - treat older messages as background only,
+  - ignore Gmail AI summaries/quoted history unless the newest inbound asks about them,
   - do **not** pull memory from other sender threads unless explicitly quoted in the current thread.
 - Recommended baseline:
-  - `aiDrafting.maxMessagesFromThread=12` (reduces stale-context drift while keeping continuity).
+  - `aiDrafting.maxMessagesFromThread=8` (reduces stale-context drift while keeping continuity).
 
 Fix Chat Digest Permissions (if logs show `chat.digest_failed` with `insufficientPermissions`)
 - Re-auth all Gmail accounts with Workspace scopes (including Chat when available):
@@ -138,6 +140,20 @@ Calendar Auto-Book Verification (strict mode)
   - `sudo systemctl start openclaw-email-triage.service`
   - `sudo journalctl -u openclaw-email-triage.service -n 200 --no-pager | grep -E "triage.done|calendarBooked|calendarConflict|calendarParseFailed|calendarSkipped"`
 - In strict mode, events only auto-create when explicit date/time/timezone + requester email + conflict-free slot are present.
+- Runtime v3 also restricts auto-book intents to **confirmation language** (for example: "confirm this time", "that time works", "lock this meeting").
+
+Calendar Cleanup Endpoint (discovery-call cleanup)
+- Route: `POST /api/calendar/events?action=cleanup` (authenticated user; primary calendar only).
+- Default mode is dry-run (`dryRun=true` if omitted).
+- Request body:
+  - `summaryPrefix` (default `"Discovery Call -"`),
+  - `timeMin` (optional ISO timestamp),
+  - `maxResults` (optional, default `100`, max `200`),
+  - `dryRun` (optional boolean).
+- Example (dry-run):
+  - `{"summaryPrefix":"Discovery Call -","timeMin":"2026-02-20T00:00:00.000Z"}`
+- Example (execute delete):
+  - `{"summaryPrefix":"Discovery Call -","timeMin":"2026-02-20T00:00:00.000Z","dryRun":false}`
 
 Notes
 - `systemctl` commands must run on the VM, not Cloud Shell itself.

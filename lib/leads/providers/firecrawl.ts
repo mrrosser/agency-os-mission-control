@@ -273,7 +273,7 @@ export async function enrichLeadWithFirecrawl(
 export async function enrichLeadsWithFirecrawl(
   leads: LeadCandidate[],
   apiKey: string,
-  options: { maxLeads?: number; concurrency?: number } = {},
+  options: { maxLeads?: number; concurrency?: number; onQuotaExceeded?: () => void } = {},
   log?: Logger
 ): Promise<LeadCandidate[]> {
   const maxLeads = options.maxLeads ?? 5;
@@ -306,6 +306,9 @@ export async function enrichLeadsWithFirecrawl(
       log,
       {
         onQuotaExceeded: () => {
+          if (!quotaExhausted) {
+            options.onQuotaExceeded?.();
+          }
           quotaExhausted = true;
         },
       }

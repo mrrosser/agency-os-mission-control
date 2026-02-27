@@ -121,6 +121,7 @@ describe("lead run jobs route", () => {
     expect(data.ok).toBe(true);
     expect(data.job.status).toBe("queued");
     expect(data.job.totalLeads).toBe(2);
+    expect(data.job.config.requireBookingConfirmation).toBe(true);
     expect(jobSet).toHaveBeenCalledOnce();
     expect(triggerLeadRunWorkerMock).toHaveBeenCalledOnce();
     expect(resolveLeadRunOrgIdMock).toHaveBeenCalledWith("user-1", expect.anything());
@@ -170,6 +171,7 @@ describe("lead run jobs route", () => {
     expect(res.status).toBe(200);
     expect(data.job.status).toBe("running");
     expect(data.job.totalLeads).toBe(1);
+    expect(data.job.config.requireBookingConfirmation).toBe(true);
   });
 
   it("returns 429 when active run concurrency cap is reached", async () => {

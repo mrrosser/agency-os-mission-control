@@ -58,6 +58,37 @@ interface BudgetUsage {
     stopProvider?: LeadSource;
 }
 
+const DEFAULT_FIRECRAWL_ENRICH_COOLDOWN_SEC = 15 * 60;
+const firecrawlEnrichmentCooldownByUid = new Map<string, number>();
+
+function readFirecrawlCooldownMs(): number {
+    const parsed = Number(process.env.FIRECRAWL_ENRICH_COOLDOWN_SEC || DEFAULT_FIRECRAWL_ENRICH_COOLDOWN_SEC);
+    if (!Number.isFinite(parsed) || parsed < 30) {
+        return DEFAULT_FIRECRAWL_ENRICH_COOLDOWN_SEC * 1000;
+    }
+    return Math.floor(parsed) * 1000;
+}
+
+function readFirecrawlCooldownUntilMs(uid: string, nowMs: number): number {
+    const value = firecrawlEnrichmentCooldownByUid.get(uid);
+    if (!value) return 0;
+    if (value <= nowMs) {
+        firecrawlEnrichmentCooldownByUid.delete(uid);
+        return 0;
+    }
+    return value;
+}
+
+function setFirecrawlCooldown(uid: string, nowMs: number): number {
+    const untilMs = nowMs + readFirecrawlCooldownMs();
+    firecrawlEnrichmentCooldownByUid.set(uid, untilMs);
+    return untilMs;
+}
+
+export function __resetFirecrawlEnrichmentCooldownForTests(): void {
+    firecrawlEnrichmentCooldownByUid.clear();
+}
+
 function readPositiveFloat(value: string | undefined, fallback: number): number {
     const parsed = Number.parseFloat(value || "");
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -363,12 +394,38 @@ export async function sourceLeads(
         if (!firecrawlKey) {
             warnings.push("Firecrawl key missing; skipping website enrichment.");
         } else {
-            enrichedLeads = await enrichLeadsWithFirecrawl(
-                enrichedLeads,
-                firecrawlKey,
-                { maxLeads: Math.min(request.limit || 10, 5), concurrency: 2 },
-                log
-            );
+            const nowMs = Date.now();
+            const cooldownUntilMs = readFirecrawlCooldownUntilMs(uid, nowMs);
+            if (cooldownUntilMs > nowMs) {
+                const cooldownUntilIso = new Date(cooldownUntilMs).toISOString();
+                warnings.push(`Firecrawl enrichment paused after quota exhaustion until ${cooldownUntilIso}.`);
+                log?.warn("lead.enrich.firecrawl.cooldown_active", {
+                    uid,
+                    cooldownUntil: cooldownUntilIso,
+                });
+            } else {
+                let quotaExceeded = false;
+                enrichedLeads = await enrichLeadsWithFirecrawl(
+                    enrichedLeads,
+                    firecrawlKey,
+                    {
+                        maxLeads: Math.min(request.limit || 10, 5),
+                        concurrency: 2,
+                        onQuotaExceeded: () => {
+                            quotaExceeded = true;
+                        },
+                    },
+                    log
+                );
+                if (quotaExceeded) {
+                    const cooldownUntilIso = new Date(setFirecrawlCooldown(uid, Date.now())).toISOString();
+                    warnings.push(`Firecrawl quota exhausted; enrichment paused until ${cooldownUntilIso}.`);
+                    log?.warn("lead.enrich.firecrawl.cooldown_set", {
+                        uid,
+                        cooldownUntil: cooldownUntilIso,
+                    });
+                }
+            }
         }
     }
 

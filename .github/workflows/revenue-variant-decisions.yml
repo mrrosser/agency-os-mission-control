@@ -1,0 +1,66 @@
+name: Revenue Variant Decisions
+
+on:
+  schedule:
+    # Mondays 16:10 UTC, after weekly KPI rollup.
+    - cron: "10 16 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  variant-decisions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate workflow config
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+          REVENUE_VARIANT_UID: ${{ secrets.REVENUE_VARIANT_UID || secrets.REVENUE_WEEKLY_KPI_UID }}
+        run: |
+          if [ -z "$GCP_WIF_PROVIDER" ] || [ -z "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars." >&2
+            exit 1
+          fi
+          if [ -z "$REVENUE_VARIANT_UID" ]; then
+            echo "Missing REVENUE_VARIANT_UID (or REVENUE_WEEKLY_KPI_UID) secret." >&2
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Run variant decision report
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          REVENUE_VARIANT_UID: ${{ secrets.REVENUE_VARIANT_UID || secrets.REVENUE_WEEKLY_KPI_UID }}
+          REVENUE_VARIANT_DAYS: ${{ vars.REVENUE_VARIANT_DAYS || '7' }}
+          REVENUE_VARIANT_WRITE_FIRESTORE: ${{ vars.REVENUE_VARIANT_WRITE_FIRESTORE || 'true' }}
+          REVENUE_VARIANT_REPORT_PATH: artifacts/revenue-variant-split-7d.md
+          REVENUE_VARIANT_DECISION_PATH: artifacts/revenue-variant-decisions-7d.json
+        run: |
+          mkdir -p artifacts
+          node scripts/revenue-variant-split-report.mjs | tee artifacts/revenue-variant-run.json
+
+      - name: Upload variant decision artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-variant-decisions
+          path: artifacts/
+          if-no-files-found: error

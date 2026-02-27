@@ -14,6 +14,8 @@ copy .env.local.example .env.local
 3) Fill in required values in `.env.local`:
 - `NEXT_PUBLIC_FIREBASE_*` (Firebase web app config)
 - `FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_CANONICAL_LOGIN_URL` (recommended: `https://leadflow-review.web.app/login`)
+- `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN` (recommended: `true`)
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
 - Optional: `GOOGLE_PICKER_API_KEY` (browser key; enables Google Drive Picker UI in Knowledge Base)
 - Optional: `GOOGLE_DRIVE_APP_ID` (Drive Picker app id; set to your GCP project number for Shared Drives support)
@@ -234,6 +236,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-ni
 Notes:
 - Do not use `0.0.0.0` in OAuth redirect URIs; browsers treat it as an invalid address.
 - If you run the dev server on a different port (e.g. 8080), add `http://localhost:8080/api/google/callback` to the Google OAuth client and set `GOOGLE_OAUTH_REDIRECT_URI` accordingly.
+- Use `https://leadflow-review.web.app/login` as the user-facing login URL (not direct `*.run.app` service URLs).
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
@@ -286,6 +289,21 @@ Production health monitor:
 
 Expected live URL (Firebase Hosting default):
 - `https://leadflow-review.web.app/`
+
+## Canonical Login Routing (User UX)
+- Canonical login URL: `https://leadflow-review.web.app/login`
+- Cloud Run `*.a.run.app` URLs are service endpoints (workers/webhooks/troubleshooting), not primary operator login URLs.
+- `/login` auto-redirects `*.run.app` hosts to `NEXT_PUBLIC_CANONICAL_LOGIN_URL` when `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN=true`.
+
+Update Firebase Auth authorized domains (idempotent script):
+```bash
+npm run firebase:auth:add-domain -- leadflow-review ai-hell-mary-mission-control-gdyt2qma6a-uc.a.run.app
+```
+
+Dry run:
+```bash
+npm run firebase:auth:add-domain -- leadflow-review ai-hell-mary-mission-control-gdyt2qma6a-uc.a.run.app dry-run
+```
 
 ## Telemetry + Triage (Phase 1/2)
 Phase 1: runtime error capture

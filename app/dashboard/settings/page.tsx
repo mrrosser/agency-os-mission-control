@@ -761,7 +761,9 @@ export default function SettingsPage() {
                                         Required for the Drive &quot;Browse Drive&quot; picker UI in Operations Knowledge Base.
                                         Create a browser API key restricted to your app origin (for example
                                         <span className="text-zinc-300"> https://leadflow-review.web.app/*</span> and
-                                        <span className="text-zinc-300"> http://localhost:3000/*</span>).
+                                        <span className="text-zinc-300"> http://localhost:3000/*</span>). Use the canonical
+                                        Mission Control login domain for operators; only add `*.run.app` origins when
+                                        explicitly required for service-level debugging.
                                     </p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">

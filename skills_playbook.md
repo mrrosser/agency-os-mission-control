@@ -15,6 +15,8 @@ Use global shared skills and RT Infinite Loop references while keeping project t
   - `skills/rt-local-web-sales-loop/SKILL.md` (RT Solutions local SMB web-sales service loop)
   - `skills/revenue-day1-automation/SKILL.md` (Day 1 revenue automation service/worker skill)
   - `skills/revenue-day2-automation/SKILL.md` (Day 2 loop: Day1 + due-response processing + approval gates)
+  - `skills/lead-comms-orchestrator/SKILL.md` (lead-gen + outreach communications + KPI sync orchestration)
+  - `skills/folio-avatar-pipeline/SKILL.md` (folio/avatar video pipeline for personalized outbound drafts)
   - `skills/sponsor-inbox-crm-agent/SKILL.md` (sponsor/SMB inbox scoring + CRM sync + draft-first replies)
   - `skills/cross-business-brain-service-lab/SKILL.md` (cross-business digest + approval-gated service ideation loop)
 

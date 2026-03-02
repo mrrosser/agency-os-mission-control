@@ -59,12 +59,18 @@ jobs:
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE || 'leadflow-review' }}
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           NPM_CONFIG_PRODUCTION: "true"
           NODE_ENV: "production"
         run: |
           set -euo pipefail
+          node scripts/firebase-deploy.mjs functions:artifacts:setpolicy \
+            --project "$FIREBASE_PROJECT_ID" \
+            --location "$FIREBASE_REGION" \
+            --none \
+            --non-interactive || true
           CHANNEL_ID="main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           MAX_ATTEMPTS=4
           ATTEMPT=1

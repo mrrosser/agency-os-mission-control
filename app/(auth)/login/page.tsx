@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { ConfirmationResult } from "firebase/auth";
 import {
@@ -13,6 +13,7 @@ import {
 } from "@/lib/firebase";
 import { auth, googleProvider } from "@/lib/firebase";
 import { dbService } from "@/lib/db-service";
+import { buildAuthErrorDetails, type AuthErrorDetails } from "@/lib/auth/auth-error-messages";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,14 +24,10 @@ import { LeadFlowBackdrop } from "@/components/visuals/LeadFlowBackdrop";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { Loader2, AlertCircle, Apple } from "lucide-react";
 
-function isErrorWithMessage(error: unknown): error is { message: string } {
-    return (
-        typeof error === "object" &&
-        error !== null &&
-        "message" in error &&
-        typeof (error as Record<string, unknown>).message === "string"
-    );
-}
+const CANONICAL_LOGIN_URL =
+    process.env.NEXT_PUBLIC_CANONICAL_LOGIN_URL ?? "https://leadflow-review.web.app/login";
+const AUTO_REDIRECT_NON_CANONICAL_LOGIN =
+    process.env.NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN !== "false";
 
 declare global {
     interface Window {
@@ -41,7 +38,8 @@ declare global {
 export default function LoginPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState<AuthErrorDetails | null>(null);
+    const [hostWarning, setHostWarning] = useState(false);
 
     // Email/Password state
     const [email, setEmail] = useState("");
@@ -53,6 +51,36 @@ export default function LoginPage() {
     const [otp, setOtp] = useState("");
     const [showOtp, setShowOtp] = useState(false);
     const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+
+    useEffect(() => {
+        const currentHost = window.location.hostname.toLowerCase();
+        const isLocalHost = currentHost === "localhost" || currentHost === "127.0.0.1";
+        if (isLocalHost) {
+            setHostWarning(false);
+            return;
+        }
+
+        try {
+            const canonicalUrl = new URL(CANONICAL_LOGIN_URL);
+            const canonicalHost = canonicalUrl.hostname.toLowerCase();
+            const nonCanonicalHost = currentHost !== canonicalHost;
+
+            if (
+                nonCanonicalHost &&
+                currentHost.endsWith(".run.app") &&
+                AUTO_REDIRECT_NON_CANONICAL_LOGIN
+            ) {
+                canonicalUrl.search = window.location.search;
+                canonicalUrl.hash = window.location.hash;
+                window.location.replace(canonicalUrl.toString());
+                return;
+            }
+
+            setHostWarning(nonCanonicalHost);
+        } catch {
+            setHostWarning(false);
+        }
+    }, []);
 
     const handleSocialLogin = async (providerName: 'google' | 'apple') => {
         setLoading(true);
@@ -70,7 +98,7 @@ export default function LoginPage() {
             router.push("/dashboard");
         } catch (error: unknown) {
             console.error("Login failed:", error);
-            setError(isErrorWithMessage(error) ? error.message : "Failed to sign in. Please try again.");
+            setError(buildAuthErrorDetails(error, { canonicalLoginUrl: CANONICAL_LOGIN_URL }));
         } finally {
             setLoading(false);
         }
@@ -92,7 +120,7 @@ export default function LoginPage() {
             await dbService.syncUser(user);
             router.push("/dashboard");
         } catch (error: unknown) {
-            setError(isErrorWithMessage(error) ? error.message : "Failed to sign in. Please try again.");
+            setError(buildAuthErrorDetails(error, { canonicalLoginUrl: CANONICAL_LOGIN_URL }));
         } finally {
             setLoading(false);
         }
@@ -120,7 +148,7 @@ export default function LoginPage() {
             setConfirmationResult(confirmation);
             setShowOtp(true);
         } catch (error: unknown) {
-            setError(isErrorWithMessage(error) ? error.message : "Failed to start phone sign-in. Please try again.");
+            setError(buildAuthErrorDetails(error, { canonicalLoginUrl: CANONICAL_LOGIN_URL }));
         } finally {
             setLoading(false);
         }
@@ -138,7 +166,7 @@ export default function LoginPage() {
             await dbService.syncUser(result.user);
             router.push("/dashboard");
         } catch (error: unknown) {
-            setError(isErrorWithMessage(error) ? error.message : "Failed to verify code. Please try again.");
+            setError(buildAuthErrorDetails(error, { canonicalLoginUrl: CANONICAL_LOGIN_URL }));
         } finally {
             setLoading(false);
         }
@@ -146,14 +174,14 @@ export default function LoginPage() {
 
     return (
         <div className="relative min-h-screen w-full overflow-hidden bg-[#05060b]">
-            <LeadFlowBackdrop className="opacity-[0.96]" />
-            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(3,6,12,0.2),rgba(4,7,14,0.48)_35%,rgba(2,3,7,0.76)_80%)]" />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(450px_circle_at_50%_50%,rgba(2,8,18,0.08),rgba(2,7,16,0.35),rgba(1,3,8,0.7))]" />
-            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/36 blur-3xl" />
+            <LeadFlowBackdrop className="opacity-[0.62]" />
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,rgba(3,6,12,0.04),rgba(4,7,14,0.22)_35%,rgba(2,3,7,0.44)_80%)]" />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(450px_circle_at_50%_50%,rgba(2,8,18,0.02),rgba(2,7,16,0.16),rgba(1,3,8,0.42))]" />
+            <div className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/20 blur-[120px]" />
 
             <div className="relative z-10 flex min-h-screen w-full items-center justify-center px-4 py-16">
-                <div data-testid="login-card" className="w-full max-w-sm rounded-[24px] border border-white/18 bg-black/72 p-1.5 backdrop-blur-2xl shadow-[0_32px_90px_rgba(3,6,15,0.9)]">
-                    <Card className="border-white/15 bg-black/86 shadow-none">
+                <div data-testid="login-card" className="w-full max-w-sm rounded-[24px] border border-white/22 bg-black/58 p-1.5 backdrop-blur-2xl shadow-[0_32px_90px_rgba(3,6,15,0.72)]">
+                    <Card className="border-white/20 bg-black/76 shadow-none">
                         <CardHeader className="text-center space-y-2">
                             <div className="flex justify-center mb-2">
                                 <div className="p-3 rounded-2xl bg-gradient-to-br from-sky-500/20 via-indigo-500/10 to-emerald-500/10 border border-white/10 shadow-[0_0_40px_rgba(56,189,248,0.25)]">
@@ -163,7 +191,7 @@ export default function LoginPage() {
                             <CardTitle className="text-2xl font-semibold text-white">
                                 Mission Control
                             </CardTitle>
-                            <CardDescription className="text-slate-300/70">
+                            <CardDescription className="text-slate-200/80">
                                 Access the lead generation command center
                             </CardDescription>
                         </CardHeader>
@@ -174,7 +202,26 @@ export default function LoginPage() {
                             {error && (
                                 <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
                                     <AlertCircle className="h-4 w-4 shrink-0" />
-                                    <p>{error}</p>
+                                    <div className="space-y-1">
+                                        <p>{error.message}</p>
+                                        {error.helpHref && (
+                                            <Link
+                                                className="text-red-100 underline underline-offset-2 hover:text-white"
+                                                href={error.helpHref}
+                                            >
+                                                {error.helpLabel ?? "Learn more"}
+                                            </Link>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {hostWarning && (
+                                <div className="mb-4 rounded-lg border border-amber-400/35 bg-amber-500/10 p-3 text-xs text-amber-100">
+                                    <p className="mb-1">This is a non-canonical host and Google sign-in can fail here.</p>
+                                    <Link className="underline underline-offset-2 hover:text-white" href={CANONICAL_LOGIN_URL}>
+                                        Open Mission Control login
+                                    </Link>
                                 </div>
                             )}
 

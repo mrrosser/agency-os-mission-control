@@ -29,6 +29,7 @@
     "social:dispatch:run": "node scripts/social-dispatch-run.mjs",
     "social:dispatch:smoke": "node scripts/social-dispatch-smoke.mjs",
     "social:acceptance:nonadmin": "node scripts/social-nonadmin-acceptance.mjs",
+    "firebase:auth:add-domain": "node scripts/firebase-auth-authorized-domains.mjs",
     "revenue:variant:report": "node scripts/revenue-variant-split-report.mjs",
     "revenue:variant:decide": "node scripts/revenue-variant-split-report.mjs",
     "revenue:day1:seed-templates": "node scripts/revenue-day1-seed-templates.mjs",

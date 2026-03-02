@@ -53,6 +53,12 @@ Google Cloud Console -> APIs & Services -> Credentials -> OAuth 2.0 Client:
 In runtime env vars (Cloud Run / Firebase frameworks SSR), set:
 - `GOOGLE_OAUTH_REDIRECT_URI=https://<your-domain>/api/google/callback`
 
+Mission Control routing policy:
+- User-facing login should stay on the canonical hosting domain (for this project: `https://leadflow-review.web.app/login`).
+- Treat `*.run.app` URLs as service endpoints (worker/webhook/debug). If one must be used temporarily for OAuth popup flows, add it to Firebase Auth authorized domains first.
+- Script helper:
+  - `npm run firebase:auth:add-domain -- leadflow-review <your-run-app-host>`
+
 ## 5) Minimize requested scopes (verification friction)
 This app supports scope presets (Integrations -> Connect Google):
 - Core: Drive + Calendar

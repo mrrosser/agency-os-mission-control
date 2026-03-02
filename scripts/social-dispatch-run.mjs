@@ -1,3 +1,7 @@
+import { loadLocalEnv } from "./_load-env.mjs";
+
+loadLocalEnv();
+
 const baseUrl = (
   process.env.SOCIAL_DISPATCH_BASE_URL ||
   process.env.SOCIAL_DRAFT_BASE_URL ||

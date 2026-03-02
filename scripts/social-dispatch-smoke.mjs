@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { loadLocalEnv } from "./_load-env.mjs";
+
+loadLocalEnv();
 
 function readEnv(name, fallback = "") {
   const value = process.env[name];

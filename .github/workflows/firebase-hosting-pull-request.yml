@@ -58,16 +58,22 @@ jobs:
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           NPM_CONFIG_PRODUCTION: "true"
           NODE_ENV: "production"
         run: |
           set -euo pipefail
+          node scripts/firebase-deploy.mjs functions:artifacts:setpolicy \
+            --project "$FIREBASE_PROJECT_ID" \
+            --location "$FIREBASE_REGION" \
+            --days 7 \
+            --force \
+            --non-interactive
           CHANNEL_ID="pr-${{ github.event.number }}"
           node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
             --project "$FIREBASE_PROJECT_ID" \
             --expires 7d \
-            --force \
             --non-interactive
       - name: Ensure SSR backend memory (webframeworks)
         if: ${{ env.GCP_AUTH_READY == '1' }}

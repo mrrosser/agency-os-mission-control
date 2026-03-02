@@ -67,9 +67,8 @@ jobs:
           node scripts/firebase-deploy.mjs functions:artifacts:setpolicy \
             --project "$FIREBASE_PROJECT_ID" \
             --location "$FIREBASE_REGION" \
-            --days 7 \
-            --force \
-            --non-interactive
+            --none \
+            --non-interactive || true
           CHANNEL_ID="pr-${{ github.event.number }}"
           node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
             --project "$FIREBASE_PROJECT_ID" \

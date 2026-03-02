@@ -69,9 +69,8 @@ jobs:
           node scripts/firebase-deploy.mjs functions:artifacts:setpolicy \
             --project "$FIREBASE_PROJECT_ID" \
             --location "$FIREBASE_REGION" \
-            --days 7 \
-            --force \
-            --non-interactive
+            --none \
+            --non-interactive || true
           CHANNEL_ID="main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           MAX_ATTEMPTS=4
           ATTEMPT=1

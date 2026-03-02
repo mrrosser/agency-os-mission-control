@@ -67,6 +67,7 @@ jobs:
           node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
             --project "$FIREBASE_PROJECT_ID" \
             --expires 7d \
+            --force \
             --non-interactive
       - name: Ensure SSR backend memory (webframeworks)
         if: ${{ env.GCP_AUTH_READY == '1' }}

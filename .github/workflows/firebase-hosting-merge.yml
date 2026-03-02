@@ -75,6 +75,7 @@ jobs:
             if node scripts/firebase-deploy.mjs hosting:channel:deploy "$CHANNEL_ID" \
               --project "$FIREBASE_PROJECT_ID" \
               --expires 7d \
+              --force \
               --non-interactive 2>&1 | tee "$LOG_FILE"; then
               PREVIEW_URL="$(grep -Eo 'https://[^[:space:]]+\.(web\.app|firebaseapp\.com)' "$LOG_FILE" | tail -n1 || true)"
               rm -f "$LOG_FILE"

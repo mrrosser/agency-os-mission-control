@@ -16,7 +16,7 @@ export const POST = withApiHandler(
   async ({ request, log }) => {
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "calendar" });
 
     const start = new Date(body.startTime);
     const end = new Date(body.endTime);

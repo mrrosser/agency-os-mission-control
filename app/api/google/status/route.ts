@@ -1,27 +1,46 @@
 import { NextResponse } from "next/server";
-import { withApiHandler } from "@/lib/api/handler";
+import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
-import { getStoredGoogleTokens } from "@/lib/google/oauth";
+import {
+  getAccessTokenForUser,
+  getStoredGoogleTokens,
+  googleCapabilitiesFromScopeString,
+} from "@/lib/google/oauth";
 
 export const GET = withApiHandler(async ({ request, log }) => {
   const user = await requireFirebaseAuth(request, log);
   const tokens = await getStoredGoogleTokens(user.uid);
 
   const scopeString = tokens?.scope || "";
-  const scopes = scopeString
-    .split(" ")
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const tokenPresent = Boolean(tokens?.refreshToken || tokens?.accessToken);
+  let connected = false;
+  let reconnectRequired = false;
+  let capabilities = googleCapabilitiesFromScopeString(scopeString);
+  let normalizedScopes: string | null = scopeString || null;
 
-  const capabilities = {
-    drive: scopes.some((s) => s.includes("/auth/drive")),
-    gmail: scopes.some((s) => s.includes("/auth/gmail")),
-    calendar: scopes.some((s) => s.includes("/auth/calendar")),
-  };
+  if (tokenPresent) {
+    try {
+      await getAccessTokenForUser(user.uid, log);
+      connected = true;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        reconnectRequired = true;
+        capabilities = {
+          drive: false,
+          gmail: false,
+          calendar: false,
+        };
+        normalizedScopes = null;
+      } else {
+        throw error;
+      }
+    }
+  }
 
   return NextResponse.json({
-    connected: Boolean(tokens?.refreshToken || tokens?.accessToken),
-    scopes: scopeString || null,
+    connected,
+    reconnectRequired,
+    scopes: normalizedScopes,
     capabilities,
   });
 }, { route: "google.status" });

@@ -116,7 +116,7 @@ export const POST = withApiHandler(
       });
     }
 
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "gmail" });
     const result = await withIdempotency(
       { uid: user.uid, route: "gmail.send", key: idempotencyKey, log },
       () => sendEmail(accessToken, body.email, log)

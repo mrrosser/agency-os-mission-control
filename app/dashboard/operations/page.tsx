@@ -392,6 +392,15 @@ export default function OperationsPage() {
     const [jobActionLoading, setJobActionLoading] = useState(false);
     const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null);
     const [googleConnected, setGoogleConnected] = useState<boolean>(false);
+    const [googleCapabilities, setGoogleCapabilities] = useState<{
+        drive: boolean;
+        gmail: boolean;
+        calendar: boolean;
+    }>({
+        drive: false,
+        gmail: false,
+        calendar: false,
+    });
     const [driveDelta, setDriveDelta] = useState<DriveDeltaScanSummary | null>(null);
     const [driveDeltaLoading, setDriveDeltaLoading] = useState(false);
     const [driveDeltaRunning, setDriveDeltaRunning] = useState(false);
@@ -442,19 +451,39 @@ export default function OperationsPage() {
         try {
             const headers = await buildAuthHeaders(user);
             const res = await fetch("/api/google/status", { method: "GET", headers });
-            const data = await readApiJson<{ connected?: boolean; error?: string }>(res);
+            const data = await readApiJson<{
+                connected?: boolean;
+                capabilities?: { drive?: boolean; gmail?: boolean; calendar?: boolean };
+                error?: string;
+            }>(res);
             if (!res.ok) {
                 throw new Error(data?.error || "Failed to load Google connection status");
             }
             setGoogleConnected(Boolean(data?.connected));
+            setGoogleCapabilities({
+                drive: Boolean(data?.capabilities?.drive),
+                gmail: Boolean(data?.capabilities?.gmail),
+                calendar: Boolean(data?.capabilities?.calendar),
+            });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            setGoogleConnected(false);
+            setGoogleCapabilities({
+                drive: false,
+                gmail: false,
+                calendar: false,
+            });
             reportClientError(message, { source: "operations.google_status" });
         }
     };
 
     const loadDriveDeltaStatus = async () => {
         if (!user) return;
+        if (!googleConnected || !googleCapabilities.drive) {
+            setDriveDelta(null);
+            setDriveDeltaLoading(false);
+            return;
+        }
         setDriveDeltaLoading(true);
         try {
             const headers = await buildAuthHeaders(user);
@@ -477,6 +506,12 @@ export default function OperationsPage() {
 
     const runDriveDeltaScan = async () => {
         if (!user) return;
+        if (!googleConnected || !googleCapabilities.drive) {
+            toast.error("Google Drive is not connected", {
+                description: "Open Integrations and enable Drive before running delta scans.",
+            });
+            return;
+        }
         setDriveDeltaRunning(true);
         try {
             const headers = await buildAuthHeaders(user, {
@@ -547,6 +582,11 @@ export default function OperationsPage() {
             setQuotaSummary(null);
             setAlerts([]);
             setGoogleConnected(false);
+            setGoogleCapabilities({
+                drive: false,
+                gmail: false,
+                calendar: false,
+            });
             setDriveDelta(null);
             return;
         }
@@ -554,10 +594,19 @@ export default function OperationsPage() {
         void loadQuotaSummary();
         void loadAlerts();
         void loadGoogleConnectionStatus();
-        void loadDriveDeltaStatus();
         void loadTelemetryCleanupStatus();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid]);
+
+    useEffect(() => {
+        if (!user || !googleConnected || !googleCapabilities.drive) {
+            setDriveDelta(null);
+            setDriveDeltaLoading(false);
+            return;
+        }
+        void loadDriveDeltaStatus();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.uid, googleConnected, googleCapabilities.drive]);
 
     const reportClientError = (message: string, meta?: Record<string, unknown>) => {
         try {
@@ -3004,14 +3053,22 @@ export default function OperationsPage() {
                                             type="button"
                                             size="sm"
                                             variant="outline"
-                                            disabled={driveDeltaRunning}
+                                            disabled={driveDeltaRunning || !googleConnected || !googleCapabilities.drive}
                                             className="h-7 border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-white"
                                             onClick={() => void runDriveDeltaScan()}
                                         >
                                             {driveDeltaRunning ? "Running..." : "Run now"}
                                         </Button>
                                     </div>
-                                    {driveDeltaLoading ? (
+                                    {!googleConnected ? (
+                                        <p className="text-[11px] text-zinc-500">
+                                            Connect Google Workspace before running Drive delta scans.
+                                        </p>
+                                    ) : !googleCapabilities.drive ? (
+                                        <p className="text-[11px] text-zinc-500">
+                                            Drive is not enabled for this workspace yet. Open Integrations and enable Drive.
+                                        </p>
+                                    ) : driveDeltaLoading ? (
                                         <p className="text-[11px] text-zinc-500">Loading status...</p>
                                     ) : driveDelta ? (
                                         <div className="space-y-1 text-[11px]">

@@ -82,7 +82,7 @@ export const POST = withApiHandler(
   async ({ request, log, correlationId }) => {
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "calendar" });
     const idempotencyKey = getIdempotencyKey(request, body);
 
     const durationMinutes = body.durationMinutes ?? 30;
@@ -167,6 +167,9 @@ export const POST = withApiHandler(
               scheduledStart: payload.scheduledStart,
               scheduledEnd: payload.scheduledEnd,
               eventId: payload.event.id,
+              summary: body.event.summary,
+              location: body.event.location,
+              attendees: body.event.attendees?.map((attendee) => attendee.email) || [],
             },
           },
           log
@@ -308,6 +311,9 @@ export const POST = withApiHandler(
             eventId: responsePayload.event?.id,
             htmlLink: responsePayload.event?.htmlLink,
             meetLink: responsePayload.meetLink,
+            summary: body.event.summary,
+            location: body.event.location,
+            attendees: body.event.attendees?.map((attendee) => attendee.email) || [],
           },
         },
         log

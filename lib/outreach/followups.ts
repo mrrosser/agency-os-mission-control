@@ -343,9 +343,18 @@ export async function processDueFollowupDraftTasks(args: {
   const maxTasks = Math.min(Math.max(args.maxTasks || 5, 1), 25);
   const nowMs = Date.now();
 
-  const accessToken = args.dryRun ? null : await getAccessTokenForUser(args.uid, args.log);
-  if (!args.dryRun && !accessToken) {
-    throw new ApiError(401, "Missing Google access token");
+  let accessToken: string | null = null;
+  let gmailUnavailableMessage: string | null = null;
+  if (!args.dryRun) {
+    try {
+      accessToken = await getAccessTokenForUser(args.uid, args.log, { requireCapability: "gmail" });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        gmailUnavailableMessage = error.message;
+      } else {
+        throw error;
+      }
+    }
   }
 
   const identitySnap = await getAdminDb().collection("identities").doc(args.uid).get();
@@ -455,6 +464,36 @@ export async function processDueFollowupDraftTasks(args: {
           {
             status: "skipped",
             leaseUntilMs: null,
+            updatedAt: FieldValue.serverTimestamp(),
+            completedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        continue;
+      }
+
+      if (gmailUnavailableMessage) {
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: claimed.leadDocId,
+            actionId: "gmail.followup_draft",
+            uid: args.uid,
+            correlationId: args.runId,
+            status: "skipped",
+            dryRun: false,
+            replayed: false,
+            idempotencyKey: receiptKey,
+            data: { reason: "gmail_not_enabled", detail: gmailUnavailableMessage },
+          },
+          args.log
+        );
+        skipped += 1;
+        await tasksRef(args.runId).doc(claimed.taskId).set(
+          {
+            status: "skipped",
+            leaseUntilMs: null,
+            lastError: gmailUnavailableMessage,
             updatedAt: FieldValue.serverTimestamp(),
             completedAt: FieldValue.serverTimestamp(),
           },

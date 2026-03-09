@@ -8,7 +8,7 @@ export const GET = withApiHandler(
     async ({ request, params, log }) => {
         const threadId = params?.threadId;
         const user = await requireFirebaseAuth(request, log);
-        const accessToken = await getAccessTokenForUser(user.uid, log);
+        const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "gmail" });
 
         if (!threadId) {
             return NextResponse.json({ error: "Missing thread ID" }, { status: 400 });

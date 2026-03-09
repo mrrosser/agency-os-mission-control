@@ -25,7 +25,6 @@ import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
 import { DncList } from "@/components/settings/DncList";
 import { FollowupAutomationSettings } from "@/components/settings/FollowupAutomationSettings";
-import { SocialOnboardingChecklist } from "@/components/onboarding/SocialOnboardingChecklist";
 
 interface IdentityProfile {
     businessName: string;
@@ -72,10 +71,6 @@ export default function SettingsPage() {
     const [runtimePreflightLoading, setRuntimePreflightLoading] = useState(false);
     const [activeTab, setActiveTab] = useState("identity");
     const [motionSetting, setMotionSetting] = useState<MotionSetting>("auto");
-
-    const googleError = searchParams?.get("google") === "error";
-    const googleErrorCode = searchParams?.get("googleError");
-    const googleErrorDescription = searchParams?.get("googleErrorDescription");
 
     // Identity State
     const [identity, setIdentity] = useState<IdentityProfile>({
@@ -227,59 +222,6 @@ export default function SettingsPage() {
             description: "Opening Operations and forcing the First Scan Tour to show.",
         });
         router.push("/dashboard/operations");
-    };
-
-    const handleConnectGoogle = async () => {
-        if (!user) return;
-        setLoading(true);
-        try {
-            const headers = await buildAuthHeaders(user);
-            const res = await fetch("/api/google/connect", {
-                method: "POST",
-                headers,
-                body: JSON.stringify({
-                    returnTo: `${window.location.pathname}${window.location.search}`,
-                    scopePreset: "core",
-                })
-            });
-            const payload = await readApiJson<{ authUrl?: string; error?: string }>(res);
-            if (!res.ok) {
-                const cid = getResponseCorrelationId(res);
-                throw new Error(payload?.error || `Failed to start Google connection${cid ? ` cid=${cid}` : ""}`);
-            }
-            const { authUrl } = payload;
-            if (authUrl) window.location.href = authUrl;
-        } catch (e: unknown) {
-            toast.error("Failed to start Google connection", {
-                description: getErrorMessage(e),
-            });
-        }
-        setLoading(false);
-    };
-
-    const handleDisconnectGoogle = async () => {
-        if (!user) return;
-        setLoading(true);
-        try {
-            const headers = await buildAuthHeaders(user);
-            const res = await fetch("/api/google/disconnect", { method: "POST", headers });
-            if (!res.ok) {
-                const payload = await readApiJson<{ error?: string }>(res);
-                throw new Error(payload?.error || "Failed to disconnect");
-            }
-            setGoogleStatus({
-                connected: false,
-                loading: false,
-                capabilities: { drive: false, gmail: false, calendar: false },
-            });
-            toast.success("Google account disconnected");
-        } catch (e: unknown) {
-            toast.error("Failed to disconnect", {
-                description: getErrorMessage(e),
-            });
-        } finally {
-            setLoading(false);
-        }
     };
 
     const handleSaveIdentity = async () => {
@@ -452,7 +394,7 @@ export default function SettingsPage() {
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                     <TabsList className="bg-zinc-900 border-zinc-800">
                         <TabsTrigger value="identity">Business Identity</TabsTrigger>
-                        <TabsTrigger value="integrations">API Access</TabsTrigger>
+                        <TabsTrigger value="integrations">API Vault</TabsTrigger>
                         <TabsTrigger value="appearance">Appearance</TabsTrigger>
                     </TabsList>
 
@@ -517,7 +459,85 @@ export default function SettingsPage() {
                     {/* --- Integrations Tab --- */}
                     <TabsContent value="integrations">
                         <div className="space-y-6">
-                            <SocialOnboardingChecklist />
+                            <Card className="bg-zinc-950 border-zinc-800">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <AfroGlyph variant="integrations" className="h-4 w-4 text-cyan-300" />
+                                        Connections First
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Google Workspace is managed as a connected account. Save vendor keys below only when this workspace uses its own environment-level credentials.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+                                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                            <div className="space-y-2">
+                                                <div className="flex items-center gap-2">
+                                                    <p className="font-medium text-white">Google Workspace connection</p>
+                                                    {googleStatus.loading ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
+                                                    ) : googleStatus.connected ? (
+                                                        <Badge className="bg-green-500/10 text-green-500 border-green-500/20">
+                                                            Connected
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="text-zinc-400 border-zinc-700">
+                                                            Needs connection
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                                <p className="text-sm text-zinc-400">
+                                                    White-labeled users usually connect Google and continue. Gmail, Calendar, and Drive scopes are managed in Integrations, not stored as API keys here.
+                                                </p>
+                                                <div className="flex flex-wrap gap-2 text-xs">
+                                                    <span
+                                                        className={`rounded-full border px-2 py-1 ${
+                                                            googleStatus.capabilities.drive
+                                                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                                : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                        }`}
+                                                    >
+                                                        Drive {googleStatus.capabilities.drive ? "enabled" : "missing"}
+                                                    </span>
+                                                    <span
+                                                        className={`rounded-full border px-2 py-1 ${
+                                                            googleStatus.capabilities.calendar
+                                                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                                : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                        }`}
+                                                    >
+                                                        Calendar {googleStatus.capabilities.calendar ? "enabled" : "missing"}
+                                                    </span>
+                                                    <span
+                                                        className={`rounded-full border px-2 py-1 ${
+                                                            googleStatus.capabilities.gmail
+                                                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                                                                : "border-zinc-700 bg-zinc-900 text-zinc-300"
+                                                        }`}
+                                                    >
+                                                        Gmail {googleStatus.capabilities.gmail ? "enabled" : "missing"}
+                                                    </span>
+                                                </div>
+                                                {googleStatus.connected && !googleStatus.capabilities.gmail ? (
+                                                    <p className="text-xs text-amber-300">
+                                                        Gmail is not enabled yet. Open Integrations and run the Gmail enable step so Inbox and outreach drafts work end-to-end.
+                                                    </p>
+                                                ) : null}
+                                            </div>
+
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:text-white"
+                                                onClick={() => router.push("/dashboard/integrations")}
+                                            >
+                                                Manage Google Connection
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
 
                             <Card className="bg-zinc-950 border-zinc-800">
                                 <CardHeader>
@@ -598,95 +618,25 @@ export default function SettingsPage() {
 
                             <Card className="bg-zinc-950 border-zinc-800">
                                 <CardHeader>
-                                    <CardTitle>Outreach API Configuration</CardTitle>
-                                    <CardDescription>Your keys are stored securely in Secret Manager.</CardDescription>
+                                    <CardTitle>API Vault</CardTitle>
+                                    <CardDescription>
+                                        Store bring-your-own vendor credentials in Secret Manager. Skip anything your environment does not own directly.
+                                    </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-6">
-                                {/* Google Section */}
-                                <div className="space-y-4 p-4 rounded-lg bg-zinc-900/50 border border-zinc-800">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="p-2 rounded-full bg-cyan-500/10 text-cyan-300">
-                                                <AfroGlyph variant="integrations" className="h-5 w-5" />
-                                            </div>
-                                            <div>
-                                                <p className="font-medium text-white">Google Workspace</p>
-                                                <p className="text-sm text-zinc-400">Required for reading Drive files and sending emails.</p>
-                                            </div>
-                                        </div>
-                                        {googleStatus.loading ? (
-                                            <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
-                                        ) : googleStatus.connected ? (
-                                            <Badge className="bg-green-500/10 text-green-500 border-green-500/20">
-                                                Connected
-                                            </Badge>
-                                        ) : (
-                                            <Badge variant="outline" className="text-zinc-500">Disconnected</Badge>
-                                        )}
+                                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
+                                        <p className="text-sm font-medium text-white">When to use this vault</p>
+                                        <p className="mt-1 text-sm text-zinc-400">
+                                            Use these fields when a client or white-labeled environment needs its own provider account. Do not re-enter Google Workspace login credentials here.
+                                        </p>
                                     </div>
 
-                                    {googleError && (
-                                        <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-                                            <p className="font-medium">Google connection was denied.</p>
-                                            <p className="mt-1 text-red-200/80">
-                                                {googleErrorCode ? `Code: ${googleErrorCode}. ` : ""}
-                                                {googleErrorDescription || "If you are using a managed Google Workspace account, your admin may block unverified apps until this OAuth consent screen is verified."}
-                                            </p>
-                                        </div>
-                                    )}
-
-                                    {googleStatus.connected && (
-                                        <div className="flex flex-wrap gap-2 text-xs">
-                                            <span
-                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.drive
-                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
-                                                    }`}
-                                            >
-                                                Drive {googleStatus.capabilities.drive ? "enabled" : "missing"}
-                                            </span>
-                                            <span
-                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.calendar
-                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
-                                                    }`}
-                                            >
-                                                Calendar {googleStatus.capabilities.calendar ? "enabled" : "missing"}
-                                            </span>
-                                            <span
-                                                className={`rounded-full border px-2 py-1 ${googleStatus.capabilities.gmail
-                                                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-                                                        : "border-zinc-700 bg-zinc-900 text-zinc-300"
-                                                    }`}
-                                            >
-                                                Gmail {googleStatus.capabilities.gmail ? "enabled" : "missing"}
-                                            </span>
-                                        </div>
-                                    )}
-
-                                    {googleStatus.connected && !googleStatus.capabilities.gmail && (
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium text-white">Core AI and sourcing</p>
                                         <p className="text-xs text-zinc-500">
-                                            Gmail permissions are not enabled yet. Open the Integrations page to enable Gmail when you&apos;re ready.
+                                            These keys power lead sourcing, enrichment, reasoning, and Drive picker UX when you are not relying on shared operator credentials.
                                         </p>
-                                    )}
-
-                                    {googleStatus.connected ? (
-                                        <Button
-                                            variant="outline"
-                                            onClick={handleDisconnectGoogle}
-                                            className="w-full border-zinc-800 hover:bg-red-500/10 hover:text-red-500 transition-colors"
-                                        >
-                                            <Power className="mr-2 h-4 w-4" /> Disconnect Account
-                                        </Button>
-                                    ) : (
-                                        <Button
-                                            onClick={handleConnectGoogle}
-                                            className="w-full bg-white text-black hover:bg-zinc-200"
-                                        >
-                                            Connect Google Account
-                                        </Button>
-                                    )}
-                                </div>
+                                    </div>
 
                                 <div className="space-y-4">
                                     <Label className="flex justify-between">
@@ -766,6 +716,12 @@ export default function SettingsPage() {
                                         explicitly required for service-level debugging.
                                     </p>
                                 </div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-medium text-white">Communications</p>
+                                    <p className="text-xs text-zinc-500">
+                                        Twilio settings are only needed when this workspace sends SMS or places outbound calls from its own Twilio account.
+                                    </p>
+                                </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-2">
                                         <Label className="flex justify-between">
@@ -806,6 +762,12 @@ export default function SettingsPage() {
                                         value={apiKeys.twilioPhoneNumber}
                                         onChange={e => setApiKeys({ ...apiKeys, twilioPhoneNumber: e.target.value })}
                                     />
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-medium text-white">Voice and media</p>
+                                    <p className="text-xs text-zinc-500">
+                                        ElevenLabs and HeyGen are optional. Add them only if this workspace owns those services directly.
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label className="flex justify-between">
@@ -951,7 +913,7 @@ export default function SettingsPage() {
                                 </div>
                                     <Button onClick={handleSaveKeys} className="w-full bg-zinc-100 text-black hover:bg-zinc-200">
                                         <Save className="mr-2 h-4 w-4" />
-                                        Save Keys
+                                        Save Vault Changes
                                     </Button>
                                 </CardContent>
                             </Card>

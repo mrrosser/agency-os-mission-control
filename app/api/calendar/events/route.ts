@@ -43,7 +43,7 @@ export const POST = withApiHandler(
     const action = url.searchParams.get("action");
 
     const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "calendar" });
 
     if (action === "list") {
       const body = await parseJson(request, getQuerySchema);

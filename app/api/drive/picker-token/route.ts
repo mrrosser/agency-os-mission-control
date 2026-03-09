@@ -33,7 +33,7 @@ export const GET = withApiHandler(
       throw new ApiError(500, "Missing GOOGLE_PICKER_API_KEY");
     }
 
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "drive" });
 
     const appId =
       process.env.GOOGLE_DRIVE_APP_ID || parseFirebaseProjectNumber() || null;

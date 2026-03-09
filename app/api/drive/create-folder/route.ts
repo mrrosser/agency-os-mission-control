@@ -62,7 +62,7 @@ export const POST = withApiHandler(
       return NextResponse.json(payload);
     }
 
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "drive" });
     const result = await withIdempotency(
       { uid: user.uid, route: "drive.create-folder", key: idempotencyKey, log },
       () => createClientFolder(accessToken, body.clientName, body.parentFolderId, log)

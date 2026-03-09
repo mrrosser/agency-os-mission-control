@@ -14,7 +14,7 @@ export const POST = withApiHandler(
   async ({ request, log }) => {
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "drive" });
 
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: accessToken });

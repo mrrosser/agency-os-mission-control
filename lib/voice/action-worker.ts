@@ -10,6 +10,7 @@ import { createMeetingWithAvailabilityCheck } from "@/lib/google/calendar";
 import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
 import { findDncMatch } from "@/lib/outreach/dnc";
 import { withIdempotency } from "@/lib/api/idempotency";
+import { ApiError } from "@/lib/api/handler";
 import type { VoiceActionName, VoiceKnowledgeContext } from "@/lib/voice/inbound-webhook";
 
 export interface VoiceActionWorkerResult {
@@ -406,9 +407,21 @@ async function processVoiceAction(input: ProcessVoiceActionInput): Promise<"comp
     }
   }
 
-  const accessToken = await getAccessTokenForUser(uid, input.log);
-
   if (request.action === "gmail.createDraft") {
+    let accessToken: string;
+    try {
+      accessToken = await getAccessTokenForUser(uid, input.log, { requireCapability: "gmail" });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        await markRequest(request.requestId, "needs_input", {
+          reason: "gmail_not_enabled",
+          message: error.message,
+        });
+        return "needs_input";
+      }
+      throw error;
+    }
+
     const subject = business
       ? `${business.name} follow up from your call`
       : "Follow up from your call";
@@ -514,6 +527,20 @@ async function processVoiceAction(input: ProcessVoiceActionInput): Promise<"comp
       },
     });
     return "complete";
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = await getAccessTokenForUser(uid, input.log, { requireCapability: "calendar" });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403) {
+      await markRequest(request.requestId, "needs_input", {
+        reason: "calendar_not_enabled",
+        message: error.message,
+      });
+      return "needs_input";
+    }
+    throw error;
   }
 
   const createdResult = await withIdempotency(

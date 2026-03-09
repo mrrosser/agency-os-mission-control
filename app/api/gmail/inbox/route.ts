@@ -22,7 +22,7 @@ export const POST = withApiHandler(
 
     let accessToken: string;
     try {
-      accessToken = await getAccessTokenForUser(user.uid, log);
+      accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "gmail" });
       log.info("inbox.token_retrieved", { uid: user.uid });
     } catch (error: unknown) {
       log.warn("inbox.token_failed", {

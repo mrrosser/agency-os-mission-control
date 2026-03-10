@@ -23,6 +23,21 @@ export const GOOGLE_OAUTH_SCOPES = [
 ];
 
 export type GoogleScopePreset = "core" | "drive" | "calendar" | "gmail" | "full";
+export type GoogleCapability = "drive" | "calendar" | "gmail";
+
+export interface GoogleCapabilities {
+  drive: boolean;
+  gmail: boolean;
+  calendar: boolean;
+}
+
+export interface StoredGoogleTokens {
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  expiryDate?: number | null;
+  scope?: string | null;
+  tokenType?: string | null;
+}
 
 const GOOGLE_SCOPE_GROUPS = {
   identity: [
@@ -36,6 +51,12 @@ const GOOGLE_SCOPE_GROUPS = {
   ],
   gmail: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
 } as const;
+
+const GOOGLE_CAPABILITY_ERROR_MESSAGES: Record<GoogleCapability, string> = {
+  drive: "Google Drive access is not enabled. Open Integrations and enable Drive.",
+  calendar: "Google Calendar access is not enabled. Open Integrations and enable Calendar.",
+  gmail: "Gmail access is not enabled. Open Integrations and enable Gmail.",
+};
 
 function uniqueScopes(values: readonly string[]): string[] {
   const out: string[] = [];
@@ -73,6 +94,26 @@ export function scopesForPreset(preset: GoogleScopePreset): string[] {
     ...GOOGLE_SCOPE_GROUPS.calendar,
     ...GOOGLE_SCOPE_GROUPS.gmail,
   ]);
+}
+
+export function parseGoogleScopeString(scopeString?: string | null): string[] {
+  return String(scopeString || "")
+    .split(" ")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+export function googleCapabilitiesFromScopeString(scopeString?: string | null): GoogleCapabilities {
+  const scopes = parseGoogleScopeString(scopeString);
+  return {
+    drive: scopes.some((value) => value.includes("/auth/drive")),
+    gmail: scopes.some((value) => value.includes("/auth/gmail")),
+    calendar: scopes.some((value) => value.includes("/auth/calendar")),
+  };
+}
+
+export function missingGoogleCapabilityMessage(capability: GoogleCapability): string {
+  return GOOGLE_CAPABILITY_ERROR_MESSAGES[capability];
 }
 
 function getOAuthConfig() {
@@ -169,22 +210,45 @@ export async function getStoredGoogleTokens(uid: string) {
   if (!tokenDoc.exists) {
     return null;
   }
-  return tokenDoc.data() as {
-    accessToken?: string | null;
-    refreshToken?: string | null;
-    expiryDate?: number | null;
-    scope?: string | null;
-    tokenType?: string | null;
-  };
+  return tokenDoc.data() as StoredGoogleTokens;
 }
 
-export async function getAccessTokenForUser(uid: string, log?: Logger) {
+async function clearStoredGoogleTokens(uid: string, log?: Logger) {
+  await getAdminDb().collection(TOKEN_COLLECTION).doc(uid).delete().catch(() => undefined);
+  log?.warn("google.oauth.tokens_cleared", { uid });
+}
+
+function isRevokedGoogleTokenError(meta: Record<string, unknown>, errorMessage: string): boolean {
+  const haystack = [
+    errorMessage,
+    String(meta.code || ""),
+    String(meta.status || ""),
+    String(meta.error || ""),
+    String(meta.error_description || ""),
+    String(meta.message || ""),
+    String((meta.response as { data?: { error?: string; error_description?: string } } | undefined)?.data?.error || ""),
+    String(
+      (meta.response as { data?: { error?: string; error_description?: string } } | undefined)?.data?.error_description ||
+        ""
+    ),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes("invalid_grant") || haystack.includes("invalid_token") || haystack.includes("token has been expired or revoked");
+}
+
+export async function getAccessTokenForUser(
+  uid: string,
+  log?: Logger,
+  options?: { requireCapability?: GoogleCapability }
+) {
   log?.info("oauth.getAccessToken.start", { uid });
 
   const tokens = await getStoredGoogleTokens(uid);
   if (!tokens?.refreshToken) {
     log?.warn("oauth.no_tokens", { uid, hasTokens: !!tokens });
-    const error = new ApiError(403, "Google account not connected");
+    const error = new ApiError(403, "Google Workspace is not connected. Open Integrations to connect your account.");
     log?.warn("oauth.throwing_403", {
       uid,
       isApiError: error instanceof ApiError,
@@ -192,6 +256,13 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
       errorMessage: error.message
     });
     throw error;
+  }
+
+  if (options?.requireCapability) {
+    const capabilities = googleCapabilitiesFromScopeString(tokens.scope);
+    if (!capabilities[options.requireCapability]) {
+      throw new ApiError(403, missingGoogleCapabilityMessage(options.requireCapability));
+    }
   }
 
   log?.info("oauth.tokens_found", { uid });
@@ -245,6 +316,11 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
     // If it's already an ApiError, rethrow it
     if (error instanceof ApiError) {
       throw error;
+    }
+
+    if (isRevokedGoogleTokenError(meta, errorMessage)) {
+      await clearStoredGoogleTokens(uid, log);
+      throw new ApiError(403, "Google connection expired or was revoked. Reconnect your Google Workspace account.");
     }
 
     // Otherwise wrap it

@@ -174,7 +174,7 @@ export function GoogleWorkspaceConnect() {
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-zinc-400">
-          Connect Gmail, Drive, and Calendar so Mission Control can orchestrate your outreach.
+          Connect Gmail, Drive, and Calendar so Mission Control can draft outreach, schedule meetings, and read shared files without extra setup loops.
         </p>
 
         {connected && (
@@ -230,7 +230,7 @@ export function GoogleWorkspaceConnect() {
                     disabled={loading}
                     className="bg-blue-600 hover:bg-blue-500 text-white"
                   >
-                    Enable Gmail
+                    Enable Gmail for Inbox + Drafts
                   </Button>
                 )}
               </div>
@@ -248,22 +248,22 @@ export function GoogleWorkspaceConnect() {
         ) : (
           <div className="grid grid-cols-1 gap-2">
             <Button
-              onClick={() => handleConnect("core")}
+              onClick={() => handleConnect("full")}
               disabled={loading}
               className="bg-blue-600 hover:bg-blue-500 text-white"
             >
-              Connect Google (Drive + Calendar)
+              Connect Google Workspace
             </Button>
             <Button
               variant="outline"
-              onClick={() => handleConnect("full")}
+              onClick={() => handleConnect("core")}
               disabled={loading}
               className="border-zinc-700 text-zinc-200 hover:bg-zinc-900"
             >
-              Connect Full (includes Gmail)
+              Connect Calendar + Drive Only
             </Button>
             <p className="text-xs text-zinc-500">
-              Tip: start with Drive + Calendar to reduce verification friction, then enable Gmail when needed.
+              Recommended: connect the full workspace so Inbox, draft approvals, and calendar booking work in one pass.
             </p>
           </div>
         )}

@@ -29,12 +29,12 @@ export default function IntegrationsPage() {
                         <h1 className="text-3xl font-bold text-white">Outreach Integrations</h1>
                     </div>
                     <p className="text-zinc-400">
-                        Verify the channels your lead engine uses for outreach
+                        Connect the channels Mission Control uses for outreach and only open the vault when this workspace owns its own vendor accounts.
                     </p>
                     <div className="pt-2">
                         <Link href="/dashboard/settings?tab=integrations">
                             <Button variant="outline" className="border-zinc-700 text-zinc-200 hover:bg-zinc-900">
-                                Open API Vault
+                                Open API Vault (Optional)
                             </Button>
                         </Link>
                     </div>
@@ -67,6 +67,15 @@ export default function IntegrationsPage() {
 
                 <GoogleWorkspaceConnect />
                 <SocialOnboardingChecklist />
+
+                <Card className="bg-zinc-950 border-zinc-800">
+                    <CardContent className="p-4 text-sm text-zinc-300 space-y-2">
+                        <p className="font-medium text-white">What belongs here vs. in the vault</p>
+                        <p className="text-zinc-400">
+                            Google Workspace is a connected-account flow. The API Vault is only for bring-your-own OpenAI, Twilio, Firecrawl, Places, ElevenLabs, or HeyGen credentials when a client environment needs separate provider ownership.
+                        </p>
+                    </CardContent>
+                </Card>
 
                 {/* Feature Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -121,9 +130,9 @@ export default function IntegrationsPage() {
                 <div className="p-6 bg-zinc-950 border border-zinc-800 rounded-lg">
                     <h3 className="text-lg font-semibold text-white mb-3">Getting Started</h3>
                     <ol className="space-y-2 text-sm text-zinc-400 list-decimal list-inside">
-                        <li>Configure your API keys in the <strong className="text-white">API Vault</strong></li>
+                        <li>Connect Google Workspace first so Gmail, Calendar, and Drive are available to the app</li>
+                        <li>Open the <strong className="text-white">API Vault</strong> only if this environment uses its own vendor keys</li>
                         <li>Test each integration using the components above</li>
-                        <li>Check the browser console (F12) for detailed logs</li>
                         <li>Use these integrations in your Lead Engine runs</li>
                     </ol>
                 </div>

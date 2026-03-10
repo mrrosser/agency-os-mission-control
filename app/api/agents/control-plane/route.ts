@@ -1,11 +1,15 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
-import { withApiHandler } from "@/lib/api/handler";
+import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAgentSpaceStatus } from "@/lib/agent-status";
 import { getSecretStatus } from "@/lib/api/secrets";
-import { getStoredGoogleTokens } from "@/lib/google/oauth";
+import {
+  getAccessTokenForUser,
+  getStoredGoogleTokens,
+  googleCapabilitiesFromScopeString,
+} from "@/lib/google/oauth";
 import {
   getLeadRunQuotaSummary,
   listLeadRunAlerts,
@@ -174,17 +178,10 @@ async function listTelemetryGroups(uid: string, limit: number): Promise<ControlP
 }
 
 function deriveGoogleCapabilities(scopeValue: string | null | undefined) {
-  const scope = scopeValue || "";
-  const scopes = scope
-    .split(" ")
-    .map((value) => value.trim())
-    .filter(Boolean);
-
+  const capabilities = googleCapabilitiesFromScopeString(scopeValue);
   return {
-    connected: scopes.length > 0,
-    drive: scopes.some((value) => value.includes("/auth/drive")),
-    gmail: scopes.some((value) => value.includes("/auth/gmail")),
-    calendar: scopes.some((value) => value.includes("/auth/calendar")),
+    connected: capabilities.drive || capabilities.gmail || capabilities.calendar,
+    ...capabilities,
   };
 }
 
@@ -338,9 +335,25 @@ export const GET = withApiHandler(
       listLeadRunAlerts(orgId, 10),
     ]);
 
-    const google = deriveGoogleCapabilities(googleTokens?.scope || null);
+    let google = deriveGoogleCapabilities(googleTokens?.scope || null);
     if (!google.connected && (googleTokens?.refreshToken || googleTokens?.accessToken)) {
       google.connected = true;
+    }
+    if (google.connected) {
+      try {
+        await getAccessTokenForUser(user.uid, log);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          google = {
+            connected: false,
+            drive: false,
+            gmail: false,
+            calendar: false,
+          };
+        } else {
+          throw error;
+        }
+      }
     }
     const externalTools = readExternalToolConfig();
 

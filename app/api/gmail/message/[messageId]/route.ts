@@ -12,7 +12,7 @@ export const GET = withApiHandler(
     }
 
     const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "gmail" });
     const message = await getMessage(accessToken, messageId, log);
 
     return NextResponse.json(message);

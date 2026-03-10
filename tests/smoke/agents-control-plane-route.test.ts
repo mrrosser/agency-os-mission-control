@@ -3,7 +3,7 @@ import { GET } from "@/app/api/agents/control-plane/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAgentSpaceStatus } from "@/lib/agent-status";
 import { getSecretStatus } from "@/lib/api/secrets";
-import { getStoredGoogleTokens } from "@/lib/google/oauth";
+import { getAccessTokenForUser, getStoredGoogleTokens, googleCapabilitiesFromScopeString } from "@/lib/google/oauth";
 import {
   getLeadRunQuotaSummary,
   listLeadRunAlerts,
@@ -35,7 +35,13 @@ vi.mock("@/lib/api/secrets", () => ({
 }));
 
 vi.mock("@/lib/google/oauth", () => ({
+  getAccessTokenForUser: vi.fn(async () => "access-token"),
   getStoredGoogleTokens: vi.fn(async () => ({ scope: "" })),
+  googleCapabilitiesFromScopeString: vi.fn((scope?: string | null) => ({
+    drive: Boolean(scope?.includes("drive")),
+    gmail: Boolean(scope?.includes("gmail")),
+    calendar: Boolean(scope?.includes("calendar")),
+  })),
 }));
 
 vi.mock("@/lib/lead-runs/quotas", () => ({
@@ -98,7 +104,9 @@ vi.mock("@/lib/billing/provider-costs", () => ({
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const getAgentSpaceStatusMock = vi.mocked(getAgentSpaceStatus);
 const getSecretStatusMock = vi.mocked(getSecretStatus);
+const getAccessTokenForUserMock = vi.mocked(getAccessTokenForUser);
 const getStoredGoogleTokensMock = vi.mocked(getStoredGoogleTokens);
+const googleCapabilitiesFromScopeStringMock = vi.mocked(googleCapabilitiesFromScopeString);
 const resolveOrgMock = vi.mocked(resolveLeadRunOrgId);
 const getQuotaMock = vi.mocked(getLeadRunQuotaSummary);
 const listAlertsMock = vi.mocked(listLeadRunAlerts);
@@ -136,6 +144,12 @@ describe("agents control-plane route", () => {
       scope:
         "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly",
     } as unknown as Awaited<ReturnType<typeof getStoredGoogleTokens>>);
+    getAccessTokenForUserMock.mockResolvedValue("access-token");
+    googleCapabilitiesFromScopeStringMock.mockImplementation((scope?: string | null) => ({
+      drive: Boolean(scope?.includes("drive")),
+      gmail: Boolean(scope?.includes("gmail")),
+      calendar: Boolean(scope?.includes("calendar")),
+    }));
     resolveOrgMock.mockResolvedValue("org-1");
     getQuotaMock.mockResolvedValue({
       orgId: "org-1",

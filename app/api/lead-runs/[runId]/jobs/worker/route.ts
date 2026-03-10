@@ -294,7 +294,35 @@ async function processLead(
     return diag;
   }
 
-  const accessToken = await getAccessTokenForUser(args.uid, log);
+  const googleAccessTokens: Partial<Record<"drive" | "calendar" | "gmail", string>> = {};
+  const googleCapabilityErrors: Partial<Record<"drive" | "calendar" | "gmail", string>> = {};
+
+  const getGoogleAccessToken = async (
+    capability: "drive" | "calendar" | "gmail"
+  ): Promise<string | null> => {
+    if (args.config.dryRun) return null;
+    if (googleAccessTokens[capability]) return googleAccessTokens[capability] as string;
+    if (googleCapabilityErrors[capability]) return null;
+
+    try {
+      const token = await getAccessTokenForUser(args.uid, log, { requireCapability: capability });
+      googleAccessTokens[capability] = token;
+      return token;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        googleCapabilityErrors[capability] = error.message;
+        log.warn("lead_runs.google.capability_unavailable", {
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          uid: args.uid,
+          capability,
+          message: error.message,
+        });
+        return null;
+      }
+      throw error;
+    }
+  };
 
   const identitySnap = await getAdminDb().collection("identities").doc(args.uid).get();
   const identity = identitySnap.data() || {};
@@ -352,29 +380,51 @@ async function processLead(
       log
     );
   } else {
-    const driveResult = await withIdempotency(
-      { uid: args.uid, route: "drive.create-folder", key: driveKey, log },
-      () => createClientFolder(accessToken, args.lead.companyName || "Client", undefined, log)
-    );
-    folderLink = driveResult.data?.mainFolder?.webViewLink;
-    await recordLeadActionReceipt(
-      {
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        actionId: "drive.folder",
-        uid: args.uid,
-        correlationId: args.correlationId,
-        status: "complete",
-        dryRun: false,
-        replayed: driveResult.replayed,
-        idempotencyKey: driveKey,
-        data: {
-          folderId: driveResult.data?.mainFolder?.id,
-          webViewLink: folderLink,
+    const driveAccessToken = await getGoogleAccessToken("drive");
+    if (!driveAccessToken) {
+      await recordLeadActionReceipt(
+        {
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          actionId: "drive.folder",
+          uid: args.uid,
+          correlationId: args.correlationId,
+          status: "skipped",
+          dryRun: false,
+          replayed: false,
+          idempotencyKey: driveKey,
+          data: {
+            reason: "drive_not_enabled",
+            detail: googleCapabilityErrors.drive || "Google Drive access is not enabled.",
+          },
         },
-      },
-      log
-    );
+        log
+      );
+    } else {
+      const driveResult = await withIdempotency(
+        { uid: args.uid, route: "drive.create-folder", key: driveKey, log },
+        () => createClientFolder(driveAccessToken, args.lead.companyName || "Client", undefined, log)
+      );
+      folderLink = driveResult.data?.mainFolder?.webViewLink;
+      await recordLeadActionReceipt(
+        {
+          runId: args.runId,
+          leadDocId: args.leadDocId,
+          actionId: "drive.folder",
+          uid: args.uid,
+          correlationId: args.correlationId,
+          status: "complete",
+          dryRun: false,
+          replayed: driveResult.replayed,
+          idempotencyKey: driveKey,
+          data: {
+            folderId: driveResult.data?.mainFolder?.id,
+            webViewLink: folderLink,
+          },
+        },
+        log
+      );
+    }
   }
 
   let meetingTime: string | undefined;
@@ -412,54 +462,14 @@ async function processLead(
       pipelineStage: normalizeCrmPipelineStage(args.lead.pipelineStage || args.lead.status),
     });
   } else {
-    let scheduleResult: ScheduleAttemptResult = { kind: "no_slot" };
-    for (let attempt = 1; attempt <= CALENDAR_RETRY_POLICY.maxAttempts; attempt += 1) {
-      scheduleResult = await runScheduleAttempt(
-        {
-          accessToken,
-          config: args.config,
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          lead: args.lead,
-          leadEmail,
-          correlationId: args.correlationId,
-          uid: args.uid,
-          retryAttempt: attempt,
-        },
-        log
-      );
-      if (scheduleResult.kind === "scheduled") break;
-      if (attempt < CALENDAR_RETRY_POLICY.maxAttempts) {
-        diag.calendarRetries = (diag.calendarRetries || 0) + 1;
-        log.warn("lead_runs.calendar.retrying_after_no_slot", {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          attempt,
-          maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-        });
-        await sleep(CALENDAR_RETRY_POLICY.baseBackoffMs * attempt);
-      }
-    }
+    const calendarKey = buildLeadActionIdempotencyKey({
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      action: "calendar.schedule",
+    });
+    const calendarAccessToken = args.config.dryRun ? null : await getGoogleAccessToken("calendar");
 
-    if (scheduleResult.kind === "scheduled") {
-      diag.meetingsScheduled = 1;
-      meetingTime = scheduleResult.scheduledStart;
-      meetLink = scheduleResult.meetLink;
-    } else {
-      diag.noSlot = 1;
-      log.warn("lead_runs.calendar.no_slot", {
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-        checkedCandidates: scheduleResult.checkedCandidates ?? 0,
-        busyCount: scheduleResult.busyCount ?? 0,
-        windowsTried: scheduleResult.windowsTried ?? 0,
-      });
-      const calendarKey = buildLeadActionIdempotencyKey({
-        runId: args.runId,
-        leadDocId: args.leadDocId,
-        action: "calendar.schedule",
-      });
+    if (!args.config.dryRun && !calendarAccessToken) {
       await recordLeadActionReceipt(
         {
           runId: args.runId,
@@ -472,77 +482,167 @@ async function processLead(
           replayed: false,
           idempotencyKey: calendarKey,
           data: {
-            reason: "no_slot",
-            maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
-            checked: scheduleResult.checkedCandidates,
-            busyCount: scheduleResult.busyCount,
-            windowsTried: scheduleResult.windowsTried,
+            reason: "calendar_not_enabled",
+            detail: googleCapabilityErrors.calendar || "Google Calendar access is not enabled.",
           },
         },
         log
       );
-      if (leadEmail) {
-        const draftKey = buildLeadActionIdempotencyKey({
+    } else {
+      let scheduleResult: ScheduleAttemptResult = { kind: "no_slot" };
+      for (let attempt = 1; attempt <= CALENDAR_RETRY_POLICY.maxAttempts; attempt += 1) {
+        scheduleResult = await runScheduleAttempt(
+          {
+            accessToken: calendarAccessToken as string,
+            config: args.config,
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            lead: args.lead,
+            leadEmail,
+            correlationId: args.correlationId,
+            uid: args.uid,
+            retryAttempt: attempt,
+          },
+          log
+        );
+        if (scheduleResult.kind === "scheduled") break;
+        if (attempt < CALENDAR_RETRY_POLICY.maxAttempts) {
+          diag.calendarRetries = (diag.calendarRetries || 0) + 1;
+          log.warn("lead_runs.calendar.retrying_after_no_slot", {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            attempt,
+            maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+          });
+          await sleep(CALENDAR_RETRY_POLICY.baseBackoffMs * attempt);
+        }
+      }
+
+      if (scheduleResult.kind === "scheduled") {
+        diag.meetingsScheduled = 1;
+        meetingTime = scheduleResult.scheduledStart;
+        meetLink = scheduleResult.meetLink;
+      } else {
+        diag.noSlot = 1;
+        log.warn("lead_runs.calendar.no_slot", {
           runId: args.runId,
           leadDocId: args.leadDocId,
-          action: "gmail.availability-draft",
+          maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+          checkedCandidates: scheduleResult.checkedCandidates ?? 0,
+          busyCount: scheduleResult.busyCount ?? 0,
+          windowsTried: scheduleResult.windowsTried ?? 0,
         });
-
-        if (args.config.dryRun) {
-          await recordLeadActionReceipt(
-            {
-              runId: args.runId,
-              leadDocId: args.leadDocId,
-              actionId: "gmail.availability_draft",
-              uid: args.uid,
-              correlationId: args.correlationId,
-              status: "simulated",
-              dryRun: true,
-              replayed: false,
-              idempotencyKey: draftKey,
-              data: { subject: `Quick scheduling question - ${args.lead.companyName || "your team"}` },
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            actionId: "calendar.booking",
+            uid: args.uid,
+            correlationId: args.correlationId,
+            status: "skipped",
+            dryRun: false,
+            replayed: false,
+            idempotencyKey: calendarKey,
+            data: {
+              reason: "no_slot",
+              maxAttempts: CALENDAR_RETRY_POLICY.maxAttempts,
+              checked: scheduleResult.checkedCandidates,
+              busyCount: scheduleResult.busyCount,
+              windowsTried: scheduleResult.windowsTried,
             },
-            log
-          );
-        } else {
-          const availabilityDraft = await withIdempotency(
-            { uid: args.uid, route: "gmail.draft", key: draftKey, log },
-            () =>
-              createDraftEmail(
-                accessToken,
+          },
+          log
+        );
+        if (leadEmail) {
+          const draftKey = buildLeadActionIdempotencyKey({
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            action: "gmail.availability-draft",
+          });
+          let availabilityDraftRecorded = false;
+
+          if (args.config.dryRun) {
+            await recordLeadActionReceipt(
+              {
+                runId: args.runId,
+                leadDocId: args.leadDocId,
+                actionId: "gmail.availability_draft",
+                uid: args.uid,
+                correlationId: args.correlationId,
+                status: "simulated",
+                dryRun: true,
+                replayed: false,
+                idempotencyKey: draftKey,
+                data: { subject: `Quick scheduling question - ${args.lead.companyName || "your team"}` },
+              },
+              log
+            );
+            availabilityDraftRecorded = true;
+          } else {
+            const gmailAccessToken = await getGoogleAccessToken("gmail");
+            if (!gmailAccessToken) {
+              await recordLeadActionReceipt(
                 {
-                  to: [leadEmail],
-                  subject: `Quick scheduling question - ${args.lead.companyName || "your team"}`,
-                  body: availabilityDraftHtml(leadName, founderName, businessName),
-                  isHtml: true,
+                  runId: args.runId,
+                  leadDocId: args.leadDocId,
+                  actionId: "gmail.availability_draft",
+                  uid: args.uid,
+                  correlationId: args.correlationId,
+                  status: "skipped",
+                  dryRun: false,
+                  replayed: false,
+                  idempotencyKey: draftKey,
+                  data: {
+                    reason: "gmail_not_enabled",
+                    detail: googleCapabilityErrors.gmail || "Gmail access is not enabled.",
+                  },
                 },
                 log
-              )
-          );
+              );
+            } else {
+              const availabilityDraft = await withIdempotency(
+                { uid: args.uid, route: "gmail.draft", key: draftKey, log },
+                () =>
+                  createDraftEmail(
+                    gmailAccessToken,
+                    {
+                      to: [leadEmail],
+                      subject: `Quick scheduling question - ${args.lead.companyName || "your team"}`,
+                      body: availabilityDraftHtml(leadName, founderName, businessName),
+                      isHtml: true,
+                    },
+                    log
+                  )
+              );
 
-          await recordLeadActionReceipt(
-            {
-              runId: args.runId,
-              leadDocId: args.leadDocId,
-              actionId: "gmail.availability_draft",
-              uid: args.uid,
-              correlationId: args.correlationId,
-              status: "complete",
-              dryRun: false,
-              replayed: availabilityDraft.replayed,
-              idempotencyKey: draftKey,
-              data: {
-                draftId: availabilityDraft.data.draftId,
-                messageId: availabilityDraft.data.messageId,
-                threadId: availabilityDraft.data.threadId,
-              },
-            },
-            log
-          );
+              await recordLeadActionReceipt(
+                {
+                  runId: args.runId,
+                  leadDocId: args.leadDocId,
+                  actionId: "gmail.availability_draft",
+                  uid: args.uid,
+                  correlationId: args.correlationId,
+                  status: "complete",
+                  dryRun: false,
+                  replayed: availabilityDraft.replayed,
+                  idempotencyKey: draftKey,
+                  data: {
+                    draftId: availabilityDraft.data.draftId,
+                    messageId: availabilityDraft.data.messageId,
+                    threadId: availabilityDraft.data.threadId,
+                  },
+                },
+                log
+              );
+              availabilityDraftRecorded = true;
+            }
+          }
+
+          if (availabilityDraftRecorded) {
+            diag.meetingsDrafted = 1;
+            diag.emailsDrafted = 1;
+          }
         }
-
-        diag.meetingsDrafted = 1;
-        diag.emailsDrafted = 1;
       }
     }
   }
@@ -588,6 +688,7 @@ async function processLead(
       leadDocId: args.leadDocId,
       action: "gmail.outreach-draft",
     });
+    let outreachDraftRecorded = false;
 
     if (args.config.dryRun) {
       await recordLeadActionReceipt(
@@ -605,50 +706,77 @@ async function processLead(
         },
         log
       );
+      outreachDraftRecorded = true;
     } else {
-      const draftResponse = await withIdempotency(
-        { uid: args.uid, route: "gmail.draft", key: draftKey, log },
-        () =>
-          createDraftEmail(
-            accessToken,
-            {
-              to: [leadEmail],
-              subject: outreachSubject,
-              body: outreachBody,
-              isHtml: true,
+      const gmailAccessToken = await getGoogleAccessToken("gmail");
+      if (!gmailAccessToken) {
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            actionId: "gmail.outreach_draft",
+            uid: args.uid,
+            correlationId: args.correlationId,
+            status: "skipped",
+            dryRun: false,
+            replayed: false,
+            idempotencyKey: draftKey,
+            data: {
+              reason: "gmail_not_enabled",
+              detail: googleCapabilityErrors.gmail || "Gmail access is not enabled.",
             },
-            log
-          )
-      );
-
-      await recordLeadActionReceipt(
-        {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          actionId: "gmail.outreach_draft",
-          uid: args.uid,
-          correlationId: args.correlationId,
-          status: "complete",
-          dryRun: false,
-          replayed: draftResponse.replayed,
-          idempotencyKey: draftKey,
-          data: {
-            draftId: draftResponse.data.draftId,
-            messageId: draftResponse.data.messageId,
-            threadId: draftResponse.data.threadId,
           },
-        },
-        log
-      );
+          log
+        );
+      } else {
+        const draftResponse = await withIdempotency(
+          { uid: args.uid, route: "gmail.draft", key: draftKey, log },
+          () =>
+            createDraftEmail(
+              gmailAccessToken,
+              {
+                to: [leadEmail],
+                subject: outreachSubject,
+                body: outreachBody,
+                isHtml: true,
+              },
+              log
+            )
+        );
+
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            actionId: "gmail.outreach_draft",
+            uid: args.uid,
+            correlationId: args.correlationId,
+            status: "complete",
+            dryRun: false,
+            replayed: draftResponse.replayed,
+            idempotencyKey: draftKey,
+            data: {
+              draftId: draftResponse.data.draftId,
+              messageId: draftResponse.data.messageId,
+              threadId: draftResponse.data.threadId,
+            },
+          },
+          log
+        );
+        outreachDraftRecorded = true;
+      }
     }
 
-    diag.emailsDrafted = (diag.emailsDrafted || 0) + 1;
+    if (outreachDraftRecorded) {
+      diag.emailsDrafted = (diag.emailsDrafted || 0) + 1;
+    }
   } else {
     const sendKey = buildLeadActionIdempotencyKey({
       runId: args.runId,
       leadDocId: args.leadDocId,
       action: "gmail.send",
     });
+    let outreachSent = false;
 
     if (args.config.dryRun) {
       await recordLeadActionReceipt(
@@ -666,43 +794,69 @@ async function processLead(
         },
         log
       );
+      outreachSent = true;
     } else {
-      const sent = await withIdempotency(
-        { uid: args.uid, route: "gmail.send", key: sendKey, log },
-        () =>
-          sendEmail(
-            accessToken,
-            {
-              to: [leadEmail],
-              subject: outreachSubject,
-              body: outreachBody,
-              isHtml: true,
+      const gmailAccessToken = await getGoogleAccessToken("gmail");
+      if (!gmailAccessToken) {
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            actionId: "gmail.outreach",
+            uid: args.uid,
+            correlationId: args.correlationId,
+            status: "skipped",
+            dryRun: false,
+            replayed: false,
+            idempotencyKey: sendKey,
+            data: {
+              reason: "gmail_not_enabled",
+              detail: googleCapabilityErrors.gmail || "Gmail access is not enabled.",
             },
-            log
-          )
-      );
-
-      await recordLeadActionReceipt(
-        {
-          runId: args.runId,
-          leadDocId: args.leadDocId,
-          actionId: "gmail.outreach",
-          uid: args.uid,
-          correlationId: args.correlationId,
-          status: "complete",
-          dryRun: false,
-          replayed: sent.replayed,
-          idempotencyKey: sendKey,
-          data: {
-            messageId: sent.data.id,
-            threadId: sent.data.threadId,
           },
-        },
-        log
-      );
+          log
+        );
+      } else {
+        const sent = await withIdempotency(
+          { uid: args.uid, route: "gmail.send", key: sendKey, log },
+          () =>
+            sendEmail(
+              gmailAccessToken,
+              {
+                to: [leadEmail],
+                subject: outreachSubject,
+                body: outreachBody,
+                isHtml: true,
+              },
+              log
+            )
+        );
+
+        await recordLeadActionReceipt(
+          {
+            runId: args.runId,
+            leadDocId: args.leadDocId,
+            actionId: "gmail.outreach",
+            uid: args.uid,
+            correlationId: args.correlationId,
+            status: "complete",
+            dryRun: false,
+            replayed: sent.replayed,
+            idempotencyKey: sendKey,
+            data: {
+              messageId: sent.data.id,
+              threadId: sent.data.threadId,
+            },
+          },
+          log
+        );
+        outreachSent = true;
+      }
     }
 
-    diag.emailsSent = 1;
+    if (outreachSent) {
+      diag.emailsSent = 1;
+    }
   }
 
   const twilioSid =

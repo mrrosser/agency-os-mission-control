@@ -115,7 +115,7 @@ export const POST = withApiHandler(
       return NextResponse.json(payload);
     }
 
-    const accessToken = await getAccessTokenForUser(user.uid, log);
+    const accessToken = await getAccessTokenForUser(user.uid, log, { requireCapability: "gmail" });
     const result = await withIdempotency(
       { uid: user.uid, route: "gmail.draft", key: idempotencyKey, log },
       () => createDraftEmail(accessToken, body.email, log)

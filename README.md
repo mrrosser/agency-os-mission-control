@@ -16,6 +16,8 @@ copy .env.local.example .env.local
 - `FIREBASE_PROJECT_ID`
 - `NEXT_PUBLIC_CANONICAL_LOGIN_URL` (recommended: `https://leadflow-review.web.app/login`)
 - `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN` (recommended: `true`)
+- `MISSION_CONTROL_PUBLIC_ORIGIN` (recommended: `https://leadflow-review.web.app`)
+- `MISSION_CONTROL_ALLOWED_ORIGINS` (optional: comma-separated list for dev or temporary callback hosts)
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
 - Optional: `GOOGLE_PICKER_API_KEY` (browser key; enables Google Drive Picker UI in Knowledge Base)
 - Optional: `GOOGLE_DRIVE_APP_ID` (Drive Picker app id; set to your GCP project number for Shared Drives support)
@@ -34,6 +36,7 @@ copy .env.local.example .env.local
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
 - Optional (lead source budget defaults): `LEAD_SOURCE_BUDGET_MAX_COST_USD`, `LEAD_SOURCE_BUDGET_MAX_PAGES`, `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC`
+- Optional (lead enrichment fallback guard): `LEAD_ENRICH_BASIC_FALLBACK_ENABLED` (default `true`; when `true`, website fetch fallback runs if Firecrawl key is missing, cooldown is active, or quota is exhausted)
 - Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
@@ -67,6 +70,8 @@ npm run dev
 - New control-plane dashboard: `app/dashboard/agents` (`/dashboard/agents` in the UI).
 - Backend snapshot API: `GET /api/agents/control-plane`.
 - Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` requests for operators).
+- Repo-improvement inbox API: `GET /api/agents/repo-improvement`.
+- Repo-improvement review API: `POST /api/agents/repo-improvement/review`.
 - Includes:
   - agent runtime states (active/idle/degraded/inactive),
   - service/tool/skill health,
@@ -74,12 +79,20 @@ npm run dev
   - per-agent quick actions (`Ping`, `Pause`, `Route`),
   - timeline filters (`All`, `Tasks`, `Comments`, `Status`, `Decisions`),
   - daily quota posture,
-  - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability).
+  - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability),
+  - overnight repo-improvement inbox with decision labels (`approve`, `reject`, `defer`, `needs-human`),
+  - shared review metrics (`proposal_rate`, `keep_rate`, `morning_approval_rate`, `revert_rate`, `verifier_pass_rate`, `repeat_failure_rate`, `time_to_accept_hours`).
 - Billing sources:
   - OpenAI: `GET /v1/organization/costs` (org admin key required for live pulls)
   - Twilio: Usage Records (ThisMonth, total price category)
   - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
   - Control-plane billing pulls are cached per user for 120s by default (`CONTROL_PLANE_BILLING_CACHE_TTL_MS`).
+- Local workstation env for the repo-improvement inbox:
+  - `REPO_IMPROVEMENT_REPORT_ROOT` defaults to `C:\CTO Projects\CodexSkills\docs\reports`
+  - `REPO_IMPROVEMENT_SCRIPT_ROOT` defaults to `C:\CTO Projects\CodexSkills\.codex\skills\automation-control-plane\scripts`
+  - optional `REPO_IMPROVEMENT_REVIEW_ALLOWED_UIDS` gates review submission to a comma-separated UID allowlist
+  - optional `REPO_IMPROVEMENT_REVIEW_SHELL` overrides the PowerShell executable used for the shared review recorder
+- When those paths are not mounted in the current runtime, Agent Nexus fails closed and shows the inbox as unavailable instead of breaking the rest of the control plane.
 
 ## Cross-Project MCP Connectors
 - Purpose: consume external systems (`SMAuto`, LeadOps Mission Control) as tools without merging codebases.
@@ -102,6 +115,19 @@ npm run dev
 - Skill file: `skills/sponsor-inbox-crm-agent/SKILL.md`
 - Refined prompt pack: `docs/plans/2026-02-25-refined-prompts-sponsor-crm.md`
 - Rubric template (sync target): `please-review/config-templates/sponsor-inbox-rubric.v1.json`
+
+## Inbox Triage API (Rubric v2, Backward Compatible)
+- Route: `POST /api/gmail/inbox`
+- Legacy compatibility retained:
+  - `messages[].triage.bucket` remains `hot|follow_up|nurture|ignore`
+  - `triage.bucketCounts` remains available in response summary
+- v2 extensions:
+  - `messages[].triage.rubricVersion = "v2"`
+  - `messages[].triage.dimensions` (`fit`, `clarity`, `budget`, `seriousness`, `companyTrust`, `closeLikelihood`)
+  - `messages[].triage.sponsorBucket` (`exceptional|high|medium|low|spam`)
+  - `messages[].triage.confidenceThreshold`, `messages[].triage.lowConfidence`
+  - `messages[].triage.suggestedAction`
+  - response `triage.sponsorBucketCounts` and `triage.lowConfidenceCount`
 
 ## Revenue Day 1 Automation
 - Manual/authenticated route: `POST /api/revenue/day1`
@@ -166,8 +192,26 @@ npm run dev
 - Latest snapshot route: `GET /api/revenue/kpi/latest`
 - Worker auth: send `Authorization: Bearer <REVENUE_WEEKLY_KPI_WORKER_TOKEN>` (or `x-revenue-weekly-kpi-token`).
 - Writes weekly and latest KPI docs under `identities/{uid}/revenue_kpi_reports/*`.
+- KPI docs include canonical outcome gate payload:
+  - `outcomeGates.gates[]` (`throughput`, `qualification`, `meeting`, `revenue`, `pipeline`)
+  - `outcomeGates.summary` (`passCount`, `warnCount`, `failCount`, `passOrWarnCount`)
+  - `outcomeGates.criticalGateFailures` (`throughput`, `revenue`)
+  - `outcomeGateReadiness` (two-week evidence tracker, default target `>=3/5` pass|warn for `2` consecutive weeks)
 - Automation workflow: `.github/workflows/revenue-weekly-kpi.yml`
 - Dashboard surface (internal revenue UI flag): weekly KPI summary cards + decision counts.
+
+## Revenue Weekly Business Health Artifact
+- Script: `npm run revenue:weekly:health`
+- Reads latest Firestore KPI + variant decision snapshots and outputs:
+  - Markdown report (`docs/reports/<date>-weekly-business-health.md` by default)
+  - JSON payload (`docs/reports/<date>-weekly-business-health.json` by default)
+- Uses canonical outcome gates as the primary health table (variant decisions are supporting signals).
+- Optional Firestore writeback collection: `identities/{uid}/revenue_health_reports/*` (enabled by default).
+- Environment:
+  - `REVENUE_HEALTH_UID` (falls back to revenue UID env chain)
+  - `REVENUE_HEALTH_REPORT_PATH`, `REVENUE_HEALTH_JSON_PATH` (optional output overrides)
+  - `REVENUE_HEALTH_WRITE_FIRESTORE=true|false`
+- Scheduled automation workflow: `.github/workflows/revenue-weekly-health.yml` (Mondays 17:00 UTC, after KPI + variant jobs).
 
 ## Square Deposit Webhook
 - Route: `POST /api/webhooks/square`
@@ -236,7 +280,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-ni
 Notes:
 - Do not use `0.0.0.0` in OAuth redirect URIs; browsers treat it as an invalid address.
 - If you run the dev server on a different port (e.g. 8080), add `http://localhost:8080/api/google/callback` to the Google OAuth client and set `GOOGLE_OAUTH_REDIRECT_URI` accordingly.
-- Use `https://leadflow-review.web.app/login` as the user-facing login URL (not direct `*.run.app` service URLs).
+- Use `https://leadflow-review.web.app/login` as the user-facing login URL.
+- Keep `*.run.app` URLs as service endpoints unless they are explicitly added as temporary OAuth callback hosts.
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
@@ -254,6 +299,11 @@ If your npm version rewrites flags, this direct form always works:
 ```bash
 node scripts/firebase-deploy.mjs deploy --only hosting --project leadflow-review
 ```
+
+Repo-improvement dashboard behavior after deploy:
+- The hosted UI can render the inbox only when the runtime can read the shared CodexSkills reports and invoke the shared review recorder.
+- For local workstation use, the default Windows paths above are enough.
+- For hosted or non-Windows runtimes, set `REPO_IMPROVEMENT_REPORT_ROOT`, `REPO_IMPROVEMENT_SCRIPT_ROOT`, and `REPO_IMPROVEMENT_REVIEW_SHELL` to mounted equivalents, or accept the fail-closed unavailable state in `/dashboard/agents`.
 
 Required GitHub Actions configuration:
 - `ENV_LOCAL` (full `.env.local` content)
@@ -293,7 +343,7 @@ Expected live URL (Firebase Hosting default):
 ## Canonical Login Routing (User UX)
 - Canonical login URL: `https://leadflow-review.web.app/login`
 - Cloud Run `*.a.run.app` URLs are service endpoints (workers/webhooks/troubleshooting), not primary operator login URLs.
-- `/login` auto-redirects `*.run.app` hosts to `NEXT_PUBLIC_CANONICAL_LOGIN_URL` when `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN=true`.
+- `/login` auto-redirects non-canonical browser hosts to `NEXT_PUBLIC_CANONICAL_LOGIN_URL` when `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN=true`.
 
 Update Firebase Auth authorized domains (idempotent script):
 ```bash
@@ -428,7 +478,29 @@ gcloud run services update ssrleadflowreview \
 ## Tests
 ```bash
 npm test
+npm run promptfoo:eval
+npm run promptfoo:code-scan
+npm run promptfoo:redteam
 ```
+
+## Hybrid Sprint Verification (Outcome Gates + Inbox Rubric v2)
+```bash
+npm run lint
+npm run test:unit
+npm run test:smoke
+npm run build
+```
+
+Stage verification:
+1. `POST /api/gmail/inbox` and confirm `rubricVersion="v2"` plus sponsor/low-confidence summary fields.
+2. `POST /api/revenue/kpi/weekly/worker-task` and confirm `report.outcomeGates` is present.
+3. `npm run revenue:weekly:health` and confirm canonical gate table appears in markdown/json artifact.
+
+Post-deploy verification:
+1. `GET /api/runtime/preflight`
+2. `POST /api/revenue/kpi/weekly/worker-task`
+3. `POST /api/gmail/inbox`
+4. Confirm Firestore `identities/{uid}/revenue_kpi_reports/latest` includes `outcomeGates`.
 
 ## RT Loop Gates (Recommended)
 Runs lint + unit + smoke + build + security scans and writes a report to `docs/reports/latest-run.md`:

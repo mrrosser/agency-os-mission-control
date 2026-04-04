@@ -2,7 +2,7 @@
 
 Date: 2026-02-24  
 Owner: Mission Control + OpenClaw Runtime  
-Status: In Progress
+Status: Completed (verification gates satisfied on 2026-02-27)
 
 ## Goal
 
@@ -130,10 +130,10 @@ Turn Mission Control + OpenClaw into a deterministic revenue engine for:
 
 ## Verification Gates
 
-- [ ] Business profiles updated with packaged offers and deposit rules.
-- [ ] Stage worker flow tested with dry-run and approval-gated live-run.
-- [ ] Weekly KPI report generated from live pipeline data.
-- [ ] No secrets committed; all connector keys env/Secret Manager only.
+- [x] Business profiles updated with packaged offers and deposit rules.
+- [x] Stage worker flow tested with dry-run and approval-gated live-run.
+- [x] Weekly KPI report generated from live pipeline data.
+- [x] No secrets committed; all connector keys env/Secret Manager only.
 
 ## Progress Log
 
@@ -146,6 +146,13 @@ Turn Mission Control + OpenClaw into a deterministic revenue engine for:
 - [x] Weekly KPI worker now emits deterministic decision logs to `identities/{uid}/revenue_kpi_decisions/*`.
 - [x] Local quality gates pass for current implementation (`lint`, `unit`, `smoke`, `build`).
 - [x] 2026-02-25 deployment + post-deploy smoke executed for `leadflow-review` (`npm run deploy:firebase`, `npm run test:postdeploy`).
+- [x] 2026-02-27 business profile offer/deposit sync gate codified in unit coverage (`tests/unit/business-profile-offers-sync.test.ts`) using `please-review/from-root/config-templates/knowledge-pack.v2.json` as the profile source.
+- [x] 2026-02-27 stage worker dry-run + approval-gated live-run coverage expanded in smoke tests (`tests/smoke/revenue-day2-worker-task-route.test.ts`, `tests/smoke/revenue-day30-worker-task-route.test.ts`).
+- [x] 2026-02-27 live weekly KPI report artifact generated from Firestore source-of-truth (`docs/reports/2026-02-27-weekly-kpi-live.md`).
+- [x] 2026-02-27 secrets/config hygiene sweep completed with repository scan evidence (`docs/reports/2026-02-27-secrets-config-hygiene-sweep.md`); only dummy test fixtures matched secret-like patterns.
+- [x] 2026-02-27 lead enrichment fallback shipped for Firecrawl missing/cooldown/quota paths (`lib/leads/providers/basic-web-enrichment.ts`, `lib/leads/sourcing.ts`) with unit coverage.
+- [x] 2026-02-27 inbox triage rubric/confidence telemetry landed in API response + logs (`lib/inbox/triage.ts`, `app/api/gmail/inbox/route.ts`) with smoke/unit tests.
+- [x] 2026-02-27 weekly automated business health artifact workflow added (`scripts/revenue-weekly-health-report.mjs`, `.github/workflows/revenue-weekly-health.yml`).
 
 ## Local Ops Commands
 

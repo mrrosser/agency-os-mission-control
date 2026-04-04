@@ -76,6 +76,8 @@ describe("buildRuntimePreflightReport", () => {
   });
 
   it("reports ok when required keys are present and warns on optional gaps", () => {
+    for (const key of KEYS) delete process.env[key];
+
     process.env.GOOGLE_PLACES_API_KEY = "x";
     process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD = "2";
     process.env.LEAD_SOURCE_BUDGET_MAX_PAGES = "4";

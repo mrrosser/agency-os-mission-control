@@ -14,6 +14,7 @@ import {
 import { auth, googleProvider } from "@/lib/firebase";
 import { dbService } from "@/lib/db-service";
 import { buildAuthErrorDetails, type AuthErrorDetails } from "@/lib/auth/auth-error-messages";
+import { buildLoginHostPolicy } from "@/lib/auth/canonical-host";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,8 +27,6 @@ import { Loader2, AlertCircle, Apple } from "lucide-react";
 
 const CANONICAL_LOGIN_URL =
     process.env.NEXT_PUBLIC_CANONICAL_LOGIN_URL ?? "https://leadflow-review.web.app/login";
-const AUTO_REDIRECT_NON_CANONICAL_LOGIN =
-    process.env.NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN !== "false";
 
 declare global {
     interface Window {
@@ -54,29 +53,19 @@ export default function LoginPage() {
 
     useEffect(() => {
         const currentHost = window.location.hostname.toLowerCase();
-        const isLocalHost = currentHost === "localhost" || currentHost === "127.0.0.1";
-        if (isLocalHost) {
-            setHostWarning(false);
-            return;
-        }
 
         try {
-            const canonicalUrl = new URL(CANONICAL_LOGIN_URL);
-            const canonicalHost = canonicalUrl.hostname.toLowerCase();
-            const nonCanonicalHost = currentHost !== canonicalHost;
+            const policy = buildLoginHostPolicy(currentHost);
 
-            if (
-                nonCanonicalHost &&
-                currentHost.endsWith(".run.app") &&
-                AUTO_REDIRECT_NON_CANONICAL_LOGIN
-            ) {
+            if (policy.action === "redirect") {
+                const canonicalUrl = new URL(policy.canonicalLoginUrl);
                 canonicalUrl.search = window.location.search;
                 canonicalUrl.hash = window.location.hash;
                 window.location.replace(canonicalUrl.toString());
                 return;
             }
 
-            setHostWarning(nonCanonicalHost);
+            setHostWarning(policy.hostWarning);
         } catch {
             setHostWarning(false);
         }

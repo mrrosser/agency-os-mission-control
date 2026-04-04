@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, AlertTriangle, Bot, Radar, Shield, Activity, Sparkles } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
+import { buildLiveFeedItems, filterLiveFeed, summarizeLiveFeed, type TimelineFilter } from "@/lib/agents/live-feed";
+import { RepoImprovementInbox } from "@/components/operations/RepoImprovementInbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,6 @@ import { Button } from "@/components/ui/button";
 type Health = "operational" | "degraded" | "offline";
 type RuntimeState = "active" | "idle" | "degraded" | "inactive";
 type BillingStatus = "live" | "missing_credentials" | "unauthorized" | "unavailable" | "error";
-type TimelineFilter = "all" | "tasks" | "comments" | "status" | "decisions";
 
 interface AgentSnapshot {
   id: string;
@@ -125,6 +126,13 @@ interface ControlPlaneSnapshot {
         kill: number;
         watch: number;
       };
+      outcomeGates: {
+        passCount: number;
+        warnCount: number;
+        failCount: number;
+        passOrWarnCount: number;
+        criticalGateFailures: Array<"throughput" | "revenue">;
+      };
     };
     posWorker: {
       state: Health;
@@ -138,13 +146,13 @@ interface ControlPlaneSnapshot {
     };
   };
   costModel: {
-    method: string;
+    method: "heuristic-v1" | "hybrid-v1" | "live-v1";
     assumptions: string[];
     serviceCostUsd: number;
     agentCostUsd: number;
     liveProviderCostUsd: number;
     providerBilling: Array<{
-      providerId: string;
+      providerId: "openai" | "twilio" | "elevenlabs";
       label: string;
       status: BillingStatus;
       monthlyCostUsd: number | null;
@@ -153,17 +161,6 @@ interface ControlPlaneSnapshot {
       source: string;
     }>;
   };
-}
-
-type ActivityKind = "heartbeat" | "alert" | "bug" | "decision";
-
-interface ActivityItem {
-  id: string;
-  kind: ActivityKind;
-  timeline: Exclude<TimelineFilter, "all">;
-  title: string;
-  detail: string;
-  ts: number;
 }
 
 const HEALTH_BADGE: Record<Health, string> = {
@@ -203,12 +200,6 @@ function costMethodLabel(method: string): string {
   if (method === "live-v1") return "Live provider billing";
   if (method === "hybrid-v1") return "Hybrid (live + fallback)";
   return "Heuristic monthly estimate";
-}
-
-function toTs(value: string | null | undefined): number {
-  if (!value) return 0;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function defaultRouteTarget(agent: AgentSnapshot): string {
@@ -263,72 +254,14 @@ export default function AgentNexusPage() {
     return snapshot.services.filter((service) => service.state === "operational").length;
   }, [snapshot]);
 
-  const liveFeed = useMemo(() => {
-    if (!snapshot) return [];
-
-    const items: ActivityItem[] = [];
-
-    for (const agent of snapshot.agents) {
-      if (!agent.lastSeenAt) continue;
-      items.push({
-        id: `heartbeat:${agent.id}:${agent.lastSeenAt}`,
-        kind: "heartbeat",
-        timeline: "status",
-        title: `${agent.label} heartbeat`,
-        detail: agent.channels.length > 0 ? `Channels: ${agent.channels.join(", ")}` : "No active channels",
-        ts: toTs(agent.lastSeenAt),
-      });
-    }
-
-    for (const alert of snapshot.diagnostics.alerts) {
-      items.push({
-        id: `alert:${alert.alertId}`,
-        kind: "alert",
-        timeline: "tasks",
-        title: alert.title,
-        detail: `${alert.status.toUpperCase()} • ${alert.message}`,
-        ts: toTs(alert.createdAt),
-      });
-    }
-
-    for (const bug of snapshot.diagnostics.bugs) {
-      items.push({
-        id: `bug:${bug.fingerprint}`,
-        kind: "bug",
-        timeline: "comments",
-        title: bug.message || bug.route || bug.fingerprint,
-        detail: `${bug.count} hits • ${bug.triageStatus}`,
-        ts: toTs(bug.lastSeenAt),
-      });
-    }
-
-    for (const [index, recommendation] of snapshot.diagnostics.recommendations.entries()) {
-      items.push({
-        id: `decision:${index}`,
-        kind: "decision",
-        timeline: "decisions",
-        title: "Control-plane recommendation",
-        detail: recommendation,
-        ts: toTs(snapshot.generatedAt) - index,
-      });
-    }
-
-    return items.sort((a, b) => b.ts - a.ts).slice(0, 20);
-  }, [snapshot]);
+  const liveFeed = useMemo(() => buildLiveFeedItems(snapshot), [snapshot]);
 
   const liveFeedCounts = useMemo(() => {
-    return {
-      all: liveFeed.length,
-      tasks: liveFeed.filter((item) => item.timeline === "tasks").length,
-      comments: liveFeed.filter((item) => item.timeline === "comments").length,
-      status: liveFeed.filter((item) => item.timeline === "status").length,
-      decisions: liveFeed.filter((item) => item.timeline === "decisions").length,
-    };
+    return summarizeLiveFeed(liveFeed);
   }, [liveFeed]);
 
   const filteredLiveFeed = useMemo(() => {
-    if (timelineFilter === "all") return liveFeed;
-    return liveFeed.filter((item) => item.timeline === timelineFilter);
+    return filterLiveFeed(liveFeed, timelineFilter);
   }, [liveFeed, timelineFilter]);
 
   const runAgentAction = useCallback(
@@ -483,6 +416,10 @@ export default function AgentNexusPage() {
                   <p className="text-xs text-zinc-400">{costMethodLabel(snapshot.costModel.method)}</p>
                 </CardContent>
               </Card>
+            </section>
+
+            <section>
+              <RepoImprovementInbox />
             </section>
 
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

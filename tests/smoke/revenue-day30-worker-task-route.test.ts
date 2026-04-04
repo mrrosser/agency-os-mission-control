@@ -111,6 +111,8 @@ describe("revenue day30 worker-task route", () => {
       body: JSON.stringify({
         uid: "user-1",
         templateIds: ["rng-south-day1"],
+        dryRun: false,
+        requireApprovalGates: true,
         runCloserQueue: true,
       }),
     });
@@ -124,6 +126,49 @@ describe("revenue day30 worker-task route", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(runDay30Mock).toHaveBeenCalledOnce();
+    const [args] = runDay30Mock.mock.calls[0] || [];
+    expect(args).toMatchObject({
+      uid: "user-1",
+      templateIds: ["rng-south-day1"],
+      dryRun: false,
+      requireApprovalGates: true,
+      runCloserQueue: true,
+    });
+  });
+
+  it("runs dry-run flow with approval gates enabled", async () => {
+    const req = new Request("http://localhost/api/revenue/day30/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer token-day30",
+      },
+      body: JSON.stringify({
+        uid: "user-1",
+        templateIds: ["rng-south-day1"],
+        dryRun: true,
+        requireApprovalGates: true,
+        runCloserQueue: false,
+      }),
+    });
+
+    const res = await POST(
+      req as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(runDay30Mock).toHaveBeenCalledOnce();
+    const [args] = runDay30Mock.mock.calls[0] || [];
+    expect(args).toMatchObject({
+      uid: "user-1",
+      templateIds: ["rng-south-day1"],
+      dryRun: true,
+      requireApprovalGates: true,
+      runCloserQueue: false,
+    });
   });
 
   it("falls back to REVENUE_DAY2_WORKER_TOKEN when day30 token is unset", async () => {

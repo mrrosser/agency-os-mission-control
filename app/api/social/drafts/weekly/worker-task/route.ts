@@ -22,7 +22,7 @@ const mediaSchema = z.object({
 
 const bodySchema = z.object({
   uid: z.string().trim().min(1).max(128).optional(),
-  businessKey: z.enum(["aicf", "rng", "rts"]).default("rng"),
+  businessKey: z.enum(["aicf", "rng", "rts", "all"]).default("rng"),
   channels: z.array(channelSchema).min(1).max(6).optional(),
   caption: z.string().trim().min(1).max(5000).optional(),
   media: z.array(mediaSchema).max(8).default([]),
@@ -146,43 +146,81 @@ export const POST = withApiHandler(
       );
     }
 
-    const businessKey = body.businessKey;
-    const weekKey = resolveWeekKey(businessKey, body.weekKey);
-    const idempotencyKey =
-      getIdempotencyKey(request, { idempotencyKey: body.idempotencyKey }) ||
-      `social-draft-${businessKey}-weekly-${uid}-${weekKey}`;
+    const requestedBusinessKey = body.businessKey;
+    const businessKeys =
+      requestedBusinessKey === "all"
+        ? (["aicf", "rng", "rts"] as const)
+        : ([requestedBusinessKey] as const);
+    const approvalBaseUrl = resolveApprovalBaseUrl(request);
+    const routeMetadata = {
+      run_id: correlationId,
+      job_name:
+        requestedBusinessKey === "all"
+          ? "social-drafts-weekly-all"
+          : `social-drafts-weekly-${requestedBusinessKey}`,
+      surface: "cloud_scheduler",
+      repo: "agency-os-mission-control",
+      mode: "live",
+      correlation_id: correlationId,
+    } as const;
 
-    const channels = body.channels || [...defaultChannelsForBusiness(businessKey)];
-    const caption = String(body.caption || "").trim() || defaultCaptionForWeek(businessKey, weekKey);
+    const results = [];
+    for (const businessKey of businessKeys) {
+      const weekKey = resolveWeekKey(businessKey, body.weekKey);
+      const idempotencyKey =
+        getIdempotencyKey(request, { idempotencyKey: body.idempotencyKey }) ||
+        `social-draft-${businessKey}-weekly-${uid}-${weekKey}`;
 
-    const result = await withIdempotency(
-      {
-        uid,
-        route: "social.drafts.weekly.worker_task.create",
-        key: idempotencyKey,
-        log,
-      },
-      async () =>
-        createSocialDraftWithApprovalDispatch({
+      const channels = body.channels || [...defaultChannelsForBusiness(businessKey)];
+      const caption =
+        String(body.caption || "").trim() || defaultCaptionForWeek(businessKey, weekKey);
+
+      const result = await withIdempotency(
+        {
           uid,
-          businessKey,
-          channels,
-          caption,
-          media: body.media,
-          source: body.source,
-          publishAt: null,
-          correlationId,
-          requestApproval: body.requestApproval,
-          approvalBaseUrl: resolveApprovalBaseUrl(request),
+          route: "social.drafts.weekly.worker_task.create",
+          key: idempotencyKey,
           log,
-        })
-    );
+        },
+        async () =>
+          createSocialDraftWithApprovalDispatch({
+            uid,
+            businessKey,
+            channels,
+            caption,
+            media: body.media,
+            source: body.source,
+            publishAt: null,
+            correlationId,
+            requestApproval: body.requestApproval,
+            approvalBaseUrl,
+            log,
+          })
+      );
+
+      results.push({
+        businessKey,
+        weekKey,
+        replayed: result.replayed,
+        ...result.data,
+      });
+    }
+
+    if (requestedBusinessKey !== "all") {
+      const [result] = results;
+      return NextResponse.json({
+        ok: true,
+        ...routeMetadata,
+        ...result,
+        correlationId,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
-      replayed: result.replayed,
-      weekKey,
-      ...result.data,
+      ...routeMetadata,
+      requestedBusinessKey,
+      results,
       correlationId,
     });
   },

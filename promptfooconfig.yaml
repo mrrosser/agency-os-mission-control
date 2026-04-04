@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Agency OS Mission Control prompt evaluations
+prompts:
+  - "{{input}}"
+providers:
+  - file://promptfoo/providers/script-generator.provider.mjs
+tests: file://promptfoo/tests/*.yaml
+defaultTest:
+  options:
+    transformVars: |
+      return {
+        ...vars,
+        type: vars.type || 'voice',
+      };

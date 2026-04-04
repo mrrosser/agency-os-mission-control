@@ -361,6 +361,17 @@ describe("email triage runtime v3 quality", () => {
     expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("newest inbound message");
     expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("gmail ai overview");
     expect(String(aiDrafting.promptDefault).toLowerCase()).toContain("other threads");
+
+    const promptGuardrail = aiDrafting.promptGuardrail as Record<string, unknown>;
+    expect(Boolean(promptGuardrail.enabled)).toBe(true);
+    expect(promptGuardrail.baseSkills).toEqual(
+      expect.arrayContaining([
+        "lead-comms-email-thread-guardrails",
+        "lead-comms-email-shared-voice",
+        "lead-comms-email-route-voices",
+      ])
+    );
+    expect(String(promptGuardrail.routeSkillName)).toBe("lead-comms-email-route-voices");
   });
 
   it("uses human-readable fallback template bodies (real newlines, no literal slash-n)", () => {

@@ -71,6 +71,8 @@ describe("revenue day2 worker-task route", () => {
       body: JSON.stringify({
         uid: "user-1",
         templateIds: ["rng-south-day1"],
+        dryRun: false,
+        requireApprovalGates: true,
         processDueResponses: true,
       }),
     });
@@ -84,6 +86,49 @@ describe("revenue day2 worker-task route", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(runDay2Mock).toHaveBeenCalledOnce();
+    const [args] = runDay2Mock.mock.calls[0] || [];
+    expect(args).toMatchObject({
+      uid: "user-1",
+      templateIds: ["rng-south-day1"],
+      dryRun: false,
+      requireApprovalGates: true,
+      processDueResponses: true,
+    });
+  });
+
+  it("runs dry-run flow with approval gates still enabled", async () => {
+    const req = new Request("http://localhost/api/revenue/day2/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer token-day2",
+      },
+      body: JSON.stringify({
+        uid: "user-1",
+        templateIds: ["rng-south-day1"],
+        dryRun: true,
+        requireApprovalGates: true,
+        processDueResponses: false,
+      }),
+    });
+
+    const res = await POST(
+      req as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(runDay2Mock).toHaveBeenCalledOnce();
+    const [args] = runDay2Mock.mock.calls[0] || [];
+    expect(args).toMatchObject({
+      uid: "user-1",
+      templateIds: ["rng-south-day1"],
+      dryRun: true,
+      requireApprovalGates: true,
+      processDueResponses: false,
+    });
   });
 
   it("falls back to REVENUE_DAY1_WORKER_TOKEN when day2 token is unset", async () => {

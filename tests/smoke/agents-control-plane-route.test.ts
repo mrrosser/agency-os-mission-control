@@ -11,6 +11,7 @@ import {
 } from "@/lib/lead-runs/quotas";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
+import { buildLiveFeedItems, summarizeLiveFeed } from "@/lib/agents/live-feed";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -296,5 +297,13 @@ describe("agents control-plane route", () => {
     expect(payload.services.some((service: { id: string }) => service.id === "square_pos")).toBe(true);
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");
+
+    const liveFeed = buildLiveFeedItems(payload);
+    const feedSummary = summarizeLiveFeed(liveFeed);
+    expect(liveFeed.length).toBeGreaterThan(0);
+    expect(feedSummary.all).toBe(liveFeed.length);
+    expect(
+      feedSummary.tasks + feedSummary.comments + feedSummary.status + feedSummary.decisions
+    ).toBe(liveFeed.length);
   });
 });

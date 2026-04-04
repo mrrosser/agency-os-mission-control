@@ -2,7 +2,7 @@ name: Postdeploy Health Monitor
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "15 11 * * *"
   workflow_dispatch:
 
 permissions:

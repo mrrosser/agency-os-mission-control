@@ -2,7 +2,7 @@
 
 Date: 2026-02-24  
 Owner: Marcus + Mission Control Ops  
-Status: Draft (for immediate packaging in Square)
+Status: Active baseline (packaged offers + deposit rules synced)
 
 ## Rosser NFT Gallery
 
@@ -95,4 +95,3 @@ Status: Draft (for immediate packaging in Square)
 2. Attach one intake form URL per offer.
 3. Add one booking link per offer.
 4. Publish a single "services" landing section for each business with direct offer links.
-

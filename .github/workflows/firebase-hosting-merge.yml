@@ -28,6 +28,8 @@ jobs:
             ${{ runner.os }}-nextjs-
       - run: npm ci
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
+      - name: Validate Firebase public client env
+        run: node scripts/validate-firebase-public-env.mjs .env.local
       - run: npm test
       - run: npm run build
         env:

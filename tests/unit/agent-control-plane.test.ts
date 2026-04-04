@@ -273,4 +273,118 @@ describe("buildControlPlaneSnapshot", () => {
     expect(String(smAuto?.detail || "")).toContain("invalid");
     expect(String(leadOps?.detail || "")).toContain("invalid");
   });
+
+  it("marks revenue KPI degraded when a critical outcome gate fails", () => {
+    const snapshot = buildControlPlaneSnapshot({
+      nowIso: "2026-03-02T18:00:00.000Z",
+      spaces: {},
+      secretStatus: {
+        ...ALL_MISSING,
+        openaiKey: "secret",
+      },
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-03-02",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: true,
+        hasAgentTopology: true,
+        hasKnowledgeIngestionPolicy: true,
+        hasVoiceOpsPolicy: true,
+      },
+      externalTools: {
+        smAutoEndpoint: null,
+        leadOpsEndpoint: null,
+      },
+      posWorker: null,
+      weeklyKpi: {
+        weekStartDate: "2026-03-02",
+        weekEndDate: "2026-03-08",
+        generatedAt: "2026-03-02T17:55:00.000Z",
+        leadsSourced: 6,
+        closeRatePct: 0,
+        depositsCollected: 0,
+        dealsWon: 0,
+        pipelineValueUsd: 1200,
+        decisionSummary: { scale: 0, fix: 1, kill: 0, watch: 1 },
+        outcomeGates: {
+          summary: { passCount: 0, warnCount: 2, failCount: 3, passOrWarnCount: 2 },
+          criticalGateFailures: ["revenue"],
+        },
+      },
+    });
+
+    expect(snapshot.operations.revenueKpi.state).toBe("degraded");
+    expect(snapshot.operations.revenueKpi.outcomeGates.criticalGateFailures).toContain("revenue");
+  });
+
+  it("marks revenue KPI operational when report is fresh and critical outcome gates pass", () => {
+    const snapshot = buildControlPlaneSnapshot({
+      nowIso: "2026-03-02T18:00:00.000Z",
+      spaces: {},
+      secretStatus: {
+        ...ALL_MISSING,
+        openaiKey: "secret",
+      },
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-03-02",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: true,
+        hasAgentTopology: true,
+        hasKnowledgeIngestionPolicy: true,
+        hasVoiceOpsPolicy: true,
+      },
+      externalTools: {
+        smAutoEndpoint: null,
+        leadOpsEndpoint: null,
+      },
+      posWorker: null,
+      weeklyKpi: {
+        weekStartDate: "2026-03-02",
+        weekEndDate: "2026-03-08",
+        generatedAt: "2026-03-02T17:55:00.000Z",
+        leadsSourced: 12,
+        closeRatePct: 12,
+        depositsCollected: 1,
+        dealsWon: 1,
+        pipelineValueUsd: 5200,
+        decisionSummary: { scale: 0, fix: 0, kill: 2, watch: 0 },
+        outcomeGates: {
+          summary: { passCount: 3, warnCount: 2, failCount: 0, passOrWarnCount: 5 },
+          criticalGateFailures: [],
+        },
+      },
+    });
+
+    expect(snapshot.operations.revenueKpi.state).toBe("operational");
+    expect(snapshot.operations.revenueKpi.outcomeGates.passOrWarnCount).toBe(5);
+  });
 });

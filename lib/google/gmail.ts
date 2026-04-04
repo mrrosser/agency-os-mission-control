@@ -76,6 +76,34 @@ export interface EmailMessage {
     }>;
 }
 
+export interface GmailInboxTriageAction {
+    escalate: boolean;
+    priority: "critical" | "high" | "normal" | "none";
+    autoDraft: boolean;
+    template: "qualify" | "decline" | null;
+    suppress: boolean;
+}
+
+export interface GmailInboxTriage {
+    rubricVersion: "v1" | "v2";
+    score: number;
+    confidence: number;
+    bucket: "hot" | "follow_up" | "nurture" | "ignore";
+    sponsorBucket?: "exceptional" | "high" | "medium" | "low" | "spam";
+    confidenceThreshold?: number;
+    lowConfidence?: boolean;
+    dimensions?: {
+        fit: number;
+        clarity: number;
+        budget: number;
+        seriousness: number;
+        companyTrust: number;
+        closeLikelihood: number;
+    };
+    suggestedAction?: GmailInboxTriageAction;
+    reasons?: string[];
+}
+
 export interface GmailMessage {
     id: string;
     threadId: string;
@@ -87,6 +115,7 @@ export interface GmailMessage {
         parts?: GmailMessagePart[];
     };
     internalDate?: string;
+    triage?: GmailInboxTriage;
 }
 
 export interface GmailMessagePart {

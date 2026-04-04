@@ -107,6 +107,7 @@ describe("social drafts weekly worker-task route", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.weekKey).toMatch(/^\d{4}-W\d{2}$/);
+    expect(data.job_name).toBe("social-drafts-weekly-rts");
     expect(withIdempotencyMock).toHaveBeenCalledOnce();
     expect(createDraftMock).toHaveBeenCalledOnce();
     expect(createDraftMock.mock.calls[0]?.[0]).toMatchObject({
@@ -114,5 +115,29 @@ describe("social drafts weekly worker-task route", () => {
       uid: "uid-weekly",
       channels: ["instagram_post", "facebook_post"],
     });
+  });
+
+  it("creates drafts for all businesses in one request", async () => {
+    const req = new Request("http://localhost/api/social/drafts/weekly/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer social-token",
+      },
+      body: JSON.stringify({ businessKey: "all" }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.job_name).toBe("social-drafts-weekly-all");
+    expect(data.results).toHaveLength(3);
+    expect(withIdempotencyMock).toHaveBeenCalledTimes(3);
+    expect(createDraftMock).toHaveBeenCalledTimes(3);
   });
 });

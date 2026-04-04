@@ -41,6 +41,11 @@ export function InboxList({ messages, selectedId, onSelect, loading }: InboxList
                 const dateStr = message.internalDate
                     ? parseInt(message.internalDate)
                     : null;
+                const triageBucket = message.triage?.bucket || null;
+                const triageConfidencePct =
+                    typeof message.triage?.confidence === "number"
+                        ? Math.round(Math.min(1, Math.max(0, message.triage.confidence)) * 100)
+                        : null;
 
                 // Clean up "From" -> display name only if possible
                 const fromName = from.split("<")[0].replace(/"/g, "").trim();
@@ -68,6 +73,32 @@ export function InboxList({ messages, selectedId, onSelect, loading }: InboxList
                         <span className="text-sm font-medium text-zinc-300 line-clamp-1 w-full">
                             {subject}
                         </span>
+
+                        {triageBucket && (
+                            <div className="flex items-center gap-2 text-[10px]">
+                                <span
+                                    className={cn(
+                                        "rounded border px-1.5 py-0.5 uppercase tracking-wide",
+                                        triageBucket === "hot" && "border-rose-400/40 text-rose-300",
+                                        triageBucket === "follow_up" && "border-amber-400/40 text-amber-300",
+                                        triageBucket === "nurture" && "border-sky-400/40 text-sky-300",
+                                        triageBucket === "ignore" && "border-zinc-700 text-zinc-400"
+                                    )}
+                                >
+                                    {triageBucket.replace("_", " ")}
+                                </span>
+                                {triageConfidencePct !== null && (
+                                    <span
+                                        className={cn(
+                                            "text-zinc-500",
+                                            message.triage?.lowConfidence ? "text-amber-400" : "text-zinc-400"
+                                        )}
+                                    >
+                                        {triageConfidencePct}% confidence
+                                    </span>
+                                )}
+                            </div>
+                        )}
 
                         <p className="text-xs text-zinc-500 line-clamp-2 w-full break-words">
                             {message.snippet}

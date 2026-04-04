@@ -98,6 +98,34 @@ schtasks /Create /TN "MissionControl-AIHellMary-Sync" /SC DAILY /ST 02:10 /TR "p
 - Writes weekly report docs under:
   - `identities/{uid}/revenue_kpi_reports/{weekStartDate}`
   - `identities/{uid}/revenue_kpi_reports/latest`
+- Report payload includes:
+  - `outcomeGates.gates[]` with canonical gate statuses (`pass|warn|fail`)
+  - `outcomeGates.summary` with pass/warn/fail counts
+  - `outcomeGates.criticalGateFailures` for `throughput` and `revenue`
+  - `outcomeGateReadiness` for consecutive-week evidence tracking
+
+### Canonical outcome gate definitions
+1. Throughput
+- Metric: sourced leads/week
+- Pass: `>=10`, Warn: `5-9`, Fail: `<5`
+2. Qualification
+- Metric: qualified/sourced
+- Pass: `>=20%`, Warn: `10-19.9%`, Fail: `<10%`
+3. Meeting
+- Metric: booked/sourced
+- Pass: `>=15%`, Warn: `8-14.9%`, Fail: `<8%`
+4. Revenue
+- Metric: deposits with meeting context
+- Pass: `>=1` deposit, Warn: `0` deposits with `>=2` meetings, Fail: otherwise
+5. Pipeline
+- Metric: active pipeline USD
+- Pass: `>=5000`, Warn: `2000-4999`, Fail: `<2000`
+
+### Two-week evidence procedure (remaining milestone)
+1. Generate KPI report each week via `POST /api/revenue/kpi/weekly/worker-task`.
+2. Confirm `outcomeGates.summary.passOrWarnCount >= 3`.
+3. Track `outcomeGateReadiness.consecutiveReadyWeeks` in `revenue_kpi_reports/latest`.
+4. Mark milestone complete only after two consecutive qualifying weekly reports (not same-day).
 
 ### GitHub scheduler
 - Workflow: `.github/workflows/revenue-weekly-kpi.yml`

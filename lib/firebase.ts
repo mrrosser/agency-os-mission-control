@@ -1,24 +1,34 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import {
+    type FirebaseClientConfig,
+    findMissingFirebaseClientConfig,
+    resolveFirebaseClientConfig,
+} from "@/lib/firebase-client-config";
 
-const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
+declare global {
+    interface Window {
+        __LEADFLOW_FIREBASE_CONFIG__?: Partial<FirebaseClientConfig>;
+    }
+}
 
-const missingConfig = Object.entries(firebaseConfig).filter(([, value]) => !value);
-const allowMissingConfig =
-    process.env.CI === "true" ||
-    process.env.NODE_ENV === "test" ||
-    process.env.NEXT_PHASE === "phase-production-build";
+function getInjectedFirebaseConfig() {
+    if (typeof window === "undefined") return undefined;
+    return window.__LEADFLOW_FIREBASE_CONFIG__;
+}
+
+const firebaseConfig = resolveFirebaseClientConfig({
+    env: process.env,
+    defaultsJson: process.env.__FIREBASE_DEFAULTS__,
+    injected: getInjectedFirebaseConfig(),
+});
+
+const missingConfig = findMissingFirebaseClientConfig(firebaseConfig);
+const allowMissingConfig = process.env.NODE_ENV === "test" || typeof window === "undefined";
 
 if (missingConfig.length > 0 && !allowMissingConfig) {
-    throw new Error(`Missing Firebase config values: ${missingConfig.map(([key]) => key).join(", ")}`);
+    throw new Error(`Missing Firebase config values: ${missingConfig.join(", ")}`);
 }
 
 const placeholderConfig = {
@@ -30,7 +40,7 @@ const placeholderConfig = {
     appId: "1:0000000000:web:missing",
 };
 
-const configForInit = missingConfig.length > 0 ? placeholderConfig : firebaseConfig;
+const configForInit = missingConfig.length > 0 ? placeholderConfig : (firebaseConfig as FirebaseClientConfig);
 
 // Initialize Firebase (Singleton)
 const app = !getApps().length ? initializeApp(configForInit) : getApp();

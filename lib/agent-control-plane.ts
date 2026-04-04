@@ -107,6 +107,15 @@ export interface ControlPlaneRevenueKpiInput {
     kill: number;
     watch: number;
   };
+  outcomeGates?: {
+    summary: {
+      passCount: number;
+      warnCount: number;
+      failCount: number;
+      passOrWarnCount: number;
+    };
+    criticalGateFailures: Array<"throughput" | "revenue">;
+  } | null;
 }
 
 export interface ControlPlaneServiceSnapshot {
@@ -195,6 +204,13 @@ export interface ControlPlaneRevenueKpiSnapshot {
     fix: number;
     kill: number;
     watch: number;
+  };
+  outcomeGates: {
+    passCount: number;
+    warnCount: number;
+    failCount: number;
+    passOrWarnCount: number;
+    criticalGateFailures: Array<"throughput" | "revenue">;
   };
 }
 
@@ -377,6 +393,7 @@ const QUEUE_CHECK_IDS = [
   "followups-queue",
   "competitor-monitor-queue",
 ] as const;
+const WEEKLY_KPI_STALE_MS = 8 * 24 * 60 * 60 * 1000;
 
 function asNonNegativeInt(value: number | null | undefined): number {
   if (!Number.isFinite(value ?? NaN)) return 0;
@@ -804,7 +821,8 @@ function buildSocialDispatchSnapshot(
 }
 
 function buildRevenueKpiSnapshot(
-  weeklyKpi: ControlPlaneRevenueKpiInput | null | undefined
+  weeklyKpi: ControlPlaneRevenueKpiInput | null | undefined,
+  nowMs: number
 ): ControlPlaneRevenueKpiSnapshot {
   if (!weeklyKpi) {
     return {
@@ -818,6 +836,13 @@ function buildRevenueKpiSnapshot(
       dealsWon: 0,
       pipelineValueUsd: 0,
       decisionSummary: { scale: 0, fix: 0, kill: 0, watch: 0 },
+      outcomeGates: {
+        passCount: 0,
+        warnCount: 0,
+        failCount: 0,
+        passOrWarnCount: 0,
+        criticalGateFailures: [],
+      },
     };
   }
 
@@ -832,13 +857,34 @@ function buildRevenueKpiSnapshot(
   const depositsCollected = asNonNegativeInt(weeklyKpi.depositsCollected);
   const dealsWon = asNonNegativeInt(weeklyKpi.dealsWon);
   const pipelineValueUsd = roundUsd(Math.max(0, Number(weeklyKpi.pipelineValueUsd) || 0));
-  const hasRecentReport = Boolean(weeklyKpi.generatedAt);
+  const generatedAtMs = parseIso(weeklyKpi.generatedAt || null);
+  const hasRecentReport =
+    generatedAtMs !== null && generatedAtMs <= nowMs && nowMs - generatedAtMs <= WEEKLY_KPI_STALE_MS;
+
+  const outcomeGateSummary = {
+    passCount: asNonNegativeInt(weeklyKpi.outcomeGates?.summary?.passCount),
+    warnCount: asNonNegativeInt(weeklyKpi.outcomeGates?.summary?.warnCount),
+    failCount: asNonNegativeInt(weeklyKpi.outcomeGates?.summary?.failCount),
+    passOrWarnCount: asNonNegativeInt(weeklyKpi.outcomeGates?.summary?.passOrWarnCount),
+  };
+  const criticalGateFailures = (weeklyKpi.outcomeGates?.criticalGateFailures || []).filter(
+    (value): value is "throughput" | "revenue" =>
+      value === "throughput" || value === "revenue"
+  );
+  const hasOutcomeGateState = Boolean(weeklyKpi.outcomeGates);
 
   let state: ControlPlaneHealth = "degraded";
-  if (hasRecentReport && decisionSummary.kill === 0 && (depositsCollected > 0 || closeRatePct > 0 || leadsSourced > 0)) {
-    state = "operational";
-  } else if (hasRecentReport && decisionSummary.kill === 0 && decisionSummary.fix === 0) {
-    state = "operational";
+  if (hasRecentReport) {
+    if (hasOutcomeGateState) {
+      state = criticalGateFailures.length === 0 ? "operational" : "degraded";
+    } else if (
+      decisionSummary.kill === 0 &&
+      (depositsCollected > 0 || closeRatePct > 0 || leadsSourced > 0)
+    ) {
+      state = "operational";
+    } else if (decisionSummary.kill === 0 && decisionSummary.fix === 0) {
+      state = "operational";
+    }
   }
 
   return {
@@ -852,10 +898,15 @@ function buildRevenueKpiSnapshot(
     dealsWon,
     pipelineValueUsd,
     decisionSummary,
+    outcomeGates: {
+      ...outcomeGateSummary,
+      criticalGateFailures,
+    },
   };
 }
 
 function buildOperationsSnapshot(args: {
+  nowMs: number;
   runtimeChecks: ControlPlaneRuntimeCheckInput[] | null | undefined;
   socialPipeline: ControlPlaneSocialPipelineInput | null | undefined;
   weeklyKpi: ControlPlaneRevenueKpiInput | null | undefined;
@@ -864,7 +915,7 @@ function buildOperationsSnapshot(args: {
   return {
     queueHealth: buildQueueHealthSnapshot(args.runtimeChecks),
     socialDispatch: buildSocialDispatchSnapshot(args.socialPipeline),
-    revenueKpi: buildRevenueKpiSnapshot(args.weeklyKpi),
+    revenueKpi: buildRevenueKpiSnapshot(args.weeklyKpi, args.nowMs),
     posWorker: args.posWorker
       ? {
           state: args.posWorker.health,
@@ -1122,6 +1173,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
   }
 
   const operations = buildOperationsSnapshot({
+    nowMs,
     runtimeChecks: input.runtimeChecks,
     socialPipeline: input.socialPipeline,
     weeklyKpi: input.weeklyKpi,

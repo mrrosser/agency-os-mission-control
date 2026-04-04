@@ -37,6 +37,30 @@ const GOOGLE_SCOPE_GROUPS = {
   gmail: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
 } as const;
 
+function getMissionControlPublicOrigin(): string | null {
+  const raw = process.env.MISSION_CONTROL_PUBLIC_ORIGIN?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ApiError(500, "Invalid MISSION_CONTROL_PUBLIC_ORIGIN");
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ApiError(500, "MISSION_CONTROL_PUBLIC_ORIGIN must use http or https");
+  }
+
+  if (url.hostname === "0.0.0.0" || url.hostname === "::") {
+    throw new ApiError(500, "MISSION_CONTROL_PUBLIC_ORIGIN must not use bind-all addresses");
+  }
+
+  return url.origin;
+}
+
 function uniqueScopes(values: readonly string[]): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -107,6 +131,14 @@ function getOAuthConfig() {
     throw new ApiError(500, "GOOGLE_OAUTH_REDIRECT_URI must end with /api/google/callback");
   }
 
+  const publicOrigin = getMissionControlPublicOrigin();
+  if (publicOrigin && redirectUrl.origin !== publicOrigin) {
+    throw new ApiError(
+      500,
+      `GOOGLE_OAUTH_REDIRECT_URI must match MISSION_CONTROL_PUBLIC_ORIGIN (${publicOrigin})`
+    );
+  }
+
   return { clientId, clientSecret, redirectUri: redirectUrl.toString() };
 }
 
@@ -161,7 +193,50 @@ export async function storeGoogleTokens(
     { merge: true }
   );
 
-  log?.info("google.oauth.tokens_saved", { uid });
+  log?.info("oauth.tokens.saved", { uid });
+}
+
+export function resolveMissionControlOrigin(
+  stateOrigin: string | undefined,
+  requestOrigin: string
+): { origin: string; redirected: boolean } {
+  const forcedOrigin = getMissionControlPublicOrigin();
+  if (forcedOrigin) {
+    return { origin: forcedOrigin, redirected: forcedOrigin !== requestOrigin };
+  }
+
+  const candidate = stateOrigin || requestOrigin;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { origin: requestOrigin, redirected: true };
+    }
+    if (url.hostname === "0.0.0.0" || url.hostname === "::") {
+      return { origin: requestOrigin, redirected: true };
+    }
+
+    const req = new URL(requestOrigin);
+    if (url.origin === req.origin) {
+      return { origin: url.origin, redirected: false };
+    }
+
+    if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return { origin: url.origin, redirected: true };
+    }
+
+    const allowlist = (process.env.MISSION_CONTROL_ALLOWED_ORIGINS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (allowlist.includes(url.origin)) {
+      return { origin: url.origin, redirected: true };
+    }
+
+    return { origin: requestOrigin, redirected: true };
+  } catch {
+    return { origin: requestOrigin, redirected: true };
+  }
 }
 
 export async function getStoredGoogleTokens(uid: string) {

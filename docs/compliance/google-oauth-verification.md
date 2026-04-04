@@ -55,7 +55,9 @@ In runtime env vars (Cloud Run / Firebase frameworks SSR), set:
 
 Mission Control routing policy:
 - User-facing login should stay on the canonical hosting domain (for this project: `https://leadflow-review.web.app/login`).
-- Treat `*.run.app` URLs as service endpoints (worker/webhook/debug). If one must be used temporarily for OAuth popup flows, add it to Firebase Auth authorized domains first.
+- Treat `*.run.app` URLs as service endpoints (worker/webhook/debug), not canonical browser login hosts.
+- Set `MISSION_CONTROL_PUBLIC_ORIGIN=https://leadflow-review.web.app` in production so Google connect/callback never resolves to localhost.
+- If a temporary non-canonical host must be used, add it to Firebase Auth authorized domains first and keep the browser redirected back to the canonical login URL.
 - Script helper:
   - `npm run firebase:auth:add-domain -- leadflow-review <your-run-app-host>`
 

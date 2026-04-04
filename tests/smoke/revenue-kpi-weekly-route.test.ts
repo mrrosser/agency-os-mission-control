@@ -48,6 +48,30 @@ describe("revenue weekly kpi route", () => {
         kill: 0,
         watch: 0,
       },
+      outcomeGates: {
+        gates: [
+          { id: "throughput", label: "Lead Throughput", status: "warn", threshold: ">=10", actual: "5" },
+          { id: "qualification", label: "Qualification", status: "pass", threshold: ">=20%", actual: "4/5 (80%)" },
+          { id: "meeting", label: "Meeting Rate", status: "pass", threshold: ">=15%", actual: "3/5 (60%)" },
+          { id: "revenue", label: "Revenue", status: "pass", threshold: ">=1 deposit", actual: "2 deposits, 3 meetings" },
+          { id: "pipeline", label: "Pipeline Value", status: "warn", threshold: ">=5000", actual: "$3400" },
+        ],
+        summary: {
+          passCount: 3,
+          warnCount: 2,
+          failCount: 0,
+          passOrWarnCount: 5,
+        },
+        criticalGateFailures: [],
+      },
+      outcomeGateReadiness: {
+        minimumPassOrWarnGates: 3,
+        targetConsecutiveWeeks: 2,
+        consecutiveReadyWeeks: 1,
+        meetsTarget: false,
+        evaluatedWeeks: 1,
+        weeks: [{ weekStartDate: "2026-02-23", passOrWarnCount: 5, ready: true }],
+      },
     });
   });
 
@@ -68,6 +92,10 @@ describe("revenue weekly kpi route", () => {
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
+    expect(data.report?.outcomeGates?.gates).toHaveLength(5);
+    expect(data.report?.outcomeGates?.summary?.passOrWarnCount).toBe(5);
+    expect(Array.isArray(data.report?.outcomeGates?.criticalGateFailures)).toBe(true);
+    expect(data.report?.outcomeGateReadiness?.minimumPassOrWarnGates).toBe(3);
     expect(runWeeklyKpiRollupMock).toHaveBeenCalledOnce();
     expect(runWeeklyKpiRollupMock.mock.calls[0]?.[0]).toMatchObject({
       uid: "user-1",

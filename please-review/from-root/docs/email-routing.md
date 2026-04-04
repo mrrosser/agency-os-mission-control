@@ -75,6 +75,7 @@ Triage Runtime v3 (recommended)
   - strict calendar rules with per-business booking links + `withMeet=true`
   - confirmation-only meeting intent keywords (no broad "book a call" auto-booking)
   - AI drafting with thread-aware prompts and knowledge-pack context
+  - prompt guardrail canonicalization plus skill-backed route overlays before final prompt assembly
   - fallback templates per business (used only if AI draft cannot be produced)
 
 Legacy policy file

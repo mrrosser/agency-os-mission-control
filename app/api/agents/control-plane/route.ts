@@ -281,6 +281,16 @@ async function readWeeklyKpiSummary(uid: string): Promise<ControlPlaneRevenueKpi
   const row = (snap.data() || {}) as Record<string, unknown>;
   const summary = (row.summary || {}) as Record<string, unknown>;
   const decisionSummary = (row.decisionSummary || {}) as Record<string, unknown>;
+  const outcomeGates = (row.outcomeGates || {}) as Record<string, unknown>;
+  const outcomeGateSummary = (outcomeGates.summary || {}) as Record<string, unknown>;
+  const criticalFailures = Array.isArray(outcomeGates.criticalGateFailures)
+    ? outcomeGates.criticalGateFailures
+        .map((value) => asString(value))
+        .filter(
+          (value): value is "throughput" | "revenue" =>
+            value === "throughput" || value === "revenue"
+        )
+    : [];
 
   return {
     weekStartDate: asString(row.weekStartDate) || null,
@@ -297,6 +307,18 @@ async function readWeeklyKpiSummary(uid: string): Promise<ControlPlaneRevenueKpi
       kill: asNumber(decisionSummary.kill),
       watch: asNumber(decisionSummary.watch),
     },
+    outcomeGates:
+      Object.keys(outcomeGates).length > 0
+        ? {
+            summary: {
+              passCount: asNumber(outcomeGateSummary.passCount),
+              warnCount: asNumber(outcomeGateSummary.warnCount),
+              failCount: asNumber(outcomeGateSummary.failCount),
+              passOrWarnCount: asNumber(outcomeGateSummary.passOrWarnCount),
+            },
+            criticalGateFailures: criticalFailures,
+          }
+        : null,
   };
 }
 

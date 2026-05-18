@@ -1,9 +1,9 @@
-name: Revenue Weekly KPI
+﻿name: Revenue Weekly KPI
 
 on:
   schedule:
-    # Mondays 15:00 UTC (~9 AM CT during standard time)
-    - cron: "0 15 * * 1"
+    # Mondays 11:00 UTC (quiet-window aligned in America/Chicago)
+    - cron: "0 11 * * 1"
   workflow_dispatch:
     inputs:
       week_start_date:

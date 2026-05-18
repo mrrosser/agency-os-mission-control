@@ -26,10 +26,14 @@ copy .env.local.example .env.local
 - Optional: `APIFY_EST_COST_PER_1K_RESULTS_USD` (used for estimated Apify source cost in diagnostics)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_API_KEY`
+- Optional (Paperclip orchestration + OpenClaw runtime visibility): `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL`, `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID`, `PAPERCLIP_TIMEOUT_MS`, `PAPERCLIP_HEALTH_PATH`, `PAPERCLIP_COMPANIES_PATH`, `PAPERCLIP_AGENTS_PATH`, `PAPERCLIP_ACTIVE_RUNS_PATH`, `PAPERCLIP_ACTION_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE`, `AI_HELL_MARY_ROOT`
 - Optional (recommended for operator controls): `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions)
 - Optional (internal rollout guardrails): `NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI=false`
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 - Optional (recommended for live OpenAI billing pulls): `OPENAI_ADMIN_API_KEY`
+- Optional (budget governor + autonomy controls): `MISSION_CONTROL_BUDGET_MODE`, `MISSION_CONTROL_MONTHLY_BUDGET_USD`, `MISSION_CONTROL_PROJECTED_MONTH_END_USD`, `MISSION_CONTROL_PROVIDER_BUDGETS_JSON`, `MISSION_CONTROL_PROVIDER_ESTIMATES_JSON`, `MISSION_CONTROL_PROVIDER_UNRECONCILED_JSON`, `MISSION_CONTROL_GLOBAL_KILL_SWITCH`, `MISSION_CONTROL_PROVIDER_KILL_SWITCHES`, `MISSION_CONTROL_BUSINESS_KILL_SWITCHES`
+- Optional (mobile + reliability posture): `NEXT_PUBLIC_APP_URL`, `MISSION_CONTROL_SLO_TARGET_PCT`, `MISSION_CONTROL_PRIMARY_REGION`, `MISSION_CONTROL_FAILOVER_REGION`
+- Optional (ad-ops readiness): `META_ADS_CONTROL_URL`, `META_ADS_CONTROL_TOKEN`, `META_ADS_ACCOUNT_ID`, `META_ADS_ACCESS_TOKEN`, `META_ADS_API_VERSION`, `META_ADS_WRITE_ENABLED`, `META_ADS_CAMPAIGNS_PATH`, `META_ADS_ACTION_PATH_TEMPLATE`, `GOOGLE_ADS_CONTROL_URL`, `GOOGLE_ADS_CONTROL_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`, `GOOGLE_ADS_WRITE_ENABLED`, `GOOGLE_ADS_CAMPAIGNS_PATH`, `GOOGLE_ADS_ACTION_PATH_TEMPLATE`
 - Optional (Square deposit stage webhook): `SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_NOTIFICATION_URL`, `SQUARE_WEBHOOK_DEFAULT_UID`
 - Optional (POS worker service auth): `REVENUE_POS_WORKER_TOKEN`
 - Optional (POS side-effect policy): `POS_WORKER_ALLOW_SIDE_EFFECTS`, `POS_WORKER_AUTO_APPROVE_LOW_RISK`, `POS_WORKER_REQUIRE_APPROVAL_FOR_HIGH_RISK`, `POS_WORKER_MAX_ATTEMPTS`
@@ -59,6 +63,28 @@ npm run dev
 - Without a Places key, the Lead Engine pulls from existing CRM leads.
 - Source diagnostics include per-run budget usage (cost/pages/runtime) and stop reasons.
 
+## CRM + Customer Memory
+- Customer-memory list/upsert route: `GET/POST /api/crm/customers`
+- Pipeline-stage update route: `PATCH /api/crm/customers/:customerId`
+- Per-customer timeline route: `GET /api/crm/customers/:customerId/timeline`
+- Paperclip is the preferred source of truth when configured; Mission Control falls back to projected Firestore CRM records when Paperclip is unavailable.
+- The CRM dashboard now reads through these server routes instead of direct client-side Firestore writes.
+- Firestore -> Paperclip cutover helper:
+```bash
+npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_company_uuid>
+```
+- Omit `--uid` to backfill all leads in the configured scope. Use `--dry-run` to preview counts without writing.
+- Timeline replay is idempotent through Paperclip `externalKey` values, so rerunning the backfill will not duplicate imported customer-history events.
+
+## Ad Ops Control
+- Campaign listing route: `GET /api/ad-ops/campaigns`
+- Campaign lifecycle route: `POST /api/ad-ops/campaigns/:campaignId/action`
+- `resume` is treated as spend-bearing and requires both an approval reference and a passing budget-governor check.
+- `pause` and `sync` remain fail-closed behind authenticated Mission Control routes and emit scoped execution-envelope metadata to the provider control plane.
+- Supported provider transports:
+  - Control-plane proxy: `META_ADS_CONTROL_URL` / `GOOGLE_ADS_CONTROL_URL`
+  - Direct provider mode: `META_ADS_ACCOUNT_ID` + `META_ADS_ACCESS_TOKEN`, or `GOOGLE_ADS_CUSTOMER_ID` + `GOOGLE_ADS_DEVELOPER_TOKEN` + OAuth refresh credentials
+
 ## Competitor Monitor (Scheduled Reports)
 - Upsert/list monitors: `POST/GET /api/competitors/monitor`
 - Worker execution endpoint: `POST /api/competitors/monitor/worker-task`
@@ -69,18 +95,28 @@ npm run dev
 ## Agent Nexus Dashboard
 - New control-plane dashboard: `app/dashboard/agents` (`/dashboard/agents` in the UI).
 - Backend snapshot API: `GET /api/agents/control-plane`.
-- Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` requests for operators).
+- Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` and proxies `resume` / `wakeup` / `terminate` to Paperclip when configured).
 - Repo-improvement inbox API: `GET /api/agents/repo-improvement`.
 - Repo-improvement review API: `POST /api/agents/repo-improvement/review`.
+- Growth-research inbox API: `GET /api/agents/growth-research`.
+- Growth-research review API: `POST /api/agents/growth-research/review`.
 - Includes:
   - agent runtime states (active/idle/degraded/inactive),
   - service/tool/skill health,
+  - declared service-to-agent topology for cross-system visibility (including Paperclip + OpenClaw runtime sync when configured),
   - open alerts + top telemetry bug groups,
   - per-agent quick actions (`Ping`, `Pause`, `Route`),
   - timeline filters (`All`, `Tasks`, `Comments`, `Status`, `Decisions`),
   - daily quota posture,
   - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability),
+  - hard-stop budget governor posture across provider lanes,
+  - Paperclip orchestration summary (company count, agent count, active run count, lifecycle proxy readiness),
+  - projected omnichannel customer memory posture,
+  - product catalog + ad-ops readiness,
+  - weighted multi-touch profit attribution summary,
+  - mobile operator readiness and reliability/SLO posture,
   - overnight repo-improvement inbox with decision labels (`approve`, `reject`, `defer`, `needs-human`),
+  - weekly growth-research inbox with direct growth scorecards, RedBlueTeamKit security assurance, WaterWorld data-product operations, and bounded scaffold proposals,
   - shared review metrics (`proposal_rate`, `keep_rate`, `morning_approval_rate`, `revert_rate`, `verifier_pass_rate`, `repeat_failure_rate`, `time_to_accept_hours`).
 - Billing sources:
   - OpenAI: `GET /v1/organization/costs` (org admin key required for live pulls)
@@ -92,6 +128,11 @@ npm run dev
   - `REPO_IMPROVEMENT_SCRIPT_ROOT` defaults to `C:\CTO Projects\CodexSkills\.codex\skills\automation-control-plane\scripts`
   - optional `REPO_IMPROVEMENT_REVIEW_ALLOWED_UIDS` gates review submission to a comma-separated UID allowlist
   - optional `REPO_IMPROVEMENT_REVIEW_SHELL` overrides the PowerShell executable used for the shared review recorder
+- Local workstation env for the growth-research inbox:
+  - `GROWTH_RESEARCH_REPORT_ROOT` defaults to `C:\CTO Projects\CodexSkills\docs\reports`
+  - `GROWTH_RESEARCH_SCRIPT_ROOT` defaults to `C:\CTO Projects\CodexSkills\.codex\skills\automation-control-plane\scripts`
+  - optional `GROWTH_RESEARCH_REVIEW_ALLOWED_UIDS` gates review submission to a comma-separated UID allowlist
+  - optional `GROWTH_RESEARCH_REVIEW_SHELL` overrides the PowerShell executable used for the shared review recorder
 - When those paths are not mounted in the current runtime, Agent Nexus fails closed and shows the inbox as unavailable instead of breaking the rest of the control plane.
 
 ## Cross-Project MCP Connectors
@@ -101,9 +142,18 @@ npm run dev
   - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
   - `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`)
+  - `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL` (base visibility URL)
+  - `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID` (enables direct lifecycle proxy actions, live Paperclip summary counts, and canonical customer-memory reads/writes)
+  - `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE` (customer-memory proxy paths when Paperclip is the CRM source of truth)
+  - `AI_HELL_MARY_ROOT` (defaults to `C:\CTO Projects\AI_HELL_MARY`; used to read the latest sync manifest for OpenClaw runtime status)
+  - `META_ADS_CONTROL_URL`, `META_ADS_CONTROL_TOKEN`, `META_ADS_ACCOUNT_ID`, `META_ADS_ACCESS_TOKEN`, `META_ADS_API_VERSION`, `META_ADS_CAMPAIGNS_PATH`, `META_ADS_ACTION_PATH_TEMPLATE`
+  - `GOOGLE_ADS_CONTROL_URL`, `GOOGLE_ADS_CONTROL_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`, `GOOGLE_ADS_CAMPAIGNS_PATH`, `GOOGLE_ADS_ACTION_PATH_TEMPLATE`
 - Verification:
   - Settings -> **Runtime Config Preflight** shows connector checks.
-  - Agent Nexus -> **Services + Tools** shows `SMAuto MCP` / `LeadOps MCP` states.
+  - Agent Nexus -> **Services + Tools** shows `SMAuto MCP`, `LeadOps MCP`, `Paperclip System`, and `OpenClaw Runtime Sync` states plus declared agent links.
+  - Agent Nexus -> **Paperclip**, **Budget Governor**, **Customer Memory**, **Product + Ad Ops**, **Profit Attribution**, and **Mobile + Reliability** cards show the autonomous-business operating state.
+  - Operations -> **Ad Ops Control** exposes provider readiness, live campaign state, and approval-gated lifecycle actions.
+  - CRM -> customer board + timeline panel read through the unified customer-memory API contract.
 - Capability ownership matrix: `docs/runtime-capability-matrix.md`
 
 ## Model Prompting Guidance
@@ -232,6 +282,7 @@ node scripts/sync-ai-hell-mary.mjs --target-root "C:\\CTO Projects\\AI_HELL_MARY
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-nightly.ps1
 ```
 - Runbook: `docs/runbook-revenue-sync-and-kpi.md`
+- Agent Nexus reads `docs/generated/mission-control/sync-manifest.json` under `AI_HELL_MARY_ROOT` to reflect the latest OpenClaw runtime sync status.
 
 ## Competitor Monitor Dashboard
 - UI: `/dashboard/competitors`
@@ -304,6 +355,7 @@ Repo-improvement dashboard behavior after deploy:
 - The hosted UI can render the inbox only when the runtime can read the shared CodexSkills reports and invoke the shared review recorder.
 - For local workstation use, the default Windows paths above are enough.
 - For hosted or non-Windows runtimes, set `REPO_IMPROVEMENT_REPORT_ROOT`, `REPO_IMPROVEMENT_SCRIPT_ROOT`, and `REPO_IMPROVEMENT_REVIEW_SHELL` to mounted equivalents, or accept the fail-closed unavailable state in `/dashboard/agents`.
+- The same pattern applies to the weekly growth-research inbox via `GROWTH_RESEARCH_REPORT_ROOT`, `GROWTH_RESEARCH_SCRIPT_ROOT`, and `GROWTH_RESEARCH_REVIEW_SHELL`.
 
 Required GitHub Actions configuration:
 - `ENV_LOCAL` (full `.env.local` content)

@@ -53,10 +53,10 @@ describe("sourceLeads firecrawl cooldown", () => {
     }));
 
     enrichLeadsWithFirecrawlMock.mockImplementationOnce(
-      async (leads: unknown[], _key: string, options: { onQuotaExceeded?: () => void } = {}) => {
+      (async (leads: unknown[], _key: string, options: { onQuotaExceeded?: () => void } = {}) => {
         options.onQuotaExceeded?.();
         return leads;
-      }
+      }) as (leads: unknown[]) => Promise<unknown[]>
     );
 
     const { __resetFirecrawlEnrichmentCooldownForTests, sourceLeads } = await import(

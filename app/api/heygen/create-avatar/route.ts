@@ -5,6 +5,7 @@ import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { resolveSecret } from "@/lib/api/secrets";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
 
 const bodySchema = z.object({
   heyGenKey: z.string().optional(),
@@ -24,6 +25,13 @@ export const POST = withApiHandler(
     if (!heyGenKey) {
       throw new ApiError(400, "HeyGen API key is required");
     }
+
+    await assertProviderSpendAllowed({
+      uid: user.uid,
+      providerId: "heygen",
+      log,
+      route: "heygen.create-avatar",
+    });
 
     const result = await withIdempotency(
       { uid: user.uid, route: "heygen.create-avatar", key: idempotencyKey, log },

@@ -4,6 +4,8 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { resolveSecret } from "@/lib/api/secrets";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { dbAdmin } from "@/lib/db-admin";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
+import { ApiError } from "@/lib/api/handler";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -27,10 +29,15 @@ vi.mock("@/lib/db-admin", () => ({
   },
 }));
 
+vi.mock("@/lib/budget/enforcement", () => ({
+  assertProviderSpendAllowed: vi.fn(async () => undefined),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const resolveSecretMock = vi.mocked(resolveSecret);
 const withIdempotencyMock = vi.mocked(withIdempotency);
 const logActivityMock = vi.mocked(dbAdmin.logActivity);
+const assertProviderSpendAllowedMock = vi.mocked(assertProviderSpendAllowed);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -46,6 +53,7 @@ describe("elevenlabs synthesize route", () => {
     }));
     resolveSecretMock.mockResolvedValue("test_elevenlabs_key");
     logActivityMock.mockResolvedValue(undefined as never);
+    assertProviderSpendAllowedMock.mockResolvedValue(undefined);
   });
 
   it("returns 400 when ElevenLabs key is missing", async () => {
@@ -98,5 +106,28 @@ describe("elevenlabs synthesize route", () => {
     expect(data.audioBase64).toBe(Buffer.from(audioBytes).toString("base64"));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(logActivityMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks synthesis when the budget governor hard-stops ElevenLabs", async () => {
+    assertProviderSpendAllowedMock.mockRejectedValueOnce(
+      new ApiError(423, "Budget governor blocked elevenlabs after reaching the provider hard limit.")
+    );
+
+    const req = new Request("http://localhost/api/elevenlabs/synthesize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "Blocked line",
+      }),
+    });
+
+    const res = await synthesizePost(
+      req as unknown as Parameters<typeof synthesizePost>[0],
+      createContext() as unknown as Parameters<typeof synthesizePost>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(423);
+    expect(String(data.error)).toContain("Budget governor blocked elevenlabs");
   });
 });

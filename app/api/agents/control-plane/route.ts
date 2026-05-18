@@ -23,8 +23,17 @@ import {
   type ControlPlaneSocialPipelineInput,
   type ControlPlaneTelemetryGroup,
 } from "@/lib/agent-control-plane";
+import type {
+  BudgetGovernorInput,
+  BudgetProviderInput,
+  MobileOpsInput,
+  PaperclipControlSnapshot,
+} from "@/lib/control-plane/autonomous-business";
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
 import type { Logger } from "@/lib/logging";
+import { normalizePaperclipCustomers } from "@/lib/crm/customer-memory";
+import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
+import { BUSINESS_UNIT_OPTIONS, OFFER_DEFINITIONS } from "@/lib/revenue/offers";
 import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
 import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
 import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
@@ -75,6 +84,365 @@ function asNumber(value: unknown): number {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readBooleanEnv(name: string, fallback: boolean = false): boolean {
+  const raw = process.env[name];
+  if (typeof raw !== "string") return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function readNumberEnv(name: string): number | null {
+  const raw = process.env[name];
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readCsvEnv(name: string): string[] {
+  const raw = process.env[name];
+  if (typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function readNumberRecordEnv(name: string): Record<string, number> {
+  const raw = process.env[name];
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([key, value]) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? [[key, numeric]] : [];
+      })
+    );
+  } catch {
+    return {};
+  }
+}
+
+function newestIso(values: Array<string | null | undefined>): string | null {
+  let best: string | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const value of values) {
+    if (!value) continue;
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) continue;
+    if (parsed > bestMs) {
+      best = value;
+      bestMs = parsed;
+    }
+  }
+  return best;
+}
+
+function projectMonthEndUsd(totalUsd: number): number | null {
+  if (!Number.isFinite(totalUsd) || totalUsd <= 0) return null;
+  const now = new Date();
+  const day = Math.max(1, now.getUTCDate());
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  return Math.round((totalUsd / day) * daysInMonth * 100) / 100;
+}
+
+async function readPaperclipSummary(log: Logger): Promise<PaperclipControlSnapshot> {
+  const config = readPaperclipClientConfig();
+  if (!config) {
+    return {
+      state: "degraded",
+      configured: false,
+      reachable: false,
+      canProxyActions: false,
+      baseUrl: null,
+      sourceOfTruth: "mission_control",
+      companyCount: null,
+      agentCount: null,
+      activeRunCount: null,
+      detail: "Paperclip API base URL is not configured yet.",
+      capabilities: {
+        lifecycleActions: false,
+        heartbeats: false,
+        budgets: false,
+        audit: false,
+        mobile: false,
+      },
+    };
+  }
+
+  const client = new PaperclipClient(config);
+  return client.getControlSnapshot(log);
+}
+
+async function readCustomerProjection(
+  uid: string,
+  log: Logger
+): Promise<{
+  sourceOfTruth: "paperclip" | "firestore_projected";
+  knownContacts: number;
+  recentTimelineEvents: number;
+  lastTimelineAt: string | null;
+}> {
+  const config = readPaperclipClientConfig();
+  if (config) {
+    try {
+      const client = new PaperclipClient(config);
+      const payload = await client.listCustomers({
+        correlationId: `agents-control-plane:${uid}`,
+        requestedByUid: uid,
+        limit: 200,
+      });
+      const customers = normalizePaperclipCustomers(payload);
+      return {
+        sourceOfTruth: "paperclip",
+        knownContacts: customers.length,
+        recentTimelineEvents: customers.reduce(
+          (sum, customer) => sum + Math.max(0, customer.timelineCount || 0),
+          0
+        ),
+        lastTimelineAt: newestIso(customers.map((customer) => customer.lastTimelineAt)),
+      };
+    } catch (error) {
+      log.warn("agents.control_plane.paperclip_customer_projection_fallback", {
+        uid,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  try {
+    const db = getAdminDb() as unknown as Record<string, unknown>;
+    const leadsCollection = typeof db.collection === "function" ? db.collection("leads") : null;
+    const leadsQuery =
+      leadsCollection && typeof (leadsCollection as { where?: unknown }).where === "function"
+        ? (leadsCollection as {
+            where: (field: string, op: string, value: string) => { limit: (count: number) => { get: () => Promise<{ docs: Array<{ data: () => Record<string, unknown> }> }> } };
+          }).where("userId", "==", uid)
+        : null;
+    const posCollection =
+      typeof db.collection === "function"
+        ? (db.collection("identities") as {
+            doc?: (id: string) => {
+              collection?: (name: string) => {
+                orderBy?: (field: string, direction: string) => { limit: (count: number) => { get: () => Promise<{ docs: Array<{ data: () => Record<string, unknown> }> }> } };
+              };
+            };
+          }).doc?.(uid)?.collection?.("pos_worker_events")
+        : null;
+
+    const [leadDocs, posDocs] = await Promise.all([
+      leadsQuery?.limit(200).get().catch(() => null) || Promise.resolve(null),
+      posCollection?.orderBy?.("updatedAt", "desc")?.limit(25).get().catch(() => null) ||
+        Promise.resolve(null),
+    ]);
+
+    const leadTimestamps =
+      leadDocs?.docs
+        ?.map((doc) => {
+          const row = doc.data();
+          return toIso(row.updatedAt) || toIso(row.createdAt);
+        })
+        .filter(Boolean) || [];
+    const posTimestamps =
+      posDocs?.docs
+        ?.map((doc) => {
+          const row = doc.data();
+          return toIso(row.updatedAt) || toIso(row.createdAt);
+        })
+        .filter(Boolean) || [];
+
+    return {
+      sourceOfTruth: "firestore_projected",
+      knownContacts: leadDocs?.docs?.length || 0,
+      recentTimelineEvents: (leadDocs?.docs?.length || 0) + (posDocs?.docs?.length || 0),
+      lastTimelineAt: newestIso([...leadTimestamps, ...posTimestamps]),
+    };
+  } catch (error) {
+    log.warn("agents.control_plane.customer_projection_unavailable", {
+      uid,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      sourceOfTruth: "firestore_projected",
+      knownContacts: 0,
+      recentTimelineEvents: 0,
+      lastTimelineAt: null,
+    };
+  }
+}
+
+function buildBudgetGovernorInput(args: {
+  secretStatus: Awaited<ReturnType<typeof getSecretStatus>>;
+  googleConnected: boolean;
+  billing: Awaited<ReturnType<typeof pullProviderBilling>>;
+}): BudgetGovernorInput {
+  const providerBudgets = readNumberRecordEnv("MISSION_CONTROL_PROVIDER_BUDGETS_JSON");
+  const providerEstimates = readNumberRecordEnv("MISSION_CONTROL_PROVIDER_ESTIMATES_JSON");
+  const providerUnreconciled = readNumberRecordEnv("MISSION_CONTROL_PROVIDER_UNRECONCILED_JSON");
+  const providerKillSwitches = new Set(readCsvEnv("MISSION_CONTROL_PROVIDER_KILL_SWITCHES"));
+  const liveCosts = new Map(
+    (args.billing?.providers || []).map((provider) => [provider.providerId, provider.monthlyCostUsd])
+  );
+
+  const providers: BudgetProviderInput[] = [
+    {
+      providerId: "openai",
+      label: "OpenAI",
+      actualUsd: liveCosts.get("openai") ?? null,
+      estimatedUsd:
+        liveCosts.get("openai") === null && args.secretStatus.openaiKey !== "missing"
+          ? providerEstimates.openai ?? 24
+          : 0,
+      unreconciledUsd: providerUnreconciled.openai ?? 0,
+      hardLimitUsd: providerBudgets.openai ?? null,
+      writeEnabled: args.secretStatus.openaiKey !== "missing",
+      killSwitchEnabled: providerKillSwitches.has("openai"),
+    },
+    {
+      providerId: "google",
+      label: "Google",
+      actualUsd: null,
+      estimatedUsd: args.googleConnected ? providerEstimates.google ?? 0 : 0,
+      unreconciledUsd: providerUnreconciled.google ?? 0,
+      hardLimitUsd: providerBudgets.google ?? null,
+      writeEnabled: args.googleConnected,
+      killSwitchEnabled: providerKillSwitches.has("google"),
+    },
+    {
+      providerId: "twilio",
+      label: "Twilio",
+      actualUsd: liveCosts.get("twilio") ?? null,
+      estimatedUsd:
+        liveCosts.get("twilio") === null && args.secretStatus.twilioSid !== "missing"
+          ? providerEstimates.twilio ?? 12
+          : 0,
+      unreconciledUsd: providerUnreconciled.twilio ?? 0,
+      hardLimitUsd: providerBudgets.twilio ?? null,
+      writeEnabled:
+        args.secretStatus.twilioSid !== "missing" &&
+        args.secretStatus.twilioToken !== "missing" &&
+        args.secretStatus.twilioPhoneNumber !== "missing",
+      killSwitchEnabled: providerKillSwitches.has("twilio"),
+    },
+    {
+      providerId: "elevenlabs",
+      label: "ElevenLabs",
+      actualUsd: liveCosts.get("elevenlabs") ?? null,
+      estimatedUsd:
+        liveCosts.get("elevenlabs") === null && args.secretStatus.elevenLabsKey !== "missing"
+          ? providerEstimates.elevenlabs ?? 16
+          : 0,
+      unreconciledUsd: providerUnreconciled.elevenlabs ?? 0,
+      hardLimitUsd: providerBudgets.elevenlabs ?? null,
+      writeEnabled: args.secretStatus.elevenLabsKey !== "missing",
+      killSwitchEnabled: providerKillSwitches.has("elevenlabs"),
+    },
+    {
+      providerId: "heygen",
+      label: "HeyGen",
+      actualUsd: null,
+      estimatedUsd:
+        args.secretStatus.heyGenKey !== "missing" ? providerEstimates.heygen ?? 0 : 0,
+      unreconciledUsd: providerUnreconciled.heygen ?? 0,
+      hardLimitUsd: providerBudgets.heygen ?? null,
+      writeEnabled: args.secretStatus.heyGenKey !== "missing",
+      killSwitchEnabled: providerKillSwitches.has("heygen"),
+    },
+    {
+      providerId: "apify",
+      label: "Apify",
+      actualUsd: null,
+      estimatedUsd: providerEstimates.apify ?? 0,
+      unreconciledUsd: providerUnreconciled.apify ?? 0,
+      hardLimitUsd: providerBudgets.apify ?? null,
+      writeEnabled: Boolean(asString(process.env.APIFY_API_TOKEN)),
+      killSwitchEnabled: providerKillSwitches.has("apify"),
+    },
+    {
+      providerId: "firecrawl",
+      label: "Firecrawl",
+      actualUsd: null,
+      estimatedUsd:
+        args.secretStatus.firecrawlKey !== "missing" ? providerEstimates.firecrawl ?? 7 : 0,
+      unreconciledUsd: providerUnreconciled.firecrawl ?? 0,
+      hardLimitUsd: providerBudgets.firecrawl ?? null,
+      writeEnabled: args.secretStatus.firecrawlKey !== "missing",
+      killSwitchEnabled: providerKillSwitches.has("firecrawl"),
+    },
+    {
+      providerId: "meta_ads",
+      label: "Meta Ads",
+      actualUsd: null,
+      estimatedUsd: providerEstimates.meta_ads ?? 0,
+      unreconciledUsd: providerUnreconciled.meta_ads ?? 0,
+      hardLimitUsd: providerBudgets.meta_ads ?? null,
+      writeEnabled: readBooleanEnv("META_ADS_WRITE_ENABLED"),
+      killSwitchEnabled: providerKillSwitches.has("meta_ads"),
+    },
+    {
+      providerId: "google_ads",
+      label: "Google Ads",
+      actualUsd: null,
+      estimatedUsd: providerEstimates.google_ads ?? 0,
+      unreconciledUsd: providerUnreconciled.google_ads ?? 0,
+      hardLimitUsd: providerBudgets.google_ads ?? null,
+      writeEnabled: readBooleanEnv("GOOGLE_ADS_WRITE_ENABLED"),
+      killSwitchEnabled: providerKillSwitches.has("google_ads"),
+    },
+    {
+      providerId: "square",
+      label: "Square",
+      actualUsd: null,
+      estimatedUsd: providerEstimates.square ?? 0,
+      unreconciledUsd: providerUnreconciled.square ?? 0,
+      hardLimitUsd: providerBudgets.square ?? null,
+      writeEnabled: Boolean(asString(process.env.SQUARE_ACCESS_TOKEN)),
+      killSwitchEnabled: providerKillSwitches.has("square"),
+    },
+  ];
+
+  const monthToDateTotal = providers.reduce((sum, provider) => {
+    return (
+      sum +
+      Math.max(0, Number(provider.actualUsd || 0)) +
+      Math.max(0, Number(provider.estimatedUsd || 0)) +
+      Math.max(0, Number(provider.unreconciledUsd || 0))
+    );
+  }, 0);
+
+  return {
+    mode:
+      asString(process.env.MISSION_CONTROL_BUDGET_MODE).toLowerCase() === "observe"
+        ? "observe"
+        : "hard-stop",
+    monthBudgetUsd: readNumberEnv("MISSION_CONTROL_MONTHLY_BUDGET_USD"),
+    projectedMonthEndUsd:
+      readNumberEnv("MISSION_CONTROL_PROJECTED_MONTH_END_USD") ?? projectMonthEndUsd(monthToDateTotal),
+    providers,
+    globalKillSwitchEnabled: readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH"),
+  };
+}
+
+function buildMobileOpsInput(paperclip: PaperclipControlSnapshot): MobileOpsInput {
+  const deepLinkBaseUrl =
+    asString(process.env.NEXT_PUBLIC_APP_URL) ||
+    asString(process.env.SOCIAL_DRAFT_APPROVAL_BASE_URL) ||
+    null;
+  const googleSpaceReady = [
+    "GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL",
+    "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL",
+    "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS",
+    "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG",
+    "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF",
+  ].some((name) => Boolean(asString(process.env[name])));
+
+  return {
+    deepLinkBaseUrl,
+    googleSpaceReady,
+    lifecycleActionsEnabled: paperclip.canProxyActions,
+  };
 }
 
 async function readDriveSummary(uid: string): Promise<ControlPlaneDriveSummary> {
@@ -199,7 +567,66 @@ function readExternalToolConfig(): ControlPlaneExternalToolInput {
   return {
     smAutoEndpoint: read("SMAUTO_MCP_SERVER_URL"),
     leadOpsEndpoint: read("LEADOPS_MCP_SERVER_URL"),
+    paperclipEndpoint: read("PAPERCLIP_SYSTEM_URL") || read("PAPERCLIP_MCP_SERVER_URL"),
+    openClawSyncGeneratedAt: null,
+    openClawSyncTargetRoot: null,
+    openClawSyncManifestPath: null,
+    openClawSyncStaleHours: null,
   };
+}
+
+async function readOpenClawSyncStatus(
+  log: { warn: (msg: string, data?: Record<string, unknown>) => void }
+): Promise<
+  Pick<
+    ControlPlaneExternalToolInput,
+    | "openClawSyncGeneratedAt"
+    | "openClawSyncTargetRoot"
+    | "openClawSyncManifestPath"
+    | "openClawSyncStaleHours"
+  >
+> {
+  const targetRoot = asString(process.env.AI_HELL_MARY_ROOT) || "C:\\CTO Projects\\AI_HELL_MARY";
+  const manifestPath = path.join(
+    targetRoot,
+    "docs",
+    "generated",
+    "mission-control",
+    "sync-manifest.json"
+  );
+
+  try {
+    const raw = await fs.readFile(manifestPath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const generatedAt = toIso(parsed.generatedAt);
+    const generatedMs = generatedAt ? Date.parse(generatedAt) : Number.NaN;
+    const staleHours =
+      Number.isFinite(generatedMs)
+        ? Math.max(0, Math.floor((Date.now() - generatedMs) / (60 * 60 * 1000)))
+        : null;
+
+    return {
+      openClawSyncGeneratedAt: generatedAt,
+      openClawSyncTargetRoot: asString(parsed.targetRoot) || targetRoot,
+      openClawSyncManifestPath: manifestPath,
+      openClawSyncStaleHours: staleHours,
+    };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code && err.code !== "ENOENT") {
+      log.warn("agents.control_plane.openclaw_sync_unavailable", {
+        manifestPath,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return {
+      openClawSyncGeneratedAt: null,
+      openClawSyncTargetRoot: targetRoot,
+      openClawSyncManifestPath: manifestPath,
+      openClawSyncStaleHours: null,
+    };
+  }
 }
 
 function isValidHttpUrl(value: string | null): boolean {
@@ -339,6 +766,9 @@ export const GET = withApiHandler(
       socialPipeline,
       weeklyKpi,
       runtimeChecks,
+      openClawSync,
+      paperclip,
+      customerProjection,
     ] =
       await Promise.all([
         getAgentSpaceStatus(user.uid, log),
@@ -353,6 +783,9 @@ export const GET = withApiHandler(
         readSocialPipelineSummary(user.uid, log),
         readWeeklyKpiSummary(user.uid),
         Promise.resolve(readRuntimeChecks()),
+        readOpenClawSyncStatus(log),
+        readPaperclipSummary(log),
+        readCustomerProjection(user.uid, log),
       ]);
 
     const [quota, alerts] = await Promise.all([
@@ -364,7 +797,18 @@ export const GET = withApiHandler(
     if (!google.connected && (googleTokens?.refreshToken || googleTokens?.accessToken)) {
       google.connected = true;
     }
-    const externalTools = readExternalToolConfig();
+    const externalTools = {
+      ...readExternalToolConfig(),
+      ...openClawSync,
+    };
+    const budgetGovernor = buildBudgetGovernorInput({
+      secretStatus,
+      googleConnected: google.connected,
+      billing,
+    });
+    const providerKillSwitches = readCsvEnv("MISSION_CONTROL_PROVIDER_KILL_SWITCHES");
+    const businessKillSwitches = readCsvEnv("MISSION_CONTROL_BUSINESS_KILL_SWITCHES");
+    const mobileOps = buildMobileOpsInput(paperclip);
 
     const snapshot = buildControlPlaneSnapshot({
       spaces,
@@ -381,6 +825,72 @@ export const GET = withApiHandler(
       socialPipeline,
       weeklyKpi,
       runtimeChecks,
+      paperclip,
+      governance: {
+        globalKillSwitchEnabled: readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH"),
+        providerKillSwitches,
+        businessKillSwitches,
+        approvalRequiredClasses: [
+          "public_facing",
+          "financial_or_credentialed",
+          "spend_bearing",
+        ],
+      },
+      budgetGovernor,
+      customerMemory: {
+        sourceOfTruth: customerProjection.sourceOfTruth,
+        knownContacts: customerProjection.knownContacts,
+        recentTimelineEvents:
+          customerProjection.recentTimelineEvents +
+          (socialPipeline?.draftsPendingApproval || 0) +
+          (socialPipeline?.dispatchPendingExternalTool || 0),
+        lastTimelineAt: newestIso([
+          customerProjection.lastTimelineAt,
+          socialPipeline?.lastDispatchSuccessAt || null,
+          posWorker?.lastWebhookAt || null,
+        ]),
+        emailReady: google.gmail,
+        smsReady:
+          secretStatus.twilioSid !== "missing" &&
+          secretStatus.twilioToken !== "missing" &&
+          secretStatus.twilioPhoneNumber !== "missing",
+        voiceReady:
+          secretStatus.twilioSid !== "missing" &&
+          secretStatus.twilioToken !== "missing" &&
+          secretStatus.twilioPhoneNumber !== "missing" &&
+          secretStatus.elevenLabsKey !== "missing",
+        calendarReady: google.calendar,
+        socialReady: Boolean(socialPipeline),
+        posReady: Boolean(posWorker),
+        paidAdsReady:
+          readBooleanEnv("META_ADS_WRITE_ENABLED") || readBooleanEnv("GOOGLE_ADS_WRITE_ENABLED"),
+        duplicateProtection: true,
+        dncProtection: true,
+      },
+      productCatalog: {
+        catalogSource: "mission-control.offer-definitions",
+        businessUnitCount: BUSINESS_UNIT_OPTIONS.length,
+        activeOfferCount: OFFER_DEFINITIONS.length,
+        approvalGated: true,
+      },
+      adOps: {
+        metaAdsConfigured:
+          Boolean(asString(process.env.META_ADS_CONTROL_URL)) ||
+          Boolean(asString(process.env.META_ADS_ACCOUNT_ID)),
+        googleAdsConfigured:
+          Boolean(asString(process.env.GOOGLE_ADS_CONTROL_URL)) ||
+          Boolean(asString(process.env.GOOGLE_ADS_CUSTOMER_ID)),
+        metaAdsWriteEnabled: readBooleanEnv("META_ADS_WRITE_ENABLED"),
+        googleAdsWriteEnabled: readBooleanEnv("GOOGLE_ADS_WRITE_ENABLED"),
+        approvalGated: true,
+      },
+      mobileOps,
+      reliability: {
+        targetSloPct: readNumberEnv("MISSION_CONTROL_SLO_TARGET_PCT") ?? 99.9,
+        primaryRegion: asString(process.env.MISSION_CONTROL_PRIMARY_REGION) || null,
+        failoverRegion: asString(process.env.MISSION_CONTROL_FAILOVER_REGION) || null,
+        healthEndpointEnabled: true,
+      },
     });
 
     log.info("agents.control_plane.snapshot", {
@@ -392,6 +902,10 @@ export const GET = withApiHandler(
       projectedMonthlyCostUsd: snapshot.summary.projectedMonthlyCostUsd,
       smAutoConfigured: isValidHttpUrl(externalTools.smAutoEndpoint),
       leadOpsConfigured: isValidHttpUrl(externalTools.leadOpsEndpoint),
+      paperclipConfigured: isValidHttpUrl(externalTools.paperclipEndpoint),
+      paperclipReachable: snapshot.business.paperclip.reachable,
+      paperclipProxyActions: snapshot.business.paperclip.canProxyActions,
+      openClawSyncGeneratedAt: externalTools.openClawSyncGeneratedAt,
       posWorkerHealth: posWorker?.health || "unknown",
       posWorkerQueued: posWorker?.queuedEvents ?? null,
       socialDispatchPending: snapshot.operations.socialDispatch.pendingExternalTool,
@@ -399,6 +913,11 @@ export const GET = withApiHandler(
       queueHealth: snapshot.operations.queueHealth.state,
       revenueKpiState: snapshot.operations.revenueKpi.state,
       revenueKpiWeek: snapshot.operations.revenueKpi.weekStartDate,
+      budgetGovernorState: snapshot.business.budgetGovernor.state,
+      customerMemoryState: snapshot.business.customerMemory.state,
+      adOpsState: snapshot.business.adOps.state,
+      mobileOpsState: snapshot.business.mobileOps.state,
+      reliabilityState: snapshot.business.reliability.state,
     });
 
     return NextResponse.json(snapshot);

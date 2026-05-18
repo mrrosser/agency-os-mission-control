@@ -1,9 +1,9 @@
-name: Revenue Weekly Business Health
+﻿name: Revenue Weekly Business Health
 
 on:
   schedule:
-    # Mondays 17:00 UTC, after KPI + variant decision workflows.
-    - cron: "0 17 * * 1"
+    # Mondays 11:40 UTC, after KPI + variant decision workflows in quiet window.
+    - cron: "40 11 * * 1"
   workflow_dispatch:
 
 permissions:

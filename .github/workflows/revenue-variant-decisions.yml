@@ -1,9 +1,9 @@
-name: Revenue Variant Decisions
+﻿name: Revenue Variant Decisions
 
 on:
   schedule:
-    # Mondays 16:10 UTC, after weekly KPI rollup.
-    - cron: "10 16 * * 1"
+    # Mondays 11:10 UTC, after weekly KPI rollup in quiet window.
+    - cron: "10 11 * * 1"
   workflow_dispatch:
 
 permissions:

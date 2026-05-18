@@ -7,7 +7,7 @@ import {
 
 describe("revenue cadence audit gcloud runtime hardening", () => {
   it("builds a writable gcloud env surface", () => {
-    const env = createWritableGcloudEnv({});
+    const env = createWritableGcloudEnv({ ...process.env });
 
     expect(env.CLOUDSDK_CONFIG).toBeTruthy();
     expect(env.CLOUDSDK_LOG_DIR).toContain("logs");
@@ -17,7 +17,7 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
   it("wraps gcloud through cmd.exe on win32", () => {
     const invocation = buildGcloudInvocation(["scheduler", "jobs", "list"], {
       platform: "win32",
-      env: {},
+      env: { ...process.env },
     });
 
     expect(invocation.command).toBe("cmd.exe");

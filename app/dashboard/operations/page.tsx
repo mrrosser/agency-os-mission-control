@@ -20,6 +20,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { KnowledgeBase } from "@/components/operations/KnowledgeBase";
+import { AdOpsControlCard } from "@/components/operations/AdOpsControlCard";
 import { FollowupSequencingCard } from "@/components/operations/FollowupSequencingCard";
 import { SavedRunTemplates } from "@/components/operations/SavedRunTemplates";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
@@ -2939,6 +2940,8 @@ export default function OperationsPage() {
                                         </p>
                                     </div>
                                 </div>
+
+                                <AdOpsControlCard />
 
                                 {backgroundJob && (
                                     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-300 space-y-2">

@@ -1,6 +1,17 @@
 import type { SecretStatus } from "@/lib/api/secrets";
 import type { AgentSpaceStatus } from "@/lib/agent-status";
 import type { LeadRunAlert, LeadRunQuotaSummary } from "@/lib/lead-runs/quotas";
+import {
+  buildAutonomousBusinessSnapshot,
+  type AdOpsInput,
+  type AutonomousBusinessSnapshot,
+  type BudgetGovernorInput,
+  type CustomerMemoryInput,
+  type GovernanceInput,
+  type MobileOpsInput,
+  type PaperclipControlSnapshot,
+  type ProductCatalogInput,
+} from "@/lib/control-plane/autonomous-business";
 
 export type ControlPlaneHealth = "operational" | "degraded" | "offline";
 export type AgentRuntimeState = "active" | "idle" | "degraded" | "inactive";
@@ -29,7 +40,17 @@ export interface ControlPlaneDriveSummary {
   lastResultCount: number;
 }
 
-export type ControlPlaneBillingProviderId = "openai" | "twilio" | "elevenlabs";
+export type ControlPlaneBillingProviderId =
+  | "openai"
+  | "google"
+  | "twilio"
+  | "elevenlabs"
+  | "heygen"
+  | "apify"
+  | "firecrawl"
+  | "meta_ads"
+  | "google_ads"
+  | "square";
 export type ControlPlaneBillingProviderStatus =
   | "live"
   | "missing_credentials"
@@ -62,6 +83,11 @@ export interface ControlPlaneSkillHealthInput {
 export interface ControlPlaneExternalToolInput {
   smAutoEndpoint: string | null;
   leadOpsEndpoint: string | null;
+  paperclipEndpoint: string | null;
+  openClawSyncGeneratedAt: string | null;
+  openClawSyncTargetRoot: string | null;
+  openClawSyncManifestPath: string | null;
+  openClawSyncStaleHours: number | null;
 }
 
 export interface ControlPlanePosWorkerInput {
@@ -144,6 +170,25 @@ export interface ControlPlaneSkillSnapshot {
   label: string;
   state: ControlPlaneHealth;
   detail: string;
+}
+
+export type ControlPlaneInteractionRelationship = "required" | "declared";
+
+export interface ControlPlaneInteractionLinkSnapshot {
+  agentId: string;
+  agentLabel: string;
+  agentState: AgentRuntimeState;
+  role: string;
+  businessId: string | null;
+  relationship: ControlPlaneInteractionRelationship;
+}
+
+export interface ControlPlaneInteractionSnapshot {
+  serviceId: string;
+  serviceLabel: string;
+  serviceState: ControlPlaneHealth;
+  detail: string;
+  links: ControlPlaneInteractionLinkSnapshot[];
 }
 
 export interface ControlPlaneBugSnapshot {
@@ -252,6 +297,7 @@ export interface ControlPlaneSnapshot {
   };
   agents: ControlPlaneAgentSnapshot[];
   services: ControlPlaneServiceSnapshot[];
+  topology: ControlPlaneInteractionSnapshot[];
   skills: ControlPlaneSkillSnapshot[];
   diagnostics: {
     bugs: ControlPlaneBugSnapshot[];
@@ -259,6 +305,7 @@ export interface ControlPlaneSnapshot {
     recommendations: string[];
   };
   operations: ControlPlaneOperationsSnapshot;
+  business: AutonomousBusinessSnapshot;
   costModel: {
     method: "heuristic-v1" | "hybrid-v1" | "live-v1";
     assumptions: string[];
@@ -285,6 +332,19 @@ interface BuildControlPlaneSnapshotInput {
   socialPipeline?: ControlPlaneSocialPipelineInput | null;
   weeklyKpi?: ControlPlaneRevenueKpiInput | null;
   runtimeChecks?: ControlPlaneRuntimeCheckInput[] | null;
+  paperclip: PaperclipControlSnapshot;
+  governance: GovernanceInput;
+  budgetGovernor: BudgetGovernorInput;
+  customerMemory: CustomerMemoryInput;
+  productCatalog: ProductCatalogInput;
+  adOps: AdOpsInput;
+  mobileOps: MobileOpsInput;
+  reliability: {
+    targetSloPct: number;
+    primaryRegion: string | null;
+    failoverRegion: string | null;
+    healthEndpointEnabled: boolean;
+  };
 }
 
 type ServiceKey =
@@ -298,9 +358,11 @@ type ServiceKey =
   | "firecrawl_research"
   | "square_pos"
   | "smauto_mcp"
-  | "leadops_mcp";
+  | "leadops_mcp"
+  | "paperclip_system"
+  | "openclaw_sync";
 
-const PROVIDER_TO_SERVICE: Record<ControlPlaneBillingProviderId, ServiceKey> = {
+const PROVIDER_TO_SERVICE: Partial<Record<ControlPlaneBillingProviderId, ServiceKey>> = {
   openai: "openai_brain",
   twilio: "twilio_voice",
   elevenlabs: "elevenlabs_tts",
@@ -313,6 +375,7 @@ const AGENT_DEFINITIONS: Array<{
   businessId: string | null;
   baseMonthlyCostUsd: number;
   requiredServices: ServiceKey[];
+  declaredServices?: ServiceKey[];
   aliases: string[];
 }> = [
   {
@@ -322,6 +385,7 @@ const AGENT_DEFINITIONS: Array<{
     businessId: null,
     baseMonthlyCostUsd: 26,
     requiredServices: ["openai_brain"],
+    declaredServices: ["smauto_mcp", "leadops_mcp", "paperclip_system", "openclaw_sync"],
     aliases: ["main", "default", "coding"],
   },
   {
@@ -358,6 +422,7 @@ const AGENT_DEFINITIONS: Array<{
     businessId: null,
     baseMonthlyCostUsd: 11,
     requiredServices: ["openai_brain"],
+    declaredServices: ["smauto_mcp"],
     aliases: ["fn_marketing"],
   },
   {
@@ -367,6 +432,7 @@ const AGENT_DEFINITIONS: Array<{
     businessId: null,
     baseMonthlyCostUsd: 11,
     requiredServices: ["openai_brain", "firecrawl_research"],
+    declaredServices: ["paperclip_system", "openclaw_sync", "leadops_mcp"],
     aliases: ["fn_research"],
   },
   {
@@ -376,6 +442,7 @@ const AGENT_DEFINITIONS: Array<{
     businessId: null,
     baseMonthlyCostUsd: 16,
     requiredServices: ["gmail_tooling", "calendar_tooling", "google_workspace"],
+    declaredServices: ["leadops_mcp", "paperclip_system", "openclaw_sync"],
     aliases: ["fn_actions"],
   },
 ];
@@ -645,6 +712,52 @@ function resolveServiceState(
     };
   }
 
+  if (id === "paperclip_system") {
+    const endpoint = parseConnectorEndpoint(externalTools.paperclipEndpoint);
+    return {
+      id,
+      label: "Paperclip System",
+      state: endpoint.origin ? "operational" : "degraded",
+      detail: endpoint.origin
+        ? `Visible via ${endpoint.origin}`
+        : endpoint.invalid
+          ? "PAPERCLIP_SYSTEM_URL / PAPERCLIP_MCP_SERVER_URL is invalid. Use a full http(s) URL."
+          : "Set PAPERCLIP_SYSTEM_URL or PAPERCLIP_MCP_SERVER_URL to surface Paperclip in Agent Nexus.",
+      required: false,
+      monthlyCostUsd: 0,
+    };
+  }
+
+  if (id === "openclaw_sync") {
+    if (!externalTools.openClawSyncGeneratedAt) {
+      const manifestHint = externalTools.openClawSyncManifestPath
+        ? `No sync manifest at ${externalTools.openClawSyncManifestPath}.`
+        : "Mission Control sync manifest not found.";
+      return {
+        id,
+        label: "OpenClaw Runtime Sync",
+        state: "degraded",
+        detail: `${manifestHint} Run the Mission Control -> AI_HELL_MARY sync to refresh runtime artifacts.`,
+        required: false,
+        monthlyCostUsd: 0,
+      };
+    }
+
+    const staleHours = externalTools.openClawSyncStaleHours;
+    const freshness =
+      staleHours === null ? "freshness unknown" : `last sync ${staleHours}h ago`;
+    const targetRoot = externalTools.openClawSyncTargetRoot || "AI_HELL_MARY";
+
+    return {
+      id,
+      label: "OpenClaw Runtime Sync",
+      state: staleHours !== null && staleHours > 48 ? "degraded" : "operational",
+      detail: `${freshness} -> ${targetRoot}`,
+      required: false,
+      monthlyCostUsd: 0,
+    };
+  }
+
   const firecrawlReady = secretStatus.firecrawlKey !== "missing";
   return {
     id,
@@ -739,6 +852,62 @@ function createSkillSnapshots(input: ControlPlaneSkillHealthInput): ControlPlane
         : "Voice ops guardrails missing",
     },
   ];
+}
+
+function relationshipRank(value: ControlPlaneInteractionRelationship): number {
+  return value === "required" ? 0 : 1;
+}
+
+function createTopologySnapshots(
+  services: ControlPlaneServiceSnapshot[],
+  agents: ControlPlaneAgentSnapshot[]
+): ControlPlaneInteractionSnapshot[] {
+  const agentById = new Map(agents.map((agent) => [agent.id, agent]));
+
+  return services
+    .map((service) => {
+      const links = AGENT_DEFINITIONS.flatMap((definition) => {
+        let relationship: ControlPlaneInteractionRelationship | null = null;
+        if (definition.requiredServices.includes(service.id as ServiceKey)) {
+          relationship = "required";
+        } else if (definition.declaredServices?.includes(service.id as ServiceKey)) {
+          relationship = "declared";
+        }
+
+        if (!relationship) {
+          return [];
+        }
+
+        const agent = agentById.get(definition.id);
+        if (!agent) {
+          return [];
+        }
+
+        return [
+          {
+            agentId: agent.id,
+            agentLabel: agent.label,
+            agentState: agent.state,
+            role: agent.role,
+            businessId: agent.businessId,
+            relationship,
+          } satisfies ControlPlaneInteractionLinkSnapshot,
+        ];
+      }).sort((left, right) => {
+        const relationshipDelta = relationshipRank(left.relationship) - relationshipRank(right.relationship);
+        if (relationshipDelta !== 0) return relationshipDelta;
+        return left.agentLabel.localeCompare(right.agentLabel);
+      });
+
+      return {
+        serviceId: service.id,
+        serviceLabel: service.label,
+        serviceState: service.state,
+        detail: service.detail,
+        links,
+      } satisfies ControlPlaneInteractionSnapshot;
+    })
+    .filter((item) => item.links.length > 0);
 }
 
 function runtimeCheckToHealth(state: ControlPlaneRuntimeCheckState): ControlPlaneHealth {
@@ -949,6 +1118,7 @@ function buildRecommendations(args: {
   queueHealth: ControlPlaneQueueHealthSnapshot;
   socialDispatch: ControlPlaneSocialDispatchSnapshot;
   revenueKpi: ControlPlaneRevenueKpiSnapshot;
+  business: AutonomousBusinessSnapshot;
 }): string[] {
   const recommendations: string[] = [];
   const serviceById = new Map(args.services.map((service) => [service.id, service]));
@@ -981,6 +1151,40 @@ function buildRecommendations(args: {
   const leadOps = serviceById.get("leadops_mcp");
   if (leadOps?.state !== "operational") {
     recommendations.push("Configure LEADOPS_MCP_SERVER_URL to enable LeadOps mission-control tool routing.");
+  }
+
+  const paperclip = serviceById.get("paperclip_system");
+  if (paperclip?.state !== "operational") {
+    recommendations.push("Set PAPERCLIP_SYSTEM_URL or PAPERCLIP_MCP_SERVER_URL so Paperclip is visible in Agent Nexus.");
+  }
+
+  const openClawSync = serviceById.get("openclaw_sync");
+  if (openClawSync?.state !== "operational") {
+    recommendations.push("Run the Mission Control -> AI_HELL_MARY sync so OpenClaw runtime artifacts stay current.");
+  }
+
+  if (args.business.paperclip.state !== "operational") {
+    recommendations.push("Finish the Paperclip proxy cutover so Agent Nexus reads live company, agent, run, and lifecycle state.");
+  }
+
+  if (args.business.budgetGovernor.state !== "operational") {
+    recommendations.push("Set hard monthly/provider budgets and clear any active budget kill switches before enabling more autonomy.");
+  }
+
+  if (args.business.customerMemory.state !== "operational") {
+    recommendations.push("Promote the projected omnichannel customer timeline into a canonical Paperclip-backed memory before scaling outreach.");
+  }
+
+  if (args.business.adOps.state !== "operational") {
+    recommendations.push("Wire Meta Ads and Google Ads control paths into Mission Control so paid media uses the same approval and spend governor.");
+  }
+
+  if (args.business.mobileOps.state !== "operational") {
+    recommendations.push("Configure Mission Control deep links and Google Space webhooks so phone-first approvals and incident actions stay smooth.");
+  }
+
+  if (args.business.reliability.state !== "operational") {
+    recommendations.push("Set primary/failover regions and keep uptime/error-budget monitoring visible in Agent Nexus.");
   }
 
   const squarePos = serviceById.get("square_pos");
@@ -1037,6 +1241,11 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
   const externalTools: ControlPlaneExternalToolInput = input.externalTools || {
     smAutoEndpoint: process.env.SMAUTO_MCP_SERVER_URL || null,
     leadOpsEndpoint: process.env.LEADOPS_MCP_SERVER_URL || null,
+    paperclipEndpoint: process.env.PAPERCLIP_SYSTEM_URL || process.env.PAPERCLIP_MCP_SERVER_URL || null,
+    openClawSyncGeneratedAt: null,
+    openClawSyncTargetRoot: null,
+    openClawSyncManifestPath: null,
+    openClawSyncStaleHours: null,
   };
 
   const serviceList: ControlPlaneServiceSnapshot[] = [
@@ -1051,6 +1260,8 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     resolveServiceState("square_pos", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
     resolveServiceState("smauto_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
     resolveServiceState("leadops_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("paperclip_system", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState("openclaw_sync", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
   ];
   const providerBilling = input.billing?.providers || [];
   const billingRollup = applyProviderBilling(serviceList, providerBilling);
@@ -1130,6 +1341,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
   const activeAgents = agents.filter((agent) => agent.state === "active").length;
   const degradedAgents = agents.filter((agent) => agent.state === "degraded").length;
   const inactiveAgents = agents.filter((agent) => agent.state === "inactive").length;
+  const topology = createTopologySnapshots(serviceList, agents);
 
   const serviceCostUsd = roundUsd(serviceList.reduce((total, service) => total + service.monthlyCostUsd, 0));
   const agentCostUsd = roundUsd(agents.reduce((total, agent) => total + agent.estimatedMonthlyCostUsd, 0));
@@ -1163,15 +1375,6 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
   const operationalServices = serviceList.filter((service) => service.state === "operational").length;
   const requiredServiceFailures = serviceList.filter((service) => service.required && service.state !== "operational");
 
-  let health: ControlPlaneHealth = "operational";
-  if (requiredServiceFailures.length > 0) {
-    health = "offline";
-  } else if (degradedAgents > 0 || openAlerts > 0 || unresolvedBugs > 0 || degradedSkills > 0) {
-    health = "degraded";
-  } else if (operationalServices === 0) {
-    health = "offline";
-  }
-
   const operations = buildOperationsSnapshot({
     nowMs,
     runtimeChecks: input.runtimeChecks,
@@ -1179,6 +1382,52 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     weeklyKpi: input.weeklyKpi,
     posWorker: input.posWorker,
   });
+  const business = buildAutonomousBusinessSnapshot({
+    paperclip: input.paperclip,
+    governance: input.governance,
+    budgetGovernor: input.budgetGovernor,
+    customerMemory: input.customerMemory,
+    productCatalog: input.productCatalog,
+    adOps: input.adOps,
+    profitAttribution: {
+      pipelineValueUsd: operations.revenueKpi.pipelineValueUsd,
+      leadsSourced: operations.revenueKpi.leadsSourced,
+      depositsCollected: operations.revenueKpi.depositsCollected,
+      dealsWon: operations.revenueKpi.dealsWon,
+      monthToDateSpendUsd: input.budgetGovernor.providers.reduce((sum, provider) => {
+        return (
+          sum +
+          Math.max(0, Number(provider.actualUsd || 0)) +
+          Math.max(0, Number(provider.estimatedUsd || 0)) +
+          Math.max(0, Number(provider.unreconciledUsd || 0))
+        );
+      }, 0),
+    },
+    mobileOps: input.mobileOps,
+    reliability: {
+      ...input.reliability,
+      queueHealth: operations.queueHealth.state,
+    },
+  });
+
+  let health: ControlPlaneHealth = "operational";
+  if (requiredServiceFailures.length > 0) {
+    health = "offline";
+  } else if (business.budgetGovernor.state === "offline") {
+    health = "offline";
+  } else if (degradedAgents > 0 || openAlerts > 0 || unresolvedBugs > 0 || degradedSkills > 0) {
+    health = "degraded";
+  } else if (
+    business.paperclip.state !== "operational" ||
+    business.customerMemory.state === "offline" ||
+    business.mobileOps.state !== "operational" ||
+    business.reliability.state !== "operational"
+  ) {
+    health = "degraded";
+  } else if (operationalServices === 0) {
+    health = "offline";
+  }
+
   const recommendations = buildRecommendations({
     services: serviceList,
     alerts: input.alerts,
@@ -1188,6 +1437,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     queueHealth: operations.queueHealth,
     socialDispatch: operations.socialDispatch,
     revenueKpi: operations.revenueKpi,
+    business,
   });
 
   return {
@@ -1212,6 +1462,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     },
     agents,
     services: serviceList,
+    topology,
     skills,
     diagnostics: {
       bugs: bugSnapshots.slice(0, 8),
@@ -1219,6 +1470,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
       recommendations,
     },
     operations,
+    business,
     costModel: {
       method: costMethod,
       assumptions: costAssumptions,

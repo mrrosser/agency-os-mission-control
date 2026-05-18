@@ -47,7 +47,7 @@ const channels = String(
   .map((value) => value.trim())
   .filter(Boolean);
 
-const caption = String(process.env.SOCIAL_DRAFT_CAPTION || "").trim();
+const caption = String(process.env.SOCIAL_DRAFT_CAPTION || "Automated social draft").trim();
 const source = String(process.env.SOCIAL_DRAFT_SOURCE || "openclaw_social_orchestrator").trim();
 const publishAt = String(process.env.SOCIAL_DRAFT_PUBLISH_AT || "").trim();
 const idempotencyKey = String(process.env.SOCIAL_DRAFT_IDEMPOTENCY_KEY || "").trim();

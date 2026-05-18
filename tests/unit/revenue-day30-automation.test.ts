@@ -187,6 +187,30 @@ describe("revenue day30 automation helpers", () => {
           kill: 0,
           watch: 0,
         },
+        outcomeGates: {
+          gates: [],
+          summary: {
+            passCount: 3,
+            warnCount: 1,
+            failCount: 1,
+            passOrWarnCount: 4,
+          },
+          criticalGateFailures: [],
+        },
+        outcomeGateReadiness: {
+          minimumPassOrWarnGates: 3,
+          targetConsecutiveWeeks: 2,
+          consecutiveReadyWeeks: 1,
+          meetsTarget: false,
+          evaluatedWeeks: 1,
+          weeks: [
+            {
+              weekStartDate: "2026-02-23",
+              passOrWarnCount: 4,
+              ready: true,
+            },
+          ],
+        },
       },
       closerQueue: {
         scannedLeads: 100,

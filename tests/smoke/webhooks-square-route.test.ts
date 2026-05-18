@@ -126,6 +126,10 @@ function createFakeDb(input: { leads?: LeadSeed[]; existingEvents?: Record<strin
             }
           }
 
+          if (target.kind !== "query") {
+            return { docs: [], data: () => undefined };
+          }
+
           queryReads.push(target);
           if (target.collectionName !== "leads") {
             return { docs: [], data: () => undefined };

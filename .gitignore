@@ -35,6 +35,7 @@ tmp_dev_server.log
 firebase-debug.log
 .tmp_*
 .tmp/
+tmp/
 tmp_*
 
 # playwright

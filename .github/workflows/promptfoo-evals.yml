@@ -38,6 +38,10 @@ jobs:
   promptfoo:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
+      PROMPTFOO_CACHE_PATH: .promptfoo/cache
     steps:
       - uses: actions/checkout@v4
 
@@ -50,27 +54,18 @@ jobs:
         run: npm ci
 
       - name: Run Promptfoo evals
-        env:
-          PROMPTFOO_CACHE_PATH: .promptfoo/cache
         run: npm run promptfoo:eval
 
       - name: Run Promptfoo code scan
-        if: ${{ github.event_name != 'schedule' && secrets.PROMPTFOO_API_KEY != '' }}
-        env:
-          PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
-          PROMPTFOO_CACHE_PATH: .promptfoo/cache
+        if: ${{ github.event_name != 'schedule' && env.PROMPTFOO_API_KEY != '' }}
         run: npm run promptfoo:code-scan
 
       - name: Promptfoo code scan skipped
-        if: ${{ github.event_name != 'schedule' && secrets.PROMPTFOO_API_KEY == '' }}
+        if: ${{ github.event_name != 'schedule' && env.PROMPTFOO_API_KEY == '' }}
         run: echo "PROMPTFOO_API_KEY is not configured; code scan skipped."
 
       - name: Run Promptfoo redteam
         if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-        env:
-          PROMPTFOO_API_KEY: ${{ secrets.PROMPTFOO_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PROMPTFOO_CACHE_PATH: .promptfoo/cache
         run: |
           if [ -z "$PROMPTFOO_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
             echo "PROMPTFOO_API_KEY or OPENAI_API_KEY is required for scheduled redteam runs; skipping."

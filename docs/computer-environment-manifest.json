@@ -1,0 +1,105 @@
+{
+  "repo_id": "agency-os-mission-control",
+  "workspace_root": "C:\\CTO Projects\\agency-os-mission-control",
+  "allowed_paths": [
+    "app",
+    "components",
+    "docs",
+    "lib",
+    "scripts",
+    "skills",
+    "tests",
+    "tmp"
+  ],
+  "allowed_domains": [
+    "openai.com",
+    "developers.openai.com",
+    "platform.openai.com",
+    "googleapis.com",
+    "cloud.google.com",
+    "console.cloud.google.com",
+    "run.app",
+    "web.app",
+    "firebaseapp.com",
+    "firecrawl.dev",
+    "twilio.com",
+    "heygen.com"
+  ],
+  "secret_refs": [
+    {
+      "name": "OPENAI_API_KEY",
+      "source": "env",
+      "env_name": "OPENAI_API_KEY",
+      "required": false,
+      "allowed_domains": [
+        "api.openai.com",
+        "platform.openai.com"
+      ]
+    },
+    {
+      "name": "GOOGLE_APPLICATION_CREDENTIALS",
+      "source": "env",
+      "env_name": "GOOGLE_APPLICATION_CREDENTIALS",
+      "required": false,
+      "allowed_domains": [
+        "googleapis.com",
+        "cloud.google.com",
+        "console.cloud.google.com"
+      ]
+    },
+    {
+      "name": "FIRECRAWL_API_KEY",
+      "source": "env",
+      "env_name": "FIRECRAWL_API_KEY",
+      "required": false,
+      "allowed_domains": [
+        "api.firecrawl.dev",
+        "firecrawl.dev"
+      ]
+    },
+    {
+      "name": "TWILIO_AUTH_TOKEN",
+      "source": "env",
+      "env_name": "TWILIO_AUTH_TOKEN",
+      "required": false,
+      "allowed_domains": [
+        "api.twilio.com"
+      ]
+    },
+    {
+      "name": "HEYGEN_API_KEY",
+      "source": "env",
+      "env_name": "HEYGEN_API_KEY",
+      "required": false,
+      "allowed_domains": [
+        "api.heygen.com",
+        "heygen.com"
+      ]
+    },
+    {
+      "name": "GOOGLE_PLACES_API_KEY",
+      "source": "env",
+      "env_name": "GOOGLE_PLACES_API_KEY",
+      "required": false,
+      "allowed_domains": [
+        "maps.googleapis.com",
+        "places.googleapis.com"
+      ]
+    }
+  ],
+  "artifact_root": "docs\\reports",
+  "state_root": "tmp\\computer-environment",
+  "tool_policy": {
+    "hosted_shell": true,
+    "apply_patch": true,
+    "mcp": true,
+    "computer_use": false,
+    "background_mode": "preferred",
+    "output_char_limit": 18000
+  },
+  "compaction_threshold": {
+    "max_messages": 30,
+    "max_tool_output_chars": 20000,
+    "checkpoint_artifact": "docs\\reports\\mission-control-computer-environment-latest.md"
+  }
+}

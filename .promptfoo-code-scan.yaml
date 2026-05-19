@@ -1,0 +1,13 @@
+version: 1
+targets:
+  - app/**/*.ts
+  - app/**/*.tsx
+  - lib/**/*.ts
+  - lib/**/*.tsx
+  - scripts/**/*.js
+  - scripts/**/*.mjs
+  - tests/**/*.ts
+  - tests/**/*.tsx
+guidance:
+  - docs/promptfoo-code-scan-guidance.md
+minSeverity: medium

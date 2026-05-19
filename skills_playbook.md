@@ -19,6 +19,7 @@ Use global shared skills and RT Infinite Loop references while keeping project t
   - `skills/folio-avatar-pipeline/SKILL.md` (folio/avatar video pipeline for personalized outbound drafts)
   - `skills/sponsor-inbox-crm-agent/SKILL.md` (sponsor/SMB inbox scoring + CRM sync + draft-first replies)
   - `skills/cross-business-brain-service-lab/SKILL.md` (cross-business digest + approval-gated service ideation loop)
+  - `skills/mission-control-computer-environment/SKILL.md` (repo-local Responses computer-environment manifest, checkpointing, and ui-tests handoff)
 
 ## RT loop ownership
 - RT loop is a global skill/workflow, not a repo-level CI workflow for this project.

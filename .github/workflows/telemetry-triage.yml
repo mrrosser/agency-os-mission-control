@@ -2,8 +2,8 @@ name: Telemetry Triage
 
 on:
   schedule:
-    # Hourly (GitHub schedules are best-effort).
-    - cron: "17 * * * *"
+    # Daily inside the 5 AM-7 AM America/Chicago maintenance window.
+    - cron: "25 11 * * *"
   workflow_dispatch: {}
 
 permissions:

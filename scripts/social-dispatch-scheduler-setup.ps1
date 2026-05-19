@@ -66,7 +66,7 @@ if ([string]::IsNullOrWhiteSpace($uid)) {
 
 $timeZone = Read-Env -Name "SOCIAL_DISPATCH_TIME_ZONE" -DefaultValue "America/Chicago"
 $drainCron = Read-Env -Name "SOCIAL_DISPATCH_DRAIN_CRON" -DefaultValue "*/15 * * * *"
-$retryCron = Read-Env -Name "SOCIAL_DISPATCH_RETRY_CRON" -DefaultValue "0 3 * * *"
+$retryCron = Read-Env -Name "SOCIAL_DISPATCH_RETRY_CRON" -DefaultValue "0 * * * *"
 $maxTasks = Read-Env -Name "SOCIAL_DISPATCH_MAX_TASKS" -DefaultValue "10"
 $retryMaxTasks = Read-Env -Name "SOCIAL_DISPATCH_RETRY_MAX_TASKS" -DefaultValue "10"
 $retryEnabled = (Read-Env -Name "SOCIAL_DISPATCH_RETRY_ENABLED" -DefaultValue "false").ToLower()

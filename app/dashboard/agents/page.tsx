@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, AlertTriangle, Bot, Radar, Shield, Activity, Sparkles } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
+import { buildLiveFeedItems, filterLiveFeed, summarizeLiveFeed, type TimelineFilter } from "@/lib/agents/live-feed";
+import type { AutonomyClass } from "@/lib/control-plane/autonomous-business";
+import { RepoImprovementInbox } from "@/components/operations/RepoImprovementInbox";
+import { GrowthResearchInbox } from "@/components/operations/GrowthResearchInbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +15,7 @@ import { Button } from "@/components/ui/button";
 type Health = "operational" | "degraded" | "offline";
 type RuntimeState = "active" | "idle" | "degraded" | "inactive";
 type BillingStatus = "live" | "missing_credentials" | "unauthorized" | "unavailable" | "error";
-type TimelineFilter = "all" | "tasks" | "comments" | "status" | "decisions";
+type BudgetProviderState = "ok" | "warning" | "blocked" | "unconfigured";
 
 interface AgentSnapshot {
   id: string;
@@ -32,6 +36,23 @@ interface ServiceSnapshot {
   detail: string;
   required: boolean;
   monthlyCostUsd: number;
+}
+
+interface TopologyLinkSnapshot {
+  agentId: string;
+  agentLabel: string;
+  agentState: RuntimeState;
+  role: string;
+  businessId: string | null;
+  relationship: "required" | "declared";
+}
+
+interface TopologySnapshot {
+  serviceId: string;
+  serviceLabel: string;
+  serviceState: Health;
+  detail: string;
+  links: TopologyLinkSnapshot[];
 }
 
 interface SkillSnapshot {
@@ -83,6 +104,7 @@ interface ControlPlaneSnapshot {
   };
   agents: AgentSnapshot[];
   services: ServiceSnapshot[];
+  topology: TopologySnapshot[];
   skills: SkillSnapshot[];
   diagnostics: {
     bugs: DiagnosticBug[];
@@ -125,6 +147,13 @@ interface ControlPlaneSnapshot {
         kill: number;
         watch: number;
       };
+      outcomeGates: {
+        passCount: number;
+        warnCount: number;
+        failCount: number;
+        passOrWarnCount: number;
+        criticalGateFailures: Array<"throughput" | "revenue">;
+      };
     };
     posWorker: {
       state: Health;
@@ -137,14 +166,135 @@ interface ControlPlaneSnapshot {
       lastWebhookAt: string | null;
     };
   };
+  business: {
+    paperclip: {
+      state: Health;
+      configured: boolean;
+      reachable: boolean;
+      canProxyActions: boolean;
+      baseUrl: string | null;
+      sourceOfTruth: "paperclip" | "visibility_only" | "mission_control";
+      companyCount: number | null;
+      agentCount: number | null;
+      activeRunCount: number | null;
+      detail: string;
+      capabilities: {
+        lifecycleActions: boolean;
+        heartbeats: boolean;
+        budgets: boolean;
+        audit: boolean;
+        mobile: boolean;
+      };
+    };
+    governance: {
+      state: Health;
+      operatorMode: "mission_control_proxy";
+      failClosed: boolean;
+      defaultAutonomyClass: AutonomyClass;
+      approvalRequiredClasses: AutonomyClass[];
+      trustEnvelopeFields: string[];
+      globalKillSwitchEnabled: boolean;
+      providerKillSwitches: string[];
+      businessKillSwitches: string[];
+      detail: string;
+    };
+    budgetGovernor: {
+      state: Health;
+      mode: "observe" | "hard-stop";
+      monthBudgetUsd: number | null;
+      monthToDateActualUsd: number;
+      monthToDateEstimatedUsd: number;
+      monthToDateUnreconciledUsd: number;
+      monthToDateTotalUsd: number;
+      projectedMonthEndUsd: number | null;
+      blockedProviders: string[];
+      hardStopActive: boolean;
+      providers: Array<{
+        providerId: string;
+        label: string;
+        state: BudgetProviderState;
+        actualUsd: number | null;
+        estimatedUsd: number;
+        unreconciledUsd: number;
+        totalUsd: number;
+        hardLimitUsd: number | null;
+        writeEnabled: boolean;
+        killSwitchEnabled: boolean;
+        detail: string;
+      }>;
+      detail: string;
+    };
+    customerMemory: {
+      state: Health;
+      sourceOfTruth: "paperclip" | "firestore_projected" | "mission_control";
+      knownContacts: number;
+      recentTimelineEvents: number;
+      lastTimelineAt: string | null;
+      channels: Array<{ id: string; label: string; enabled: boolean }>;
+      duplicateProtection: boolean;
+      dncProtection: boolean;
+      detail: string;
+    };
+    productCatalog: {
+      state: Health;
+      catalogSource: string;
+      businessUnitCount: number;
+      activeOfferCount: number;
+      approvalGated: boolean;
+      detail: string;
+    };
+    adOps: {
+      state: Health;
+      approvalGated: boolean;
+      providers: Array<{
+        providerId: "meta_ads" | "google_ads";
+        configured: boolean;
+        writeEnabled: boolean;
+      }>;
+      detail: string;
+    };
+    profitAttribution: {
+      state: Health;
+      attributionMode: "weighted_multi_touch";
+      monthToDateSpendUsd: number;
+      pipelineValueUsd: number;
+      leadsSourced: number;
+      depositsCollected: number;
+      dealsWon: number;
+      costPerLeadUsd: number | null;
+      costPerDepositUsd: number | null;
+      blendedRoas: number | null;
+      detail: string;
+    };
+    mobileOps: {
+      state: Health;
+      operatorMode: "web_google_space";
+      deepLinkBaseUrl: string | null;
+      googleSpaceReady: boolean;
+      supportsApprovals: boolean;
+      supportsBudgetAlerts: boolean;
+      supportsIncidentAcks: boolean;
+      supportsLifecycleActions: boolean;
+      detail: string;
+    };
+    reliability: {
+      state: Health;
+      targetSloPct: number;
+      primaryRegion: string | null;
+      failoverRegion: string | null;
+      healthEndpointEnabled: boolean;
+      warmFailoverReady: boolean;
+      detail: string;
+    };
+  };
   costModel: {
-    method: string;
+    method: "heuristic-v1" | "hybrid-v1" | "live-v1";
     assumptions: string[];
     serviceCostUsd: number;
     agentCostUsd: number;
     liveProviderCostUsd: number;
     providerBilling: Array<{
-      providerId: string;
+      providerId: "openai" | "twilio" | "elevenlabs";
       label: string;
       status: BillingStatus;
       monthlyCostUsd: number | null;
@@ -153,17 +303,6 @@ interface ControlPlaneSnapshot {
       source: string;
     }>;
   };
-}
-
-type ActivityKind = "heartbeat" | "alert" | "bug" | "decision";
-
-interface ActivityItem {
-  id: string;
-  kind: ActivityKind;
-  timeline: Exclude<TimelineFilter, "all">;
-  title: string;
-  detail: string;
-  ts: number;
 }
 
 const HEALTH_BADGE: Record<Health, string> = {
@@ -187,6 +326,13 @@ const BILLING_BADGE: Record<BillingStatus, string> = {
   error: "border-rose-500/40 bg-rose-500/10 text-rose-200",
 };
 
+const BUDGET_PROVIDER_BADGE: Record<BudgetProviderState, string> = {
+  ok: "border-emerald-400/40 bg-emerald-400/10 text-emerald-200",
+  warning: "border-amber-400/40 bg-amber-400/10 text-amber-200",
+  blocked: "border-rose-500/40 bg-rose-500/10 text-rose-200",
+  unconfigured: "border-zinc-500/40 bg-zinc-500/10 text-zinc-300",
+};
+
 function formatTimestamp(value: string | null): string {
   if (!value) return "No heartbeat yet";
   const parsed = Date.parse(value);
@@ -203,12 +349,6 @@ function costMethodLabel(method: string): string {
   if (method === "live-v1") return "Live provider billing";
   if (method === "hybrid-v1") return "Hybrid (live + fallback)";
   return "Heuristic monthly estimate";
-}
-
-function toTs(value: string | null | undefined): number {
-  if (!value) return 0;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function defaultRouteTarget(agent: AgentSnapshot): string {
@@ -263,76 +403,26 @@ export default function AgentNexusPage() {
     return snapshot.services.filter((service) => service.state === "operational").length;
   }, [snapshot]);
 
-  const liveFeed = useMemo(() => {
-    if (!snapshot) return [];
-
-    const items: ActivityItem[] = [];
-
-    for (const agent of snapshot.agents) {
-      if (!agent.lastSeenAt) continue;
-      items.push({
-        id: `heartbeat:${agent.id}:${agent.lastSeenAt}`,
-        kind: "heartbeat",
-        timeline: "status",
-        title: `${agent.label} heartbeat`,
-        detail: agent.channels.length > 0 ? `Channels: ${agent.channels.join(", ")}` : "No active channels",
-        ts: toTs(agent.lastSeenAt),
-      });
-    }
-
-    for (const alert of snapshot.diagnostics.alerts) {
-      items.push({
-        id: `alert:${alert.alertId}`,
-        kind: "alert",
-        timeline: "tasks",
-        title: alert.title,
-        detail: `${alert.status.toUpperCase()} • ${alert.message}`,
-        ts: toTs(alert.createdAt),
-      });
-    }
-
-    for (const bug of snapshot.diagnostics.bugs) {
-      items.push({
-        id: `bug:${bug.fingerprint}`,
-        kind: "bug",
-        timeline: "comments",
-        title: bug.message || bug.route || bug.fingerprint,
-        detail: `${bug.count} hits • ${bug.triageStatus}`,
-        ts: toTs(bug.lastSeenAt),
-      });
-    }
-
-    for (const [index, recommendation] of snapshot.diagnostics.recommendations.entries()) {
-      items.push({
-        id: `decision:${index}`,
-        kind: "decision",
-        timeline: "decisions",
-        title: "Control-plane recommendation",
-        detail: recommendation,
-        ts: toTs(snapshot.generatedAt) - index,
-      });
-    }
-
-    return items.sort((a, b) => b.ts - a.ts).slice(0, 20);
+  const topologyByService = useMemo(() => {
+    if (!snapshot) return new Map<string, TopologySnapshot>();
+    return new Map(snapshot.topology.map((item) => [item.serviceId, item]));
   }, [snapshot]);
 
+  const liveFeed = useMemo(() => buildLiveFeedItems(snapshot), [snapshot]);
+
   const liveFeedCounts = useMemo(() => {
-    return {
-      all: liveFeed.length,
-      tasks: liveFeed.filter((item) => item.timeline === "tasks").length,
-      comments: liveFeed.filter((item) => item.timeline === "comments").length,
-      status: liveFeed.filter((item) => item.timeline === "status").length,
-      decisions: liveFeed.filter((item) => item.timeline === "decisions").length,
-    };
+    return summarizeLiveFeed(liveFeed);
   }, [liveFeed]);
 
   const filteredLiveFeed = useMemo(() => {
-    if (timelineFilter === "all") return liveFeed;
-    return liveFeed.filter((item) => item.timeline === timelineFilter);
+    return filterLiveFeed(liveFeed, timelineFilter);
   }, [liveFeed, timelineFilter]);
 
   const runAgentAction = useCallback(
-    async (agent: AgentSnapshot, action: "pause" | "ping" | "route") => {
+    async (
+      agent: AgentSnapshot,
+      action: "pause" | "ping" | "route" | "resume" | "terminate" | "wakeup"
+    ) => {
       if (!user) return;
       const actionKey = `${agent.id}:${action}`;
       setAgentActionState((prev) => ({ ...prev, [actionKey]: true }));
@@ -341,7 +431,7 @@ export default function AgentNexusPage() {
         const headers = await buildAuthHeaders(user);
         const body: {
           agentId: string;
-          action: "pause" | "ping" | "route";
+          action: "pause" | "ping" | "route" | "resume" | "terminate" | "wakeup";
           target?: string;
           idempotencyKey: string;
         } = {
@@ -361,14 +451,21 @@ export default function AgentNexusPage() {
           },
           body: JSON.stringify(body),
         });
-        const payload = await readApiJson<{ error?: string; requestId?: string; replayed?: boolean }>(response);
+        const payload = await readApiJson<{
+          error?: string;
+          requestId?: string;
+          replayed?: boolean;
+          proxied?: boolean;
+          status?: string;
+        }>(response);
         if (!response.ok) {
           const cid = getResponseCorrelationId(response);
           throw new Error(payload?.error || `Action failed (${response.status}${cid ? ` cid=${cid}` : ""})`);
         }
+        const statusLabel = payload?.proxied ? "forwarded" : payload?.status || "queued";
         const replayed = payload?.replayed ? " (replayed)" : "";
         setAgentActionFeedback(
-          `${agent.label}: queued ${action}${action === "route" ? ` -> ${body.target}` : ""}${replayed}`
+          `${agent.label}: ${statusLabel} ${action}${action === "route" ? ` -> ${body.target}` : ""}${replayed}`
         );
       } catch (actionError: unknown) {
         setAgentActionFeedback(
@@ -481,6 +578,148 @@ export default function AgentNexusPage() {
                   </div>
                   <p className="text-2xl font-semibold">${snapshot.summary.projectedMonthlyCostUsd.toFixed(2)}</p>
                   <p className="text-xs text-zinc-400">{costMethodLabel(snapshot.costModel.method)}</p>
+                </CardContent>
+              </Card>
+            </section>
+
+            <section>
+              <GrowthResearchInbox />
+            </section>
+
+            <section>
+              <RepoImprovementInbox />
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Paperclip</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.paperclip.state]}>
+                      {snapshot.business.paperclip.state}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.paperclip.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Source of truth {snapshot.business.paperclip.sourceOfTruth} • proxy actions{" "}
+                    {snapshot.business.paperclip.canProxyActions ? "enabled" : "disabled"}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Companies {snapshot.business.paperclip.companyCount ?? "n/a"} • Agents{" "}
+                    {snapshot.business.paperclip.agentCount ?? "n/a"} • Runs{" "}
+                    {snapshot.business.paperclip.activeRunCount ?? "n/a"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Budget Governor</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.budgetGovernor.state]}>
+                      {snapshot.business.budgetGovernor.mode}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.budgetGovernor.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Month to date ${snapshot.business.budgetGovernor.monthToDateTotalUsd.toFixed(2)} • Budget{" "}
+                    {snapshot.business.budgetGovernor.monthBudgetUsd === null
+                      ? "n/a"
+                      : `$${snapshot.business.budgetGovernor.monthBudgetUsd.toFixed(2)}`}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {snapshot.business.budgetGovernor.providers.slice(0, 4).map((provider) => (
+                      <Badge key={provider.providerId} className={BUDGET_PROVIDER_BADGE[provider.state]}>
+                        {provider.label} {provider.state}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Customer Memory</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.customerMemory.state]}>
+                      {snapshot.business.customerMemory.sourceOfTruth}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.customerMemory.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Contacts {snapshot.business.customerMemory.knownContacts} • Timeline events{" "}
+                    {snapshot.business.customerMemory.recentTimelineEvents}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    Protections: dedupe {snapshot.business.customerMemory.duplicateProtection ? "on" : "off"} • DNC{" "}
+                    {snapshot.business.customerMemory.dncProtection ? "on" : "off"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Product + Ad Ops</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.adOps.state]}>
+                      {snapshot.business.productCatalog.activeOfferCount} offers
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.productCatalog.detail}</p>
+                  <p className="text-xs text-zinc-500">{snapshot.business.adOps.detail}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {snapshot.business.adOps.providers.map((provider) => (
+                      <Badge
+                        key={provider.providerId}
+                        className={provider.configured ? HEALTH_BADGE.operational : HEALTH_BADGE.offline}
+                      >
+                        {provider.providerId} {provider.writeEnabled ? "write" : "readiness"}
+                      </Badge>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Profit Attribution</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.profitAttribution.state]}>
+                      {snapshot.business.profitAttribution.attributionMode}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.profitAttribution.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Spend ${snapshot.business.profitAttribution.monthToDateSpendUsd.toFixed(2)} • Pipeline $
+                    {snapshot.business.profitAttribution.pipelineValueUsd.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    CPL{" "}
+                    {snapshot.business.profitAttribution.costPerLeadUsd === null
+                      ? "n/a"
+                      : `$${snapshot.business.profitAttribution.costPerLeadUsd.toFixed(2)}`}{" "}
+                    • ROAS{" "}
+                    {snapshot.business.profitAttribution.blendedRoas === null
+                      ? "n/a"
+                      : `${snapshot.business.profitAttribution.blendedRoas.toFixed(2)}x`}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-zinc-800 bg-zinc-950/90">
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-wide text-zinc-400">Mobile + Reliability</p>
+                    <Badge className={HEALTH_BADGE[snapshot.business.reliability.state]}>
+                      {snapshot.business.reliability.targetSloPct.toFixed(1)}% SLO
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-zinc-300">{snapshot.business.mobileOps.detail}</p>
+                  <p className="text-xs text-zinc-500">{snapshot.business.reliability.detail}</p>
+                  <p className="text-xs text-zinc-500">
+                    Deep links {snapshot.business.mobileOps.deepLinkBaseUrl ? "ready" : "missing"} • Google Space{" "}
+                    {snapshot.business.mobileOps.googleSpaceReady ? "ready" : "missing"}
+                  </p>
                 </CardContent>
               </Card>
             </section>
@@ -638,6 +877,37 @@ export default function AgentNexusPage() {
                           >
                             Route
                           </Button>
+                          {snapshot.business.paperclip.canProxyActions ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-zinc-700 bg-black/30 text-zinc-100 hover:bg-zinc-800"
+                                disabled={Boolean(agentActionState[`${agent.id}:resume`])}
+                                onClick={() => void runAgentAction(agent, "resume")}
+                              >
+                                Resume
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-zinc-700 bg-black/30 text-zinc-100 hover:bg-zinc-800"
+                                disabled={Boolean(agentActionState[`${agent.id}:wakeup`])}
+                                onClick={() => void runAgentAction(agent, "wakeup")}
+                              >
+                                Wake
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-rose-700/60 bg-rose-950/30 text-rose-100 hover:bg-rose-900/40"
+                                disabled={Boolean(agentActionState[`${agent.id}:terminate`])}
+                                onClick={() => void runAgentAction(agent, "terminate")}
+                              >
+                                Terminate
+                              </Button>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                       <div className="text-right md:text-left">
@@ -714,6 +984,9 @@ export default function AgentNexusPage() {
               <Card className="border-zinc-800 bg-zinc-950/90">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base font-semibold">Services + Tools</CardTitle>
+                  <p className="text-xs text-zinc-500">
+                    Required links are runtime blockers. Declared links show intended system wiring in Mission Control.
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-2">
                   {snapshot.services.map((service) => (
@@ -730,6 +1003,15 @@ export default function AgentNexusPage() {
                           </p>
                         </div>
                       </div>
+                      {topologyByService.get(service.id)?.links?.length ? (
+                        <p className="mt-2 text-xs text-zinc-500">
+                          Agents:{" "}
+                          {topologyByService
+                            .get(service.id)
+                            ?.links.map((link) => `${link.agentLabel} (${link.relationship})`)
+                            .join(", ")}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </CardContent>

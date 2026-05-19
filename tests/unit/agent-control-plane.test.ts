@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildControlPlaneSnapshot } from "@/lib/agent-control-plane";
 import type { SecretStatus } from "@/lib/api/secrets";
+import type { GovernanceInput } from "@/lib/control-plane/autonomous-business";
 
 const ALL_MISSING: SecretStatus = {
   openaiKey: "missing",
@@ -12,6 +13,99 @@ const ALL_MISSING: SecretStatus = {
   googlePlacesKey: "missing",
   firecrawlKey: "missing",
   googlePickerApiKey: "missing",
+};
+
+const NO_EXTERNAL_TOOLS = {
+  smAutoEndpoint: null,
+  leadOpsEndpoint: null,
+  paperclipEndpoint: null,
+  openClawSyncGeneratedAt: null,
+  openClawSyncTargetRoot: null,
+  openClawSyncManifestPath: null,
+  openClawSyncStaleHours: null,
+} as const;
+
+const DEFAULT_PAPERCLIP = {
+  state: "degraded" as const,
+  configured: false,
+  reachable: false,
+  canProxyActions: false,
+  baseUrl: null,
+  sourceOfTruth: "mission_control" as const,
+  companyCount: null,
+  agentCount: null,
+  activeRunCount: null,
+  detail: "Paperclip API base URL is not configured yet.",
+  capabilities: {
+    lifecycleActions: false,
+    heartbeats: false,
+    budgets: false,
+    audit: false,
+    mobile: false,
+  },
+};
+
+const DEFAULT_GOVERNANCE: GovernanceInput = {
+  globalKillSwitchEnabled: false,
+  providerKillSwitches: [],
+  businessKillSwitches: [],
+  approvalRequiredClasses: [
+    "public_facing",
+    "financial_or_credentialed",
+    "spend_bearing",
+  ],
+};
+
+const DEFAULT_BUDGET = {
+  mode: "hard-stop" as const,
+  monthBudgetUsd: 500,
+  projectedMonthEndUsd: 120,
+  globalKillSwitchEnabled: false,
+  providers: [],
+};
+
+const DEFAULT_CUSTOMER_MEMORY = {
+  sourceOfTruth: "firestore_projected" as const,
+  knownContacts: 12,
+  recentTimelineEvents: 6,
+  lastTimelineAt: "2026-02-16T17:58:00.000Z",
+  emailReady: false,
+  smsReady: false,
+  voiceReady: false,
+  calendarReady: false,
+  socialReady: false,
+  posReady: false,
+  paidAdsReady: false,
+  duplicateProtection: true,
+  dncProtection: true,
+};
+
+const DEFAULT_PRODUCT_CATALOG = {
+  catalogSource: "mission-control.offer-definitions",
+  businessUnitCount: 3,
+  activeOfferCount: 9,
+  approvalGated: true,
+};
+
+const DEFAULT_AD_OPS = {
+  metaAdsConfigured: false,
+  googleAdsConfigured: false,
+  metaAdsWriteEnabled: false,
+  googleAdsWriteEnabled: false,
+  approvalGated: true,
+};
+
+const DEFAULT_MOBILE_OPS = {
+  deepLinkBaseUrl: "https://leadflow-review.web.app",
+  googleSpaceReady: true,
+  lifecycleActionsEnabled: false,
+};
+
+const DEFAULT_RELIABILITY = {
+  targetSloPct: 99.9,
+  primaryRegion: "us-central1",
+  failoverRegion: "us-east1",
+  healthEndpointEnabled: true,
 };
 
 describe("buildControlPlaneSnapshot", () => {
@@ -43,11 +137,16 @@ describe("buildControlPlaneSnapshot", () => {
         hasKnowledgeIngestionPolicy: false,
         hasVoiceOpsPolicy: false,
       },
-      externalTools: {
-        smAutoEndpoint: null,
-        leadOpsEndpoint: null,
-      },
+      externalTools: NO_EXTERNAL_TOOLS,
       posWorker: null,
+      paperclip: DEFAULT_PAPERCLIP,
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: DEFAULT_BUDGET,
+      customerMemory: DEFAULT_CUSTOMER_MEMORY,
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: DEFAULT_AD_OPS,
+      mobileOps: DEFAULT_MOBILE_OPS,
+      reliability: DEFAULT_RELIABILITY,
     });
 
     expect(snapshot.summary.health).toBe("offline");
@@ -55,6 +154,8 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.services.find((service) => service.id === "openai_brain")?.state).toBe("offline");
     expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("degraded");
     expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("degraded");
+    expect(snapshot.services.find((service) => service.id === "paperclip_system")?.state).toBe("degraded");
+    expect(snapshot.services.find((service) => service.id === "openclaw_sync")?.state).toBe("degraded");
     expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("degraded");
     expect(snapshot.diagnostics.recommendations[0]).toContain("OpenAI API key");
   });
@@ -135,6 +236,11 @@ describe("buildControlPlaneSnapshot", () => {
       externalTools: {
         smAutoEndpoint: "https://smauto.example/mcp",
         leadOpsEndpoint: "https://leadops.example/mcp",
+        paperclipEndpoint: "https://paperclip.example/system",
+        openClawSyncGeneratedAt: "2026-02-16T16:30:00.000Z",
+        openClawSyncTargetRoot: "C:\\CTO Projects\\AI_HELL_MARY",
+        openClawSyncManifestPath: "C:\\CTO Projects\\AI_HELL_MARY\\docs\\generated\\mission-control\\sync-manifest.json",
+        openClawSyncStaleHours: 1,
       },
       posWorker: {
         health: "operational",
@@ -207,6 +313,75 @@ describe("buildControlPlaneSnapshot", () => {
           },
         ],
       },
+      paperclip: {
+        ...DEFAULT_PAPERCLIP,
+        state: "operational",
+        configured: true,
+        reachable: true,
+        canProxyActions: true,
+        baseUrl: "https://paperclip.example/system",
+        sourceOfTruth: "paperclip",
+        companyCount: 3,
+        agentCount: 12,
+        activeRunCount: 4,
+        detail: "Paperclip reachable.",
+        capabilities: {
+          lifecycleActions: true,
+          heartbeats: true,
+          budgets: true,
+          audit: true,
+          mobile: true,
+        },
+      },
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: {
+        ...DEFAULT_BUDGET,
+        projectedMonthEndUsd: 88,
+        providers: [
+          {
+            providerId: "openai",
+            label: "OpenAI",
+            actualUsd: 33.21,
+            estimatedUsd: 0,
+            unreconciledUsd: 0,
+            hardLimitUsd: 120,
+            writeEnabled: true,
+          },
+          {
+            providerId: "twilio",
+            label: "Twilio",
+            actualUsd: 4.2,
+            estimatedUsd: 0,
+            unreconciledUsd: 0,
+            hardLimitUsd: 60,
+            writeEnabled: true,
+          },
+        ],
+      },
+      customerMemory: {
+        ...DEFAULT_CUSTOMER_MEMORY,
+        sourceOfTruth: "paperclip",
+        emailReady: true,
+        smsReady: true,
+        voiceReady: true,
+        calendarReady: true,
+        socialReady: true,
+        posReady: true,
+        paidAdsReady: true,
+      },
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: {
+        ...DEFAULT_AD_OPS,
+        metaAdsConfigured: true,
+        googleAdsConfigured: true,
+        metaAdsWriteEnabled: true,
+        googleAdsWriteEnabled: true,
+      },
+      mobileOps: {
+        ...DEFAULT_MOBILE_OPS,
+        lifecycleActionsEnabled: true,
+      },
+      reliability: DEFAULT_RELIABILITY,
     });
 
     expect(snapshot.summary.health).toBe("degraded");
@@ -221,11 +396,21 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.costModel.providerBilling).toHaveLength(3);
     expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("operational");
+    expect(snapshot.services.find((service) => service.id === "paperclip_system")?.state).toBe("operational");
+    expect(snapshot.services.find((service) => service.id === "openclaw_sync")?.state).toBe("operational");
     expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("operational");
+    expect(
+      snapshot.topology.find((item) => item.serviceId === "paperclip_system")?.links.some((link) => link.agentId === "orchestrator")
+    ).toBe(true);
     expect(snapshot.operations.queueHealth.state).toBe("operational");
     expect(snapshot.operations.socialDispatch.state).toBe("operational");
     expect(snapshot.operations.revenueKpi.state).toBe("operational");
     expect(snapshot.operations.revenueKpi.decisionSummary.scale).toBe(1);
+    expect(snapshot.business.paperclip.state).toBe("operational");
+    expect(snapshot.business.budgetGovernor.mode).toBe("hard-stop");
+    expect(snapshot.business.customerMemory.sourceOfTruth).toBe("paperclip");
+    expect(snapshot.business.adOps.state).toBe("operational");
+    expect(snapshot.business.mobileOps.supportsLifecycleActions).toBe(true);
   });
 
   it("marks connector services degraded when endpoint format is invalid", () => {
@@ -262,15 +447,158 @@ describe("buildControlPlaneSnapshot", () => {
       externalTools: {
         smAutoEndpoint: "smauto-local",
         leadOpsEndpoint: "ftp://leadops.local",
+        paperclipEndpoint: "paperclip-local",
+        openClawSyncGeneratedAt: "2026-02-10T18:00:00.000Z",
+        openClawSyncTargetRoot: "C:\\CTO Projects\\AI_HELL_MARY",
+        openClawSyncManifestPath: "C:\\CTO Projects\\AI_HELL_MARY\\docs\\generated\\mission-control\\sync-manifest.json",
+        openClawSyncStaleHours: 144,
       },
       posWorker: null,
+      paperclip: DEFAULT_PAPERCLIP,
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: DEFAULT_BUDGET,
+      customerMemory: DEFAULT_CUSTOMER_MEMORY,
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: DEFAULT_AD_OPS,
+      mobileOps: DEFAULT_MOBILE_OPS,
+      reliability: DEFAULT_RELIABILITY,
     });
 
     const smAuto = snapshot.services.find((service) => service.id === "smauto_mcp");
     const leadOps = snapshot.services.find((service) => service.id === "leadops_mcp");
+    const paperclip = snapshot.services.find((service) => service.id === "paperclip_system");
+    const openClawSync = snapshot.services.find((service) => service.id === "openclaw_sync");
     expect(smAuto?.state).toBe("degraded");
     expect(leadOps?.state).toBe("degraded");
+    expect(paperclip?.state).toBe("degraded");
+    expect(openClawSync?.state).toBe("degraded");
     expect(String(smAuto?.detail || "")).toContain("invalid");
     expect(String(leadOps?.detail || "")).toContain("invalid");
+    expect(String(paperclip?.detail || "")).toContain("invalid");
+    expect(String(openClawSync?.detail || "")).toContain("last sync");
+  });
+
+  it("marks revenue KPI degraded when a critical outcome gate fails", () => {
+    const snapshot = buildControlPlaneSnapshot({
+      nowIso: "2026-03-02T18:00:00.000Z",
+      spaces: {},
+      secretStatus: {
+        ...ALL_MISSING,
+        openaiKey: "secret",
+      },
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-03-02",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: true,
+        hasAgentTopology: true,
+        hasKnowledgeIngestionPolicy: true,
+        hasVoiceOpsPolicy: true,
+      },
+      externalTools: NO_EXTERNAL_TOOLS,
+      posWorker: null,
+      weeklyKpi: {
+        weekStartDate: "2026-03-02",
+        weekEndDate: "2026-03-08",
+        generatedAt: "2026-03-02T17:55:00.000Z",
+        leadsSourced: 6,
+        closeRatePct: 0,
+        depositsCollected: 0,
+        dealsWon: 0,
+        pipelineValueUsd: 1200,
+        decisionSummary: { scale: 0, fix: 1, kill: 0, watch: 1 },
+        outcomeGates: {
+          summary: { passCount: 0, warnCount: 2, failCount: 3, passOrWarnCount: 2 },
+          criticalGateFailures: ["revenue"],
+        },
+      },
+      paperclip: DEFAULT_PAPERCLIP,
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: DEFAULT_BUDGET,
+      customerMemory: DEFAULT_CUSTOMER_MEMORY,
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: DEFAULT_AD_OPS,
+      mobileOps: DEFAULT_MOBILE_OPS,
+      reliability: DEFAULT_RELIABILITY,
+    });
+
+    expect(snapshot.operations.revenueKpi.state).toBe("degraded");
+    expect(snapshot.operations.revenueKpi.outcomeGates.criticalGateFailures).toContain("revenue");
+  });
+
+  it("marks revenue KPI operational when report is fresh and critical outcome gates pass", () => {
+    const snapshot = buildControlPlaneSnapshot({
+      nowIso: "2026-03-02T18:00:00.000Z",
+      spaces: {},
+      secretStatus: {
+        ...ALL_MISSING,
+        openaiKey: "secret",
+      },
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-03-02",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: true,
+        hasAgentTopology: true,
+        hasKnowledgeIngestionPolicy: true,
+        hasVoiceOpsPolicy: true,
+      },
+      externalTools: NO_EXTERNAL_TOOLS,
+      posWorker: null,
+      weeklyKpi: {
+        weekStartDate: "2026-03-02",
+        weekEndDate: "2026-03-08",
+        generatedAt: "2026-03-02T17:55:00.000Z",
+        leadsSourced: 12,
+        closeRatePct: 12,
+        depositsCollected: 1,
+        dealsWon: 1,
+        pipelineValueUsd: 5200,
+        decisionSummary: { scale: 0, fix: 0, kill: 2, watch: 0 },
+        outcomeGates: {
+          summary: { passCount: 3, warnCount: 2, failCount: 0, passOrWarnCount: 5 },
+          criticalGateFailures: [],
+        },
+      },
+      paperclip: DEFAULT_PAPERCLIP,
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: DEFAULT_BUDGET,
+      customerMemory: DEFAULT_CUSTOMER_MEMORY,
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: DEFAULT_AD_OPS,
+      mobileOps: DEFAULT_MOBILE_OPS,
+      reliability: DEFAULT_RELIABILITY,
+    });
+
+    expect(snapshot.operations.revenueKpi.state).toBe("operational");
+    expect(snapshot.operations.revenueKpi.outcomeGates.passOrWarnCount).toBe(5);
   });
 });

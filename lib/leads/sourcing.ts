@@ -10,6 +10,7 @@ import type {
 } from "@/lib/leads/types";
 import { scoreLead } from "@/lib/leads/scoring";
 import { enrichLeadsWithFirecrawl } from "@/lib/leads/providers/firecrawl";
+import { enrichLeadsWithBasicWebFetch } from "@/lib/leads/providers/basic-web-enrichment";
 import { resolveLeadProviders } from "@/lib/leads/providers/registry";
 
 interface SourceContext {
@@ -61,6 +62,11 @@ interface BudgetUsage {
 const DEFAULT_FIRECRAWL_ENRICH_COOLDOWN_SEC = 15 * 60;
 const firecrawlEnrichmentCooldownByUid = new Map<string, number>();
 
+type BasicEnrichFallbackReason =
+    | "firecrawl_key_missing"
+    | "firecrawl_cooldown_active"
+    | "firecrawl_quota_exhausted";
+
 function readFirecrawlCooldownMs(): number {
     const parsed = Number(process.env.FIRECRAWL_ENRICH_COOLDOWN_SEC || DEFAULT_FIRECRAWL_ENRICH_COOLDOWN_SEC);
     if (!Number.isFinite(parsed) || parsed < 30) {
@@ -87,6 +93,13 @@ function setFirecrawlCooldown(uid: string, nowMs: number): number {
 
 export function __resetFirecrawlEnrichmentCooldownForTests(): void {
     firecrawlEnrichmentCooldownByUid.clear();
+}
+
+function isBasicWebEnrichmentFallbackEnabled(): boolean {
+    const raw = String(process.env.LEAD_ENRICH_BASIC_FALLBACK_ENABLED || "true")
+        .trim()
+        .toLowerCase();
+    return raw !== "false" && raw !== "0" && raw !== "off" && raw !== "no";
 }
 
 function readPositiveFloat(value: string | undefined, fallback: number): number {
@@ -391,8 +404,11 @@ export async function sourceLeads(
         return count && count > 1 ? { ...lead, domainClusterSize: count } : lead;
     });
     if (request.includeEnrichment) {
+        const fallbackEnabled = isBasicWebEnrichmentFallbackEnabled();
+        let fallbackReason: BasicEnrichFallbackReason | null = null;
         if (!firecrawlKey) {
             warnings.push("Firecrawl key missing; skipping website enrichment.");
+            fallbackReason = "firecrawl_key_missing";
         } else {
             const nowMs = Date.now();
             const cooldownUntilMs = readFirecrawlCooldownUntilMs(uid, nowMs);
@@ -403,6 +419,7 @@ export async function sourceLeads(
                     uid,
                     cooldownUntil: cooldownUntilIso,
                 });
+                fallbackReason = "firecrawl_cooldown_active";
             } else {
                 let quotaExceeded = false;
                 enrichedLeads = await enrichLeadsWithFirecrawl(
@@ -424,8 +441,34 @@ export async function sourceLeads(
                         uid,
                         cooldownUntil: cooldownUntilIso,
                     });
+                    fallbackReason = "firecrawl_quota_exhausted";
                 }
             }
+        }
+
+        if (fallbackEnabled && fallbackReason) {
+            const maxLeads = Math.min(request.limit || 10, 8);
+            enrichedLeads = await enrichLeadsWithBasicWebFetch(
+                enrichedLeads,
+                {
+                    maxLeads,
+                    concurrency: 2,
+                    timeoutMs: 8_000,
+                },
+                log
+            );
+            warnings.push(`Basic website enrichment fallback applied (${fallbackReason}).`);
+            log?.info("lead.enrich.basic.fallback_applied", {
+                uid,
+                reason: fallbackReason,
+                maxLeads,
+            });
+        } else if (fallbackReason) {
+            log?.info("lead.enrich.basic.fallback_skipped", {
+                uid,
+                reason: fallbackReason,
+                flag: "LEAD_ENRICH_BASIC_FALLBACK_ENABLED",
+            });
         }
     }
 

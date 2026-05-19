@@ -5,6 +5,7 @@ import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { getInboxMessages } from "@/lib/google/gmail";
+import { summarizeInboxTriage, triageInboxMessages } from "@/lib/inbox/triage";
 import { sanitizeError } from "@/lib/logging";
 
 const bodySchema = z.object({
@@ -39,8 +40,27 @@ export const POST = withApiHandler(
       log
     );
 
-    log.info("inbox.messages_retrieved", { count: result.messages?.length || 0 });
-    return NextResponse.json(result);
+    const triagedMessages = triageInboxMessages(result.messages || []);
+    const triageSummary = summarizeInboxTriage(triagedMessages);
+
+    log.info("inbox.messages_retrieved", {
+      count: triagedMessages.length,
+      triageRubricVersion: "v2",
+      triageBucketCounts: triageSummary.bucketCounts,
+      triageSponsorBucketCounts: triageSummary.sponsorBucketCounts,
+      triageAverageScore: triageSummary.averageScore,
+      triageAverageConfidence: triageSummary.averageConfidence,
+      triageLowConfidenceCount: triageSummary.lowConfidenceCount,
+    });
+
+    return NextResponse.json({
+      ...result,
+      messages: triagedMessages,
+      triage: {
+        rubricVersion: "v2",
+        ...triageSummary,
+      },
+    });
   },
   { route: "gmail.inbox" }
 );

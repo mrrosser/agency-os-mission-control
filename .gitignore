@@ -35,6 +35,7 @@ tmp_dev_server.log
 firebase-debug.log
 .tmp_*
 .tmp/
+tmp/
 tmp_*
 
 # playwright
@@ -90,3 +91,20 @@ openclaw.json
 openclaw-attest.log
 .env.mcp
 .firecrawl/
+.promptfoo/cache/*
+!.promptfoo/cache/.gitkeep
+.promptfoo/results/*
+!.promptfoo/results/.gitkeep
+
+# local automation scratch
+.codex-gcloud/
+.gcloud*/
+.gcloudcfg/
+.tmp-gcloud-config/
+docs/reports/probe-*.tmp
+docs/reports/write-probe-*.tmp
+docs/reports/leadgen-digest-latest.json
+docs/reports/leadgen-digest-latest.md
+docs/reports/repo-improvement-latest.json
+docs/reports/repo-improvement-latest.md
+docs/reports/repo-improvement/

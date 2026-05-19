@@ -1,0 +1,64 @@
+[
+  {
+    "name": "incomplete_shorthand",
+    "raw_prompt": "reply to this",
+    "inputs": [
+      { "name": "routeKey", "value": "rt_solutions" },
+      { "name": "replyEmail", "value": "district@example.com" }
+    ],
+    "required_input_names": ["routeKey", "replyEmail", "subject", "threadContext"],
+    "expected_confidence": "low",
+    "expected_ask_back": true,
+    "expected_ambiguities": [
+      "Missing required input: subject.",
+      "Missing required input: threadContext.",
+      "The raw prompt is very short and may be underspecified."
+    ]
+  },
+  {
+    "name": "multi_option_question",
+    "raw_prompt": "Should I reply with a quick call option or keep it async?",
+    "inputs": [
+      { "name": "routeKey", "value": "ai_cofoundry" },
+      { "name": "replyEmail", "value": "ops@example.com" },
+      { "name": "subject", "value": "pilot scope" },
+      { "name": "threadContext", "value": "present" }
+    ],
+    "required_input_names": ["routeKey", "replyEmail", "subject", "threadContext"],
+    "expected_confidence": "medium",
+    "expected_ask_back": false,
+    "expected_ambiguities": [
+      "The prompt includes multiple possible actions or outcomes."
+    ]
+  },
+  {
+    "name": "complete_jargon_request",
+    "raw_prompt": "Need a quick RT Solutions follow-up for the district automation pilot thread. Keep it body-only and move to a clear next step.",
+    "inputs": [
+      { "name": "routeKey", "value": "rt_solutions" },
+      { "name": "replyEmail", "value": "district@example.com" },
+      { "name": "subject", "value": "district automation pilot" },
+      { "name": "threadContext", "value": "present" }
+    ],
+    "required_input_names": ["routeKey", "replyEmail", "subject", "threadContext"],
+    "expected_confidence": "high",
+    "expected_ask_back": false,
+    "expected_ambiguities": []
+  },
+  {
+    "name": "consequential_missing_context",
+    "raw_prompt": "Book the reply and move it toward a meeting confirmation.",
+    "inputs": [
+      { "name": "routeKey", "value": "rt_solutions" },
+      { "name": "replyEmail", "value": "district@example.com" },
+      { "name": "subject", "value": "meeting follow-up" }
+    ],
+    "required_input_names": ["routeKey", "replyEmail", "subject", "threadContext"],
+    "consequential": true,
+    "expected_confidence": "medium",
+    "expected_ask_back": true,
+    "expected_ambiguities": [
+      "Missing required input: threadContext."
+    ]
+  }
+]

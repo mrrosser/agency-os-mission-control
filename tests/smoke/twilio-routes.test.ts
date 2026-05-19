@@ -7,6 +7,8 @@ import { withIdempotency } from "@/lib/api/idempotency";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
 import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
 import { findDncMatch } from "@/lib/outreach/dnc";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
+import { ApiError } from "@/lib/api/handler";
 
 const twilioMocks = vi.hoisted(() => {
   const messagesCreate = vi.fn();
@@ -50,12 +52,17 @@ vi.mock("@/lib/outreach/dnc", () => ({
   findDncMatch: vi.fn(),
 }));
 
+vi.mock("@/lib/budget/enforcement", () => ({
+  assertProviderSpendAllowed: vi.fn(async () => undefined),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const resolveSecretMock = vi.mocked(resolveSecret);
 const withIdempotencyMock = vi.mocked(withIdempotency);
 const createHostedCallAudioMock = vi.mocked(createHostedCallAudio);
 const resolveOrgMock = vi.mocked(resolveLeadRunOrgId);
 const findDncMock = vi.mocked(findDncMatch);
+const assertProviderSpendAllowedMock = vi.mocked(assertProviderSpendAllowed);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -89,6 +96,7 @@ describe("twilio routes", () => {
       modelId: "model-test",
       bytes: 1024,
     });
+    assertProviderSpendAllowedMock.mockResolvedValue(undefined);
     twilioMocks.messagesCreate.mockReset();
     twilioMocks.callsCreate.mockReset();
     twilioMocks.factory.mockClear();
@@ -283,5 +291,58 @@ describe("twilio routes", () => {
         twiml: "<Response><Play>https://example.com/clip-123.mp3</Play></Response>",
       })
     );
+  });
+
+  it("send-sms blocks when the budget governor hard-stops Twilio", async () => {
+    assertProviderSpendAllowedMock.mockRejectedValueOnce(
+      new ApiError(423, "Budget governor blocked twilio after reaching the provider hard limit.")
+    );
+
+    const req = new Request("http://localhost/api/twilio/send-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "+15551230000",
+        message: "Blocked by budget",
+      }),
+    });
+
+    const res = await sendSmsPost(
+      req as unknown as Parameters<typeof sendSmsPost>[0],
+      createContext() as unknown as Parameters<typeof sendSmsPost>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(423);
+    expect(String(data.error)).toContain("Budget governor blocked twilio");
+    expect(twilioMocks.messagesCreate).not.toHaveBeenCalled();
+  });
+
+  it("make-call blocks before synthesis when the budget governor hard-stops ElevenLabs", async () => {
+    assertProviderSpendAllowedMock
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new ApiError(423, "Budget governor blocked elevenlabs after reaching the provider hard limit.")
+      );
+
+    const req = new Request("http://localhost/api/twilio/make-call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "+15551239999",
+        text: "Blocked voice call",
+      }),
+    });
+
+    const res = await makeCallPost(
+      req as unknown as Parameters<typeof makeCallPost>[0],
+      createContext() as unknown as Parameters<typeof makeCallPost>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(423);
+    expect(String(data.error)).toContain("Budget governor blocked elevenlabs");
+    expect(createHostedCallAudioMock).not.toHaveBeenCalled();
+    expect(twilioMocks.callsCreate).not.toHaveBeenCalled();
   });
 });

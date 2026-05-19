@@ -57,6 +57,7 @@ describe("follow-up sequencing routes", () => {
         leadDocId: "lead-1",
         uid: "user-1",
         sequence: 1,
+        branch: "standard",
         status: "pending",
         dueAtMs: Date.now() + 1,
         attempts: 0,

@@ -16,6 +16,8 @@ copy .env.local.example .env.local
 - `FIREBASE_PROJECT_ID`
 - `NEXT_PUBLIC_CANONICAL_LOGIN_URL` (recommended: `https://leadflow-review.web.app/login`)
 - `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN` (recommended: `true`)
+- `MISSION_CONTROL_PUBLIC_ORIGIN` (recommended: `https://leadflow-review.web.app`)
+- `MISSION_CONTROL_ALLOWED_ORIGINS` (optional: comma-separated list for dev or temporary callback hosts)
 - `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`
 - Optional: `GOOGLE_PICKER_API_KEY` (browser key; enables Google Drive Picker UI in Knowledge Base)
 - Optional: `GOOGLE_DRIVE_APP_ID` (Drive Picker app id; set to your GCP project number for Shared Drives support)
@@ -24,16 +26,21 @@ copy .env.local.example .env.local
 - Optional: `APIFY_EST_COST_PER_1K_RESULTS_USD` (used for estimated Apify source cost in diagnostics)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_API_KEY`
+- Optional (Paperclip orchestration + OpenClaw runtime visibility): `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL`, `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID`, `PAPERCLIP_TIMEOUT_MS`, `PAPERCLIP_HEALTH_PATH`, `PAPERCLIP_COMPANIES_PATH`, `PAPERCLIP_AGENTS_PATH`, `PAPERCLIP_ACTIVE_RUNS_PATH`, `PAPERCLIP_ACTION_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE`, `AI_HELL_MARY_ROOT`
 - Optional (recommended for operator controls): `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions)
 - Optional (internal rollout guardrails): `NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI=false`
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 - Optional (recommended for live OpenAI billing pulls): `OPENAI_ADMIN_API_KEY`
+- Optional (budget governor + autonomy controls): `MISSION_CONTROL_BUDGET_MODE`, `MISSION_CONTROL_MONTHLY_BUDGET_USD`, `MISSION_CONTROL_PROJECTED_MONTH_END_USD`, `MISSION_CONTROL_PROVIDER_BUDGETS_JSON`, `MISSION_CONTROL_PROVIDER_ESTIMATES_JSON`, `MISSION_CONTROL_PROVIDER_UNRECONCILED_JSON`, `MISSION_CONTROL_GLOBAL_KILL_SWITCH`, `MISSION_CONTROL_PROVIDER_KILL_SWITCHES`, `MISSION_CONTROL_BUSINESS_KILL_SWITCHES`
+- Optional (mobile + reliability posture): `NEXT_PUBLIC_APP_URL`, `MISSION_CONTROL_SLO_TARGET_PCT`, `MISSION_CONTROL_PRIMARY_REGION`, `MISSION_CONTROL_FAILOVER_REGION`
+- Optional (ad-ops readiness): `META_ADS_CONTROL_URL`, `META_ADS_CONTROL_TOKEN`, `META_ADS_ACCOUNT_ID`, `META_ADS_ACCESS_TOKEN`, `META_ADS_API_VERSION`, `META_ADS_WRITE_ENABLED`, `META_ADS_CAMPAIGNS_PATH`, `META_ADS_ACTION_PATH_TEMPLATE`, `GOOGLE_ADS_CONTROL_URL`, `GOOGLE_ADS_CONTROL_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`, `GOOGLE_ADS_WRITE_ENABLED`, `GOOGLE_ADS_CAMPAIGNS_PATH`, `GOOGLE_ADS_ACTION_PATH_TEMPLATE`
 - Optional (Square deposit stage webhook): `SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_NOTIFICATION_URL`, `SQUARE_WEBHOOK_DEFAULT_UID`
 - Optional (POS worker service auth): `REVENUE_POS_WORKER_TOKEN`
 - Optional (POS side-effect policy): `POS_WORKER_ALLOW_SIDE_EFFECTS`, `POS_WORKER_AUTO_APPROVE_LOW_RISK`, `POS_WORKER_REQUIRE_APPROVAL_FOR_HIGH_RISK`, `POS_WORKER_MAX_ATTEMPTS`
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
 - Optional (lead source budget defaults): `LEAD_SOURCE_BUDGET_MAX_COST_USD`, `LEAD_SOURCE_BUDGET_MAX_PAGES`, `LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC`
+- Optional (lead enrichment fallback guard): `LEAD_ENRICH_BASIC_FALLBACK_ENABLED` (default `true`; when `true`, website fetch fallback runs if Firecrawl key is missing, cooldown is active, or quota is exhausted)
 - Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
@@ -56,6 +63,28 @@ npm run dev
 - Without a Places key, the Lead Engine pulls from existing CRM leads.
 - Source diagnostics include per-run budget usage (cost/pages/runtime) and stop reasons.
 
+## CRM + Customer Memory
+- Customer-memory list/upsert route: `GET/POST /api/crm/customers`
+- Pipeline-stage update route: `PATCH /api/crm/customers/:customerId`
+- Per-customer timeline route: `GET /api/crm/customers/:customerId/timeline`
+- Paperclip is the preferred source of truth when configured; Mission Control falls back to projected Firestore CRM records when Paperclip is unavailable.
+- The CRM dashboard now reads through these server routes instead of direct client-side Firestore writes.
+- Firestore -> Paperclip cutover helper:
+```bash
+npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_company_uuid>
+```
+- Omit `--uid` to backfill all leads in the configured scope. Use `--dry-run` to preview counts without writing.
+- Timeline replay is idempotent through Paperclip `externalKey` values, so rerunning the backfill will not duplicate imported customer-history events.
+
+## Ad Ops Control
+- Campaign listing route: `GET /api/ad-ops/campaigns`
+- Campaign lifecycle route: `POST /api/ad-ops/campaigns/:campaignId/action`
+- `resume` is treated as spend-bearing and requires both an approval reference and a passing budget-governor check.
+- `pause` and `sync` remain fail-closed behind authenticated Mission Control routes and emit scoped execution-envelope metadata to the provider control plane.
+- Supported provider transports:
+  - Control-plane proxy: `META_ADS_CONTROL_URL` / `GOOGLE_ADS_CONTROL_URL`
+  - Direct provider mode: `META_ADS_ACCOUNT_ID` + `META_ADS_ACCESS_TOKEN`, or `GOOGLE_ADS_CUSTOMER_ID` + `GOOGLE_ADS_DEVELOPER_TOKEN` + OAuth refresh credentials
+
 ## Competitor Monitor (Scheduled Reports)
 - Upsert/list monitors: `POST/GET /api/competitors/monitor`
 - Worker execution endpoint: `POST /api/competitors/monitor/worker-task`
@@ -66,20 +95,45 @@ npm run dev
 ## Agent Nexus Dashboard
 - New control-plane dashboard: `app/dashboard/agents` (`/dashboard/agents` in the UI).
 - Backend snapshot API: `GET /api/agents/control-plane`.
-- Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` requests for operators).
+- Agent action API: `POST /api/agents/actions` (queues `ping` / `pause` / `route` and proxies `resume` / `wakeup` / `terminate` to Paperclip when configured).
+- Repo-improvement inbox API: `GET /api/agents/repo-improvement`.
+- Repo-improvement review API: `POST /api/agents/repo-improvement/review`.
+- Growth-research inbox API: `GET /api/agents/growth-research`.
+- Growth-research review API: `POST /api/agents/growth-research/review`.
 - Includes:
   - agent runtime states (active/idle/degraded/inactive),
   - service/tool/skill health,
+  - declared service-to-agent topology for cross-system visibility (including Paperclip + OpenClaw runtime sync when configured),
   - open alerts + top telemetry bug groups,
   - per-agent quick actions (`Ping`, `Pause`, `Route`),
   - timeline filters (`All`, `Tasks`, `Comments`, `Status`, `Decisions`),
   - daily quota posture,
-  - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability).
+  - projected monthly cost (live/hybrid/heuristic, depending on provider billing availability),
+  - hard-stop budget governor posture across provider lanes,
+  - Paperclip orchestration summary (company count, agent count, active run count, lifecycle proxy readiness),
+  - projected omnichannel customer memory posture,
+  - product catalog + ad-ops readiness,
+  - weighted multi-touch profit attribution summary,
+  - mobile operator readiness and reliability/SLO posture,
+  - overnight repo-improvement inbox with decision labels (`approve`, `reject`, `defer`, `needs-human`),
+  - weekly growth-research inbox with direct growth scorecards, RedBlueTeamKit security assurance, WaterWorld data-product operations, and bounded scaffold proposals,
+  - shared review metrics (`proposal_rate`, `keep_rate`, `morning_approval_rate`, `revert_rate`, `verifier_pass_rate`, `repeat_failure_rate`, `time_to_accept_hours`).
 - Billing sources:
   - OpenAI: `GET /v1/organization/costs` (org admin key required for live pulls)
   - Twilio: Usage Records (ThisMonth, total price category)
   - ElevenLabs: subscription/usage endpoints (falls back gracefully if cost totals are unavailable)
   - Control-plane billing pulls are cached per user for 120s by default (`CONTROL_PLANE_BILLING_CACHE_TTL_MS`).
+- Local workstation env for the repo-improvement inbox:
+  - `REPO_IMPROVEMENT_REPORT_ROOT` defaults to `C:\CTO Projects\CodexSkills\docs\reports`
+  - `REPO_IMPROVEMENT_SCRIPT_ROOT` defaults to `C:\CTO Projects\CodexSkills\.codex\skills\automation-control-plane\scripts`
+  - optional `REPO_IMPROVEMENT_REVIEW_ALLOWED_UIDS` gates review submission to a comma-separated UID allowlist
+  - optional `REPO_IMPROVEMENT_REVIEW_SHELL` overrides the PowerShell executable used for the shared review recorder
+- Local workstation env for the growth-research inbox:
+  - `GROWTH_RESEARCH_REPORT_ROOT` defaults to `C:\CTO Projects\CodexSkills\docs\reports`
+  - `GROWTH_RESEARCH_SCRIPT_ROOT` defaults to `C:\CTO Projects\CodexSkills\.codex\skills\automation-control-plane\scripts`
+  - optional `GROWTH_RESEARCH_REVIEW_ALLOWED_UIDS` gates review submission to a comma-separated UID allowlist
+  - optional `GROWTH_RESEARCH_REVIEW_SHELL` overrides the PowerShell executable used for the shared review recorder
+- When those paths are not mounted in the current runtime, Agent Nexus fails closed and shows the inbox as unavailable instead of breaking the rest of the control plane.
 
 ## Cross-Project MCP Connectors
 - Purpose: consume external systems (`SMAuto`, LeadOps Mission Control) as tools without merging codebases.
@@ -88,9 +142,18 @@ npm run dev
   - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
   - `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`)
+  - `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL` (base visibility URL)
+  - `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID` (enables direct lifecycle proxy actions, live Paperclip summary counts, and canonical customer-memory reads/writes)
+  - `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE` (customer-memory proxy paths when Paperclip is the CRM source of truth)
+  - `AI_HELL_MARY_ROOT` (defaults to `C:\CTO Projects\AI_HELL_MARY`; used to read the latest sync manifest for OpenClaw runtime status)
+  - `META_ADS_CONTROL_URL`, `META_ADS_CONTROL_TOKEN`, `META_ADS_ACCOUNT_ID`, `META_ADS_ACCESS_TOKEN`, `META_ADS_API_VERSION`, `META_ADS_CAMPAIGNS_PATH`, `META_ADS_ACTION_PATH_TEMPLATE`
+  - `GOOGLE_ADS_CONTROL_URL`, `GOOGLE_ADS_CONTROL_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`, `GOOGLE_ADS_CAMPAIGNS_PATH`, `GOOGLE_ADS_ACTION_PATH_TEMPLATE`
 - Verification:
   - Settings -> **Runtime Config Preflight** shows connector checks.
-  - Agent Nexus -> **Services + Tools** shows `SMAuto MCP` / `LeadOps MCP` states.
+  - Agent Nexus -> **Services + Tools** shows `SMAuto MCP`, `LeadOps MCP`, `Paperclip System`, and `OpenClaw Runtime Sync` states plus declared agent links.
+  - Agent Nexus -> **Paperclip**, **Budget Governor**, **Customer Memory**, **Product + Ad Ops**, **Profit Attribution**, and **Mobile + Reliability** cards show the autonomous-business operating state.
+  - Operations -> **Ad Ops Control** exposes provider readiness, live campaign state, and approval-gated lifecycle actions.
+  - CRM -> customer board + timeline panel read through the unified customer-memory API contract.
 - Capability ownership matrix: `docs/runtime-capability-matrix.md`
 
 ## Model Prompting Guidance
@@ -102,6 +165,19 @@ npm run dev
 - Skill file: `skills/sponsor-inbox-crm-agent/SKILL.md`
 - Refined prompt pack: `docs/plans/2026-02-25-refined-prompts-sponsor-crm.md`
 - Rubric template (sync target): `please-review/config-templates/sponsor-inbox-rubric.v1.json`
+
+## Inbox Triage API (Rubric v2, Backward Compatible)
+- Route: `POST /api/gmail/inbox`
+- Legacy compatibility retained:
+  - `messages[].triage.bucket` remains `hot|follow_up|nurture|ignore`
+  - `triage.bucketCounts` remains available in response summary
+- v2 extensions:
+  - `messages[].triage.rubricVersion = "v2"`
+  - `messages[].triage.dimensions` (`fit`, `clarity`, `budget`, `seriousness`, `companyTrust`, `closeLikelihood`)
+  - `messages[].triage.sponsorBucket` (`exceptional|high|medium|low|spam`)
+  - `messages[].triage.confidenceThreshold`, `messages[].triage.lowConfidence`
+  - `messages[].triage.suggestedAction`
+  - response `triage.sponsorBucketCounts` and `triage.lowConfidenceCount`
 
 ## Revenue Day 1 Automation
 - Manual/authenticated route: `POST /api/revenue/day1`
@@ -166,8 +242,26 @@ npm run dev
 - Latest snapshot route: `GET /api/revenue/kpi/latest`
 - Worker auth: send `Authorization: Bearer <REVENUE_WEEKLY_KPI_WORKER_TOKEN>` (or `x-revenue-weekly-kpi-token`).
 - Writes weekly and latest KPI docs under `identities/{uid}/revenue_kpi_reports/*`.
+- KPI docs include canonical outcome gate payload:
+  - `outcomeGates.gates[]` (`throughput`, `qualification`, `meeting`, `revenue`, `pipeline`)
+  - `outcomeGates.summary` (`passCount`, `warnCount`, `failCount`, `passOrWarnCount`)
+  - `outcomeGates.criticalGateFailures` (`throughput`, `revenue`)
+  - `outcomeGateReadiness` (two-week evidence tracker, default target `>=3/5` pass|warn for `2` consecutive weeks)
 - Automation workflow: `.github/workflows/revenue-weekly-kpi.yml`
 - Dashboard surface (internal revenue UI flag): weekly KPI summary cards + decision counts.
+
+## Revenue Weekly Business Health Artifact
+- Script: `npm run revenue:weekly:health`
+- Reads latest Firestore KPI + variant decision snapshots and outputs:
+  - Markdown report (`docs/reports/<date>-weekly-business-health.md` by default)
+  - JSON payload (`docs/reports/<date>-weekly-business-health.json` by default)
+- Uses canonical outcome gates as the primary health table (variant decisions are supporting signals).
+- Optional Firestore writeback collection: `identities/{uid}/revenue_health_reports/*` (enabled by default).
+- Environment:
+  - `REVENUE_HEALTH_UID` (falls back to revenue UID env chain)
+  - `REVENUE_HEALTH_REPORT_PATH`, `REVENUE_HEALTH_JSON_PATH` (optional output overrides)
+  - `REVENUE_HEALTH_WRITE_FIRESTORE=true|false`
+- Scheduled automation workflow: `.github/workflows/revenue-weekly-health.yml` (Mondays 17:00 UTC, after KPI + variant jobs).
 
 ## Square Deposit Webhook
 - Route: `POST /api/webhooks/square`
@@ -188,6 +282,7 @@ node scripts/sync-ai-hell-mary.mjs --target-root "C:\\CTO Projects\\AI_HELL_MARY
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-nightly.ps1
 ```
 - Runbook: `docs/runbook-revenue-sync-and-kpi.md`
+- Agent Nexus reads `docs/generated/mission-control/sync-manifest.json` under `AI_HELL_MARY_ROOT` to reflect the latest OpenClaw runtime sync status.
 
 ## Competitor Monitor Dashboard
 - UI: `/dashboard/competitors`
@@ -236,7 +331,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-ai-hell-mary-ni
 Notes:
 - Do not use `0.0.0.0` in OAuth redirect URIs; browsers treat it as an invalid address.
 - If you run the dev server on a different port (e.g. 8080), add `http://localhost:8080/api/google/callback` to the Google OAuth client and set `GOOGLE_OAUTH_REDIRECT_URI` accordingly.
-- Use `https://leadflow-review.web.app/login` as the user-facing login URL (not direct `*.run.app` service URLs).
+- Use `https://leadflow-review.web.app/login` as the user-facing login URL.
+- Keep `*.run.app` URLs as service endpoints unless they are explicitly added as temporary OAuth callback hosts.
 
 ## Deploy (Firebase Hosting)
 The workflow `.github/workflows/firebase-hosting-merge.yml` deploys on push to `main`.
@@ -254,6 +350,12 @@ If your npm version rewrites flags, this direct form always works:
 ```bash
 node scripts/firebase-deploy.mjs deploy --only hosting --project leadflow-review
 ```
+
+Repo-improvement dashboard behavior after deploy:
+- The hosted UI can render the inbox only when the runtime can read the shared CodexSkills reports and invoke the shared review recorder.
+- For local workstation use, the default Windows paths above are enough.
+- For hosted or non-Windows runtimes, set `REPO_IMPROVEMENT_REPORT_ROOT`, `REPO_IMPROVEMENT_SCRIPT_ROOT`, and `REPO_IMPROVEMENT_REVIEW_SHELL` to mounted equivalents, or accept the fail-closed unavailable state in `/dashboard/agents`.
+- The same pattern applies to the weekly growth-research inbox via `GROWTH_RESEARCH_REPORT_ROOT`, `GROWTH_RESEARCH_SCRIPT_ROOT`, and `GROWTH_RESEARCH_REVIEW_SHELL`.
 
 Required GitHub Actions configuration:
 - `ENV_LOCAL` (full `.env.local` content)
@@ -293,7 +395,7 @@ Expected live URL (Firebase Hosting default):
 ## Canonical Login Routing (User UX)
 - Canonical login URL: `https://leadflow-review.web.app/login`
 - Cloud Run `*.a.run.app` URLs are service endpoints (workers/webhooks/troubleshooting), not primary operator login URLs.
-- `/login` auto-redirects `*.run.app` hosts to `NEXT_PUBLIC_CANONICAL_LOGIN_URL` when `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN=true`.
+- `/login` auto-redirects non-canonical browser hosts to `NEXT_PUBLIC_CANONICAL_LOGIN_URL` when `NEXT_PUBLIC_AUTO_REDIRECT_NON_CANONICAL_LOGIN=true`.
 
 Update Firebase Auth authorized domains (idempotent script):
 ```bash
@@ -428,7 +530,29 @@ gcloud run services update ssrleadflowreview \
 ## Tests
 ```bash
 npm test
+npm run promptfoo:eval
+npm run promptfoo:code-scan
+npm run promptfoo:redteam
 ```
+
+## Hybrid Sprint Verification (Outcome Gates + Inbox Rubric v2)
+```bash
+npm run lint
+npm run test:unit
+npm run test:smoke
+npm run build
+```
+
+Stage verification:
+1. `POST /api/gmail/inbox` and confirm `rubricVersion="v2"` plus sponsor/low-confidence summary fields.
+2. `POST /api/revenue/kpi/weekly/worker-task` and confirm `report.outcomeGates` is present.
+3. `npm run revenue:weekly:health` and confirm canonical gate table appears in markdown/json artifact.
+
+Post-deploy verification:
+1. `GET /api/runtime/preflight`
+2. `POST /api/revenue/kpi/weekly/worker-task`
+3. `POST /api/gmail/inbox`
+4. Confirm Firestore `identities/{uid}/revenue_kpi_reports/latest` includes `outcomeGates`.
 
 ## RT Loop Gates (Recommended)
 Runs lint + unit + smoke + build + security scans and writes a report to `docs/reports/latest-run.md`:

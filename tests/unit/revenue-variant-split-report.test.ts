@@ -8,10 +8,10 @@ let classifyVariantDecisions: (args: {
   decisionSummary: Record<string, unknown>;
 };
 
-let parseDecisionThresholdsFromEnv: (env: Record<string, unknown>) => Record<string, unknown>;
+let parseDecisionThresholdsFromEnv: (env?: NodeJS.ProcessEnv) => Record<string, unknown>;
 
 beforeAll(async () => {
-  const mod = (await import("../../scripts/revenue-variant-split-report.mjs")) as {
+  const mod = (await import("../../scripts/revenue-variant-split-report.mjs")) as unknown as {
     classifyVariantDecisions: typeof classifyVariantDecisions;
     parseDecisionThresholdsFromEnv: typeof parseDecisionThresholdsFromEnv;
   };
@@ -86,7 +86,7 @@ describe("revenue variant split report decisions", () => {
 
     const { decisions, decisionSummary } = classifyVariantDecisions({
       aggregated,
-      thresholds: parseDecisionThresholdsFromEnv({}),
+      thresholds: parseDecisionThresholdsFromEnv(),
     });
 
     expect(decisions.find((decision) => decision.templateId === "rts-south-day1")?.action).toBe(
@@ -125,7 +125,7 @@ describe("revenue variant split report decisions", () => {
 
     const { decisions } = classifyVariantDecisions({
       aggregated,
-      thresholds: parseDecisionThresholdsFromEnv({}),
+      thresholds: parseDecisionThresholdsFromEnv(),
     });
 
     expect(decisions[0]?.action).toBe("keep");

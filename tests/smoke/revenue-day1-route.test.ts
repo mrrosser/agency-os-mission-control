@@ -37,6 +37,7 @@ describe("revenue day1 route", () => {
         totalLeads: 6,
         dryRun: false,
         draftFirst: true,
+        requireBookingConfirmation: true,
         useAvatar: true,
         useSMS: false,
         useOutboundCall: false,

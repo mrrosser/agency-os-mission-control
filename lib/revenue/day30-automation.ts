@@ -13,6 +13,12 @@ import {
   type WeeklyKpiReport,
   type WeeklyKpiSegment,
 } from "@/lib/revenue/weekly-kpi";
+import {
+  evaluateOutcomeGatesFromSummary,
+  summarizeConsecutiveOutcomeGateReadiness,
+  type OutcomeGateEvaluation,
+  type OutcomeGateReadinessSummary,
+} from "@/lib/revenue/outcome-gates";
 import { getPosWorkerStatus, type PosWorkerStatusSnapshot } from "@/lib/revenue/pos-worker";
 import {
   normalizeBusinessUnit,
@@ -328,6 +334,98 @@ function parseWeeklyDecision(raw: unknown): WeeklyKpiDecision | null {
   };
 }
 
+function parseOutcomeGates(raw: unknown): OutcomeGateEvaluation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  if (!Array.isArray(row.gates) || !row.summary || typeof row.summary !== "object") return null;
+  const gates = row.gates
+    .map((gate) => {
+      if (!gate || typeof gate !== "object") return null;
+      const gateRow = gate as Record<string, unknown>;
+      const id = asString(gateRow.id);
+      const label = asString(gateRow.label);
+      const status = asString(gateRow.status);
+      const threshold = asString(gateRow.threshold);
+      const actual = asString(gateRow.actual);
+      if (!id || !label || !threshold || !actual) return null;
+      if (
+        id !== "throughput" &&
+        id !== "qualification" &&
+        id !== "meeting" &&
+        id !== "revenue" &&
+        id !== "pipeline"
+      ) {
+        return null;
+      }
+      if (status !== "pass" && status !== "warn" && status !== "fail") return null;
+      return {
+        id,
+        label,
+        status,
+        threshold,
+        actual,
+      };
+    })
+    .filter(Boolean) as OutcomeGateEvaluation["gates"];
+  if (gates.length !== 5) return null;
+
+  const summary = row.summary as Record<string, unknown>;
+  const criticalGateFailures = Array.isArray(row.criticalGateFailures)
+    ? row.criticalGateFailures
+        .map((value) => asString(value))
+        .filter(
+          (value): value is "throughput" | "revenue" =>
+            value === "throughput" || value === "revenue"
+        )
+    : [];
+
+  return {
+    gates,
+    summary: {
+      passCount: Math.max(0, safeNumber(summary.passCount)),
+      warnCount: Math.max(0, safeNumber(summary.warnCount)),
+      failCount: Math.max(0, safeNumber(summary.failCount)),
+      passOrWarnCount: Math.max(0, safeNumber(summary.passOrWarnCount)),
+    },
+    criticalGateFailures,
+  };
+}
+
+function parseOutcomeGateReadiness(
+  raw: unknown,
+  weekStartDate: string,
+  outcomeGates: OutcomeGateEvaluation
+): OutcomeGateReadinessSummary {
+  if (raw && typeof raw === "object") {
+    const row = raw as Record<string, unknown>;
+    const minimumPassOrWarnGates = Math.max(1, safeNumber(row.minimumPassOrWarnGates) || 3);
+    const targetConsecutiveWeeks = Math.max(1, safeNumber(row.targetConsecutiveWeeks) || 2);
+    const consecutiveReadyWeeks = Math.max(0, safeNumber(row.consecutiveReadyWeeks));
+    const meetsTarget = Boolean(row.meetsTarget);
+    const weeksRaw = Array.isArray(row.weeks) ? row.weeks : [];
+    return {
+      minimumPassOrWarnGates,
+      targetConsecutiveWeeks,
+      consecutiveReadyWeeks,
+      meetsTarget,
+      evaluatedWeeks: Math.max(0, safeNumber(row.evaluatedWeeks || weeksRaw.length)),
+      weeks: weeksRaw.map((item) => {
+        const week = (item || {}) as Record<string, unknown>;
+        return {
+          weekStartDate: asString(week.weekStartDate),
+          passOrWarnCount: Math.max(0, safeNumber(week.passOrWarnCount)),
+          ready: Boolean(week.ready),
+        };
+      }),
+    };
+  }
+
+  return summarizeConsecutiveOutcomeGateReadiness(
+    [{ weekStartDate, outcomeGates }],
+    { minimumPassOrWarnGates: 3, targetConsecutiveWeeks: 2 }
+  );
+}
+
 function parseWeeklyReport(raw: unknown): WeeklyKpiReport | null {
   if (!raw || typeof raw !== "object") return null;
   const row = raw as Record<string, unknown>;
@@ -345,6 +443,34 @@ function parseWeeklyReport(raw: unknown): WeeklyKpiReport | null {
   const decisions = decisionsRaw
     .map((decision) => parseWeeklyDecision(decision))
     .filter((decision): decision is WeeklyKpiDecision => Boolean(decision));
+  const summary = {
+    leadsSourced: Math.max(0, safeNumber(summaryRow.leadsSourced)),
+    qualifiedLeads: Math.max(0, safeNumber(summaryRow.qualifiedLeads)),
+    outreachReady: Math.max(0, safeNumber(summaryRow.outreachReady)),
+    meetingsBooked: Math.max(0, safeNumber(summaryRow.meetingsBooked)),
+    depositsCollected: Math.max(0, safeNumber(summaryRow.depositsCollected)),
+    dealsWon: Math.max(0, safeNumber(summaryRow.dealsWon)),
+    closeRatePct: Math.max(0, safeNumber(summaryRow.closeRatePct)),
+    avgCycleDaysToDeposit:
+      summaryRow.avgCycleDaysToDeposit === null || summaryRow.avgCycleDaysToDeposit === undefined
+        ? null
+        : safeNumber(summaryRow.avgCycleDaysToDeposit),
+    pipelineValueUsd: Math.max(0, safeNumber(summaryRow.pipelineValueUsd)),
+  };
+  const outcomeGates =
+    parseOutcomeGates(row.outcomeGates) ||
+    evaluateOutcomeGatesFromSummary({
+      leadsSourced: summary.leadsSourced,
+      qualifiedLeads: summary.qualifiedLeads,
+      meetingsBooked: summary.meetingsBooked,
+      depositsCollected: summary.depositsCollected,
+      pipelineValueUsd: summary.pipelineValueUsd,
+    });
+  const outcomeGateReadiness = parseOutcomeGateReadiness(
+    row.outcomeGateReadiness,
+    weekStartDate,
+    outcomeGates
+  );
 
   return {
     uid: asString(row.uid),
@@ -353,23 +479,12 @@ function parseWeeklyReport(raw: unknown): WeeklyKpiReport | null {
     weekEndDate,
     scannedLeadCount: Math.max(0, safeNumber(row.scannedLeadCount)),
     sampled: Boolean(row.sampled),
-    summary: {
-      leadsSourced: Math.max(0, safeNumber(summaryRow.leadsSourced)),
-      qualifiedLeads: Math.max(0, safeNumber(summaryRow.qualifiedLeads)),
-      outreachReady: Math.max(0, safeNumber(summaryRow.outreachReady)),
-      meetingsBooked: Math.max(0, safeNumber(summaryRow.meetingsBooked)),
-      depositsCollected: Math.max(0, safeNumber(summaryRow.depositsCollected)),
-      dealsWon: Math.max(0, safeNumber(summaryRow.dealsWon)),
-      closeRatePct: Math.max(0, safeNumber(summaryRow.closeRatePct)),
-      avgCycleDaysToDeposit:
-        summaryRow.avgCycleDaysToDeposit === null || summaryRow.avgCycleDaysToDeposit === undefined
-          ? null
-          : safeNumber(summaryRow.avgCycleDaysToDeposit),
-      pipelineValueUsd: Math.max(0, safeNumber(summaryRow.pipelineValueUsd)),
-    },
+    summary,
     segments,
     decisions,
     decisionSummary: decisionSummaryOrDefault(row.decisionSummary),
+    outcomeGates,
+    outcomeGateReadiness,
   };
 }
 

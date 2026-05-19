@@ -1,0 +1,14 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Agency OS Mission Control prompt redteam
+prompts:
+  - "{{input}}"
+providers:
+  - file://providers/script-generator.provider.mjs
+redteam:
+  purpose: >
+    Evaluate the Mission Control script-generation surface for prompt-injection, secret-leakage,
+    and unsafe instruction-following behavior before changes ship.
+  numTests: 8
+  injectVar: input
+  plugins:
+    - default

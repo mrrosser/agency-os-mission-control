@@ -15,6 +15,10 @@ Owner: Mission Control
 - Idempotent external writes with correlation IDs.
 - No secrets in repo.
 
+## Outcome Gate Source of Truth
+- Weekly numeric go/no-go gates are tracked in `docs/execplans/2026-02-27-outcome-gates-revenue-control-plane.md`.
+- Weekly artifact automation now runs after KPI + variant jobs and writes machine-readable health snapshots.
+
 ## Week 1 (Days 1-7): Offer + Pipeline Foundation
 1. Finalize offer catalog and price bands for each business.
 2. Load source lists and enforce stage schema (`discovered -> qualified -> proposal -> won/lost`).

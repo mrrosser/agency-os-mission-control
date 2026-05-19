@@ -6,6 +6,7 @@ import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { resolveSecret } from "@/lib/api/secrets";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
 import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
 import { findDncMatch } from "@/lib/outreach/dnc";
 
@@ -45,6 +46,13 @@ export const POST = withApiHandler(
     if (!twilioSid || !twilioToken || !twilioFrom) {
       throw new ApiError(400, "Twilio SID, Token, and Phone Number (from) are required");
     }
+
+    await assertProviderSpendAllowed({
+      uid: user.uid,
+      providerId: "twilio",
+      log,
+      route: "twilio.send-sms",
+    });
 
     const result = await withIdempotency(
       { uid: user.uid, route: "twilio.send-sms", key: idempotencyKey, log },

@@ -6,6 +6,7 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { dbAdmin } from "@/lib/db-admin";
 import { resolveSecret } from "@/lib/api/secrets";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
 
 const bodySchema = z.object({
   elevenLabsKey: z.string().optional(),
@@ -25,6 +26,13 @@ export const POST = withApiHandler(
     if (!elevenLabsKey) {
       throw new ApiError(400, "ElevenLabs API key is required");
     }
+
+    await assertProviderSpendAllowed({
+      uid: user.uid,
+      providerId: "elevenlabs",
+      log,
+      route: "elevenlabs.synthesize",
+    });
 
     const result = await withIdempotency(
       { uid: user.uid, route: "elevenlabs.synthesize", key: idempotencyKey, log },

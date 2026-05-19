@@ -11,6 +11,7 @@ import {
 } from "@/lib/lead-runs/quotas";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
+import { buildLiveFeedItems, summarizeLiveFeed } from "@/lib/agents/live-feed";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -106,6 +107,8 @@ const getAdminDbMock = vi.mocked(getAdminDb);
 const pullProviderBillingMock = vi.mocked(pullProviderBilling);
 const ORIGINAL_SMAUTO_MCP_SERVER_URL = process.env.SMAUTO_MCP_SERVER_URL;
 const ORIGINAL_LEADOPS_MCP_SERVER_URL = process.env.LEADOPS_MCP_SERVER_URL;
+const ORIGINAL_PAPERCLIP_SYSTEM_URL = process.env.PAPERCLIP_SYSTEM_URL;
+const ORIGINAL_FETCH = global.fetch;
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -198,6 +201,56 @@ describe("agents control-plane route", () => {
     });
     process.env.SMAUTO_MCP_SERVER_URL = "https://smauto.example/mcp";
     process.env.LEADOPS_MCP_SERVER_URL = "https://leadops.example/mcp";
+    process.env.PAPERCLIP_SYSTEM_URL = "https://paperclip.example/system";
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("paperclip.example")) {
+        if (url.endsWith("/api/health")) {
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        if (url.includes("/api/companies")) {
+          return new Response(JSON.stringify({ items: [{ id: "co-1" }, { id: "co-2" }] }), {
+            status: 200,
+          });
+        }
+        if (url.includes("/api/agents")) {
+          return new Response(JSON.stringify({ items: [{ id: "a-1" }, { id: "a-2" }, { id: "a-3" }] }), {
+            status: 200,
+          });
+        }
+        if (url.includes("/api/customers")) {
+          return new Response(
+            JSON.stringify({
+              customers: [
+                {
+                  customerId: "cust-1",
+                  companyName: "Alpha Dental",
+                  businessUnit: "ai_cofoundry",
+                  offerCode: "AICF-DISCOVERY",
+                  pipelineStage: "proposal",
+                  timelineCount: 4,
+                  lastTimelineAt: "2026-02-16T17:59:00.000Z",
+                },
+                {
+                  customerId: "cust-2",
+                  companyName: "Beta HVAC",
+                  businessUnit: "rt_solutions",
+                  offerCode: "RTS-OPS",
+                  pipelineStage: "lead_capture",
+                  timelineCount: 2,
+                  lastTimelineAt: "2026-02-16T17:30:00.000Z",
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/api/runs")) {
+          return new Response(JSON.stringify({ items: [{ id: "r-1" }] }), { status: 200 });
+        }
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
 
     getAdminDbMock.mockReturnValue({
       collection: (name: string) => {
@@ -269,6 +322,14 @@ describe("agents control-plane route", () => {
     } else {
       delete process.env.LEADOPS_MCP_SERVER_URL;
     }
+
+    if (typeof ORIGINAL_PAPERCLIP_SYSTEM_URL === "string") {
+      process.env.PAPERCLIP_SYSTEM_URL = ORIGINAL_PAPERCLIP_SYSTEM_URL;
+    } else {
+      delete process.env.PAPERCLIP_SYSTEM_URL;
+    }
+
+    global.fetch = ORIGINAL_FETCH;
   });
 
   it("returns control-plane snapshot payload", async () => {
@@ -293,8 +354,27 @@ describe("agents control-plane route", () => {
     expect(typeof payload.summary.projectedMonthlyCostUsd).toBe("number");
     expect(payload.costModel.method).toBe("live-v1");
     expect(Array.isArray(payload.costModel.providerBilling)).toBe(true);
+    expect(Array.isArray(payload.topology)).toBe(true);
     expect(payload.services.some((service: { id: string }) => service.id === "square_pos")).toBe(true);
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");
+    expect(payload.services.find((service: { id: string; state: string }) => service.id === "paperclip_system")?.state).toBe("operational");
+    expect(payload.services.some((service: { id: string }) => service.id === "openclaw_sync")).toBe(true);
+    expect(
+      payload.topology.find((item: { serviceId: string; links: Array<{ agentId: string }> }) => item.serviceId === "paperclip_system")?.links.some((link: { agentId: string }) => link.agentId === "orchestrator")
+    ).toBe(true);
+    expect(payload.business.paperclip.reachable).toBe(true);
+    expect(payload.business.budgetGovernor.mode).toBe("hard-stop");
+    expect(payload.business.customerMemory.sourceOfTruth).toBe("paperclip");
+    expect(payload.business.customerMemory.knownContacts).toBe(2);
+    expect(payload.business.mobileOps.operatorMode).toBe("web_google_space");
+
+    const liveFeed = buildLiveFeedItems(payload);
+    const feedSummary = summarizeLiveFeed(liveFeed);
+    expect(liveFeed.length).toBeGreaterThan(0);
+    expect(feedSummary.all).toBe(liveFeed.length);
+    expect(
+      feedSummary.tasks + feedSummary.comments + feedSummary.status + feedSummary.decisions
+    ).toBe(liveFeed.length);
   });
 });

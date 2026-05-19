@@ -13,6 +13,12 @@ import {
   type BusinessUnitId,
   type CrmPipelineStage,
 } from "@/lib/revenue/offers";
+import {
+  evaluateOutcomeGatesFromSummary,
+  summarizeConsecutiveOutcomeGateReadiness,
+  type OutcomeGateEvaluation,
+  type OutcomeGateReadinessSummary,
+} from "@/lib/revenue/outcome-gates";
 import type { Logger } from "@/lib/logging";
 
 const DEFAULT_TIME_ZONE = "America/Chicago";
@@ -97,6 +103,8 @@ export interface WeeklyKpiReport {
   segments: WeeklyKpiSegment[];
   decisions: WeeklyKpiDecision[];
   decisionSummary: WeeklyKpiDecisionSummary;
+  outcomeGates: OutcomeGateEvaluation;
+  outcomeGateReadiness: OutcomeGateReadinessSummary;
 }
 
 interface WeeklyKpiRollupArgs {
@@ -224,6 +232,78 @@ function normalizeSegment(raw: unknown): WeeklyKpiSegment | null {
         ? null
         : safeNumber(row.avgCycleDaysToDeposit),
     pipelineValueUsd: Math.max(0, safeNumber(row.pipelineValueUsd)),
+  };
+}
+
+function normalizeHistoricalSummary(raw: unknown): WeeklyKpiSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  return {
+    leadsSourced: Math.max(0, safeNumber(row.leadsSourced)),
+    qualifiedLeads: Math.max(0, safeNumber(row.qualifiedLeads)),
+    outreachReady: Math.max(0, safeNumber(row.outreachReady)),
+    meetingsBooked: Math.max(0, safeNumber(row.meetingsBooked)),
+    depositsCollected: Math.max(0, safeNumber(row.depositsCollected)),
+    dealsWon: Math.max(0, safeNumber(row.dealsWon)),
+    closeRatePct: Math.max(0, safeNumber(row.closeRatePct)),
+    avgCycleDaysToDeposit:
+      row.avgCycleDaysToDeposit === null || row.avgCycleDaysToDeposit === undefined
+        ? null
+        : safeNumber(row.avgCycleDaysToDeposit),
+    pipelineValueUsd: Math.max(0, safeNumber(row.pipelineValueUsd)),
+  };
+}
+
+function normalizeOutcomeGates(raw: unknown): OutcomeGateEvaluation | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  if (!Array.isArray(row.gates) || !row.summary || typeof row.summary !== "object") return null;
+  const gates = row.gates
+    .map((gate) => {
+      if (!gate || typeof gate !== "object") return null;
+      const gateRow = gate as Record<string, unknown>;
+      const id = asString(gateRow.id);
+      const label = asString(gateRow.label);
+      const status = asString(gateRow.status) as "pass" | "warn" | "fail";
+      const threshold = asString(gateRow.threshold);
+      const actual = asString(gateRow.actual);
+      if (!id || !label || !threshold || !actual) return null;
+      if (status !== "pass" && status !== "warn" && status !== "fail") return null;
+      if (
+        id !== "throughput" &&
+        id !== "qualification" &&
+        id !== "meeting" &&
+        id !== "revenue" &&
+        id !== "pipeline"
+      ) {
+        return null;
+      }
+      return {
+        id,
+        label,
+        status,
+        threshold,
+        actual,
+      };
+    })
+    .filter(Boolean);
+  if (gates.length !== 5) return null;
+
+  const summaryRow = row.summary as Record<string, unknown>;
+  const criticalFailuresRaw = Array.isArray(row.criticalGateFailures) ? row.criticalGateFailures : [];
+  const criticalGateFailures = criticalFailuresRaw
+    .map((value) => asString(value))
+    .filter((value): value is "throughput" | "revenue" => value === "throughput" || value === "revenue");
+
+  return {
+    gates: gates as OutcomeGateEvaluation["gates"],
+    summary: {
+      passCount: Math.max(0, safeNumber(summaryRow.passCount)),
+      warnCount: Math.max(0, safeNumber(summaryRow.warnCount)),
+      failCount: Math.max(0, safeNumber(summaryRow.failCount)),
+      passOrWarnCount: Math.max(0, safeNumber(summaryRow.passOrWarnCount)),
+    },
+    criticalGateFailures,
   };
 }
 
@@ -514,6 +594,13 @@ export async function runWeeklyKpiRollup(args: WeeklyKpiRollupArgs): Promise<Wee
     weekStartDate: window.weekStartDate,
     weekEndDate: window.weekEndDate,
   });
+  const outcomeGates = evaluateOutcomeGatesFromSummary({
+    leadsSourced: summary.leadsSourced,
+    qualifiedLeads: summary.qualifiedLeads,
+    meetingsBooked: summary.meetingsBooked,
+    depositsCollected: summary.depositsCollected,
+    pipelineValueUsd: summary.pipelineValueUsd,
+  });
 
   const reportsRoot = getAdminDb()
     .collection("identities")
@@ -525,6 +612,12 @@ export async function runWeeklyKpiRollup(args: WeeklyKpiRollupArgs): Promise<Wee
     shiftDateKey(window.weekStartDate, -14),
   ];
   const historyBySegment = new Map<string, WeeklyKpiSegment[]>();
+  const readinessWeeks: Array<{ weekStartDate: string; outcomeGates: OutcomeGateEvaluation | null }> = [
+    {
+      weekStartDate: window.weekStartDate,
+      outcomeGates,
+    },
+  ];
   const historyDocs = await Promise.all(
     historyWeekStartDates.map((weekStartDate) => reportsRoot.doc(weekStartDate).get())
   );
@@ -540,12 +633,34 @@ export async function runWeeklyKpiRollup(args: WeeklyKpiRollupArgs): Promise<Wee
       existing.push(segment);
       historyBySegment.set(key, existing);
     }
+
+    const historicalOutcomeGates =
+      normalizeOutcomeGates(data.outcomeGates) ||
+      (() => {
+        const historicalSummary = normalizeHistoricalSummary(data.summary);
+        if (!historicalSummary) return null;
+        return evaluateOutcomeGatesFromSummary({
+          leadsSourced: historicalSummary.leadsSourced,
+          qualifiedLeads: historicalSummary.qualifiedLeads,
+          meetingsBooked: historicalSummary.meetingsBooked,
+          depositsCollected: historicalSummary.depositsCollected,
+          pipelineValueUsd: historicalSummary.pipelineValueUsd,
+        });
+      })();
+    readinessWeeks.push({
+      weekStartDate: asString(data.weekStartDate) || snap.id,
+      outcomeGates: historicalOutcomeGates,
+    });
   }
 
   const { decisions, decisionSummary } = buildWeeklyKpiDecisions({
     weekStartDate: window.weekStartDate,
     segments,
     historyBySegment,
+  });
+  const outcomeGateReadiness = summarizeConsecutiveOutcomeGateReadiness(readinessWeeks, {
+    minimumPassOrWarnGates: 3,
+    targetConsecutiveWeeks: 2,
   });
 
   const report: WeeklyKpiReport = {
@@ -559,6 +674,8 @@ export async function runWeeklyKpiRollup(args: WeeklyKpiRollupArgs): Promise<Wee
     segments,
     decisions,
     decisionSummary,
+    outcomeGates,
+    outcomeGateReadiness,
   };
 
   await reportsRoot.doc(window.weekStartDate).set(
@@ -618,6 +735,9 @@ export async function runWeeklyKpiRollup(args: WeeklyKpiRollupArgs): Promise<Wee
     decisionsScale: report.decisionSummary.scale,
     decisionsFix: report.decisionSummary.fix,
     decisionsKill: report.decisionSummary.kill,
+    outcomeGatePassOrWarnCount: report.outcomeGates.summary.passOrWarnCount,
+    outcomeGateCriticalFailures: report.outcomeGates.criticalGateFailures,
+    outcomeGateConsecutiveReadyWeeks: report.outcomeGateReadiness.consecutiveReadyWeeks,
   });
 
   return report;

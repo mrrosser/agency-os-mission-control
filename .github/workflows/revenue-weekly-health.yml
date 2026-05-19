@@ -1,0 +1,66 @@
+﻿name: Revenue Weekly Business Health
+
+on:
+  schedule:
+    # Mondays 11:40 UTC, after KPI + variant decision workflows in quiet window.
+    - cron: "40 11 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  weekly-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate workflow config
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_WIF_SERVICE_ACCOUNT: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+          REVENUE_HEALTH_UID: ${{ secrets.REVENUE_HEALTH_UID || secrets.REVENUE_VARIANT_UID || secrets.REVENUE_WEEKLY_KPI_UID }}
+        run: |
+          if [ -z "$GCP_WIF_PROVIDER" ] || [ -z "$GCP_WIF_SERVICE_ACCOUNT" ]; then
+            echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars." >&2
+            exit 1
+          fi
+          if [ -z "$REVENUE_HEALTH_UID" ]; then
+            echo "Missing REVENUE_HEALTH_UID (or REVENUE_VARIANT_UID/REVENUE_WEEKLY_KPI_UID) secret." >&2
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Build weekly business health artifact
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          REVENUE_HEALTH_UID: ${{ secrets.REVENUE_HEALTH_UID || secrets.REVENUE_VARIANT_UID || secrets.REVENUE_WEEKLY_KPI_UID }}
+          REVENUE_HEALTH_WRITE_FIRESTORE: ${{ vars.REVENUE_HEALTH_WRITE_FIRESTORE || 'true' }}
+          REVENUE_HEALTH_REPORT_PATH: artifacts/revenue-weekly-health.md
+          REVENUE_HEALTH_JSON_PATH: artifacts/revenue-weekly-health.json
+        run: |
+          mkdir -p artifacts
+          node scripts/revenue-weekly-health-report.mjs | tee artifacts/revenue-weekly-health-run.json
+
+      - name: Upload weekly health artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: revenue-weekly-health
+          path: artifacts/
+          if-no-files-found: error
+

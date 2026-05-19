@@ -35,6 +35,7 @@ describe("revenue day1 worker-task route", () => {
         totalLeads: 8,
         dryRun: false,
         draftFirst: true,
+        requireBookingConfirmation: true,
         useAvatar: true,
         useSMS: false,
         useOutboundCall: false,

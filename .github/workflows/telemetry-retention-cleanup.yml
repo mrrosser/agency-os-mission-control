@@ -2,8 +2,8 @@ name: Telemetry Retention Cleanup
 
 on:
   schedule:
-    # Daily UTC run; GitHub schedules are best-effort.
-    - cron: "43 3 * * *"
+    # Daily inside the 5 AM-7 AM America/Chicago maintenance window.
+    - cron: "45 11 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

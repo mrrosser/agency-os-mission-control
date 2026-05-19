@@ -5,11 +5,17 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { getAdminDb } from "@/lib/firebase-admin";
+import {
+  PaperclipClient,
+  PaperclipClientError,
+  readPaperclipClientConfig,
+  type PaperclipLifecycleAction,
+} from "@/lib/paperclip/client";
 
 const actionSchema = z
   .object({
     agentId: z.string().trim().min(1).max(80),
-    action: z.enum(["pause", "ping", "route"]),
+    action: z.enum(["pause", "ping", "route", "resume", "terminate", "wakeup"]),
     target: z.string().trim().min(1).max(200).optional(),
     note: z.string().trim().max(400).optional(),
     idempotencyKey: z.string().trim().min(1).max(200).optional(),
@@ -32,6 +38,18 @@ function parseAllowedUids(raw: string | undefined): Set<string> {
       .map((item) => item.trim())
       .filter((item) => item.length > 0)
   );
+}
+
+function readBooleanEnv(name: string, fallback: boolean = false): boolean {
+  const raw = process.env[name];
+  if (typeof raw !== "string") return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return fallback;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+function isPaperclipLifecycleAction(action: z.infer<typeof actionSchema>["action"]): action is PaperclipLifecycleAction {
+  return action === "resume" || action === "terminate" || action === "wakeup";
 }
 
 export const POST = withApiHandler(
@@ -60,6 +78,55 @@ export const POST = withApiHandler(
       async () => {
         const nowIso = new Date().toISOString();
         const requestId = randomUUID();
+
+        if (isPaperclipLifecycleAction(payload.action)) {
+          if (readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH")) {
+            throw new ApiError(423, "Mission Control global kill switch is enabled");
+          }
+
+          const config = readPaperclipClientConfig();
+          if (!config) {
+            throw new ApiError(503, "Paperclip proxy is not configured");
+          }
+
+          const client = new PaperclipClient(config);
+          try {
+            const proxied = await client.invokeLifecycleAction({
+              agentId: payload.agentId,
+              action: payload.action,
+              correlationId,
+              requestedByUid: user.uid,
+              note: payload.note || null,
+              target: payload.target || null,
+              evidenceRef: `mission-control:${user.uid}`,
+              autonomyClass: "internal_write",
+            });
+
+            log.info("agents.action.paperclip_forwarded", {
+              uid: user.uid,
+              agentId: payload.agentId,
+              action: payload.action,
+              requestId,
+              status: proxied.status,
+            });
+
+            return {
+              ok: true,
+              requestId,
+              status: "forwarded" as const,
+              agentId: payload.agentId,
+              action: payload.action,
+              target: payload.target || null,
+              proxied: true,
+            };
+          } catch (error) {
+            if (error instanceof PaperclipClientError) {
+              throw new ApiError(error.status, error.message);
+            }
+            throw error;
+          }
+        }
+
         await getAdminDb()
           .collection("agentActionRequests")
           .doc(requestId)
@@ -103,4 +170,3 @@ export const POST = withApiHandler(
   },
   { route: "agents.actions.post" }
 );
-

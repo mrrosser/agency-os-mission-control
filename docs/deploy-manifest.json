@@ -1,0 +1,12 @@
+{
+  "adapter": "firebase-hosting",
+  "build_command": "npm run build",
+  "smoke_command": "npm run test:postdeploy",
+  "deploy_command": "npm run deploy:firebase",
+  "rollback_command": "manual://configure-firebase-hosting-rollback",
+  "required_secret_refs": [
+    "ENV_LOCAL",
+    "FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW"
+  ],
+  "public_base_url": "https://leadflow-review.web.app"
+}

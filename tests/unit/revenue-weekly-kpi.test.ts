@@ -5,6 +5,7 @@ import {
   type WeeklyKpiSegment,
   type WeeklyLeadSnapshot,
 } from "@/lib/revenue/weekly-kpi";
+import { evaluateOutcomeGatesFromSummary } from "@/lib/revenue/outcome-gates";
 
 describe("revenue weekly kpi summary", () => {
   it("summarizes weekly lead metrics by stage and offer", () => {
@@ -131,5 +132,75 @@ describe("revenue weekly kpi summary", () => {
     expect(result.decisionSummary.kill).toBe(1);
     expect(result.decisions[0]?.action).toBe("kill");
     expect(result.decisions[0]?.streakWeeks).toBeGreaterThanOrEqual(3);
+  });
+
+  it("derives canonical outcome gates from weekly summary inputs", () => {
+    const leads: WeeklyLeadSnapshot[] = [
+      {
+        leadId: "lead-1",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        pipelineStage: "won",
+        createdAt: new Date("2026-03-02T12:00:00.000Z"),
+        updatedAt: new Date("2026-03-04T12:00:00.000Z"),
+        valueUsd: 3000,
+      },
+      {
+        leadId: "lead-2",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        pipelineStage: "deposit_received",
+        createdAt: new Date("2026-03-03T12:00:00.000Z"),
+        updatedAt: new Date("2026-03-05T12:00:00.000Z"),
+        valueUsd: 2200,
+      },
+      {
+        leadId: "lead-3",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        pipelineStage: "booking",
+        createdAt: new Date("2026-03-03T14:00:00.000Z"),
+        updatedAt: new Date("2026-03-03T14:00:00.000Z"),
+        valueUsd: 1100,
+      },
+      {
+        leadId: "lead-4",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        pipelineStage: "qualification",
+        createdAt: new Date("2026-03-04T14:00:00.000Z"),
+        updatedAt: new Date("2026-03-04T14:00:00.000Z"),
+        valueUsd: 800,
+      },
+      {
+        leadId: "lead-5",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        pipelineStage: "qualification",
+        createdAt: new Date("2026-03-05T14:00:00.000Z"),
+        updatedAt: new Date("2026-03-05T14:00:00.000Z"),
+        valueUsd: 700,
+      },
+    ];
+
+    const { summary } = summarizeWeeklyLeads({
+      leads,
+      timeZone: "America/Chicago",
+      weekStartDate: "2026-03-02",
+      weekEndDate: "2026-03-08",
+    });
+    const outcomeGates = evaluateOutcomeGatesFromSummary({
+      leadsSourced: summary.leadsSourced,
+      qualifiedLeads: summary.qualifiedLeads,
+      meetingsBooked: summary.meetingsBooked,
+      depositsCollected: summary.depositsCollected,
+      pipelineValueUsd: summary.pipelineValueUsd,
+    });
+
+    expect(outcomeGates.gates).toHaveLength(5);
+    expect(outcomeGates.summary.passOrWarnCount).toBeGreaterThanOrEqual(3);
+    expect(outcomeGates.criticalGateFailures).toEqual([]);
+    expect(outcomeGates.gates.find((gate) => gate.id === "revenue")?.status).toBe("pass");
+    expect(outcomeGates.gates.find((gate) => gate.id === "pipeline")?.status).toBe("pass");
   });
 });

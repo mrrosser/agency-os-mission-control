@@ -1,11 +1,60 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_LOCATION = "us-central1";
 const DEFAULT_TIME_ZONE = "America/Chicago";
 const GCLOUD_BIN = "gcloud";
-const GCLOUD_USE_SHELL = process.platform === "win32";
+const GCLOUD_USE_SHELL = false;
+
+// repo-improvement: gcloud-runtime-hardening
+export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
+  const { preferFresh = false } = options;
+  const sourceEnv = { ...baseEnv };
+
+  let configRoot = sourceEnv.CLOUDSDK_CONFIG?.trim();
+  if (!configRoot || preferFresh) {
+    configRoot = mkdtempSync(join(tmpdir(), "mission-control-gcloud-"));
+  }
+
+  const logDir = join(configRoot, "logs");
+  const configDir = join(configRoot, "configurations");
+  mkdirSync(logDir, { recursive: true });
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config_default"), "[core]\ndisable_usage_reporting = True\n", {
+    encoding: "utf8",
+  });
+
+  return {
+    ...sourceEnv,
+    CLOUDSDK_CONFIG: configRoot,
+    CLOUDSDK_LOG_DIR: logDir,
+    CLOUDSDK_ACTIVE_CONFIG_NAME: "default",
+  };
+}
+
+export function buildGcloudInvocation(args, options = {}) {
+  const { platform = process.platform, env = process.env, preferFresh = false } = options;
+  const invocationEnv = createWritableGcloudEnv(env, { preferFresh });
+
+  if (platform === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", GCLOUD_BIN, ...args],
+      env: invocationEnv,
+    };
+  }
+
+  return {
+    command: GCLOUD_BIN,
+    args,
+    env: invocationEnv,
+  };
+}
 
 const JOB_SPECS = [
   {
@@ -136,10 +185,12 @@ function validatePayload(payload, spec) {
 
 function runGcloud(args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(GCLOUD_BIN, args, {
+    const invocation = buildGcloudInvocation(args);
+    const child = spawn(invocation.command, invocation.args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: GCLOUD_USE_SHELL,
+      env: invocation.env,
     });
 
     let stdout = "";
@@ -292,16 +343,20 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  process.stderr.write(
-    `${JSON.stringify(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      null,
-      2
-    )}\n`
-  );
-  process.exit(1);
-});
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch((error) => {
+    process.stderr.write(
+      `${JSON.stringify(
+        {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+        null,
+        2
+      )}\n`
+    );
+    process.exit(1);
+  });
+}

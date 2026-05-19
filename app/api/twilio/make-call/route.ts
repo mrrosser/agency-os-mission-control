@@ -6,6 +6,7 @@ import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { resolveSecret } from "@/lib/api/secrets";
+import { assertProviderSpendAllowed } from "@/lib/budget/enforcement";
 import { createHostedCallAudio } from "@/lib/voice/call-audio";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { resolveLeadRunOrgId } from "@/lib/lead-runs/quotas";
@@ -60,6 +61,13 @@ export const POST = withApiHandler(
       throw new ApiError(400, "Twilio SID, Token, and Phone Number (from) are required");
     }
 
+    await assertProviderSpendAllowed({
+      uid: user.uid,
+      providerId: "twilio",
+      log,
+      route: "twilio.make-call",
+    });
+
     const result = await withIdempotency(
       { uid: user.uid, route: "twilio.make-call", key: idempotencyKey, log },
       async () => {
@@ -69,6 +77,13 @@ export const POST = withApiHandler(
         let modelId: string | undefined;
 
         if (!audioUrl) {
+          await assertProviderSpendAllowed({
+            uid: user.uid,
+            providerId: "elevenlabs",
+            log,
+            route: "twilio.make-call",
+          });
+
           const elevenLabsKey = await resolveSecret(user.uid, "elevenLabsKey", "ELEVENLABS_API_KEY");
           if (!elevenLabsKey) {
             throw new ApiError(400, "ElevenLabs API key is required for text-to-call");

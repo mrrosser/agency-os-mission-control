@@ -2,7 +2,7 @@
 
 Date: 2026-02-24  
 Owner: Codex / Marcus  
-Status: In Progress (D1-D3 complete, D4 hardening in progress)
+Status: Completed (D1-D4 complete on 2026-02-27)
 
 ## Goals
 
@@ -102,3 +102,5 @@ Status: In Progress (D1-D3 complete, D4 hardening in progress)
 - [x] Added weekly KPI rollup engine + routes (`/api/revenue/kpi/weekly`, `/api/revenue/kpi/weekly/worker-task`) and scheduler workflow (`.github/workflows/revenue-weekly-kpi.yml`).
 - [x] Added Mission Control -> AI_HELL_MARY sync tooling (`scripts/sync-ai-hell-mary.mjs`, `scripts/sync-ai-hell-mary-nightly.ps1`) and rollout runbook (`docs/runbook-revenue-sync-and-kpi.md`).
 - [x] Verification gates passed locally after crash recovery (`npm run lint`, `npm run test:unit`, `npm run test:smoke`, `npm run build`).
+- [x] Added deterministic live-feed builder for `/dashboard/agents` and smoke coverage for non-empty seeded feed output (`lib/agents/live-feed.ts`, `tests/smoke/agents-control-plane-route.test.ts`).
+- [x] Added weekly memory/ops health maintenance artifact workflow (`scripts/revenue-weekly-health-report.mjs`, `.github/workflows/revenue-weekly-health.yml`).

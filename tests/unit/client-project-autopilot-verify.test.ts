@@ -14,4 +14,13 @@ describe("client-project-autopilot-verify route probe", () => {
     expect(script).toContain("Start-Sleep -Seconds ([Math]::Min($attempt, 3))");
     expect(script).toContain("$attemptEvent.error_type = $lastError");
   });
+
+  test("Playwright outcome parser treats failed summaries as failed", () => {
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain("$hasFailed = $normalizedLogText -match '(?m)^\\s*\\d+\\s+(?:failed|did not pass)(?:\\s*\\(|$)'");
+    expect(script).toContain('if ($hasFailed) {');
+    expect(script).toContain('$status = "failed"');
+    expect(script).toContain('} elseif ($hasPassed -or $hasFlaky) {');
+  });
 });

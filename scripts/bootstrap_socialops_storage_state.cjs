@@ -130,19 +130,6 @@ async function main() {
   const version = String(process.env.SOCIALOPS_PLAYWRIGHT_STORAGE_STATE_SECRET_VERSION || "latest").trim() || "latest";
 
   if (!projectId || !secretId) {
-    if (check.exists) {
-      const msg =
-        "Storage state is older than the freshness threshold, but an existing state is present and no Secret Manager source is configured. Continuing without refresh.";
-      if (logPath) {
-        fs.mkdirSync(path.dirname(logPath), { recursive: true });
-        fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg} env=${JSON.stringify(redactEnv())}\n`, {
-          encoding: "utf8",
-        });
-      }
-      process.stdout.write(`${msg}\n`);
-      return;
-    }
-
     const msg =
       "Storage state is missing/stale and no Secret Manager source is configured. " +
       "Set SOCIALOPS_GCP_PROJECT_ID and SOCIALOPS_PLAYWRIGHT_STORAGE_STATE_SECRET.";

@@ -208,10 +208,13 @@ function Get-PlaywrightOutcome {
     $normalizedLogText = [System.Text.RegularExpressions.Regex]::Replace($logText, '\x1B\[[0-9;?]*[ -/]*[@-~]', '')
     $hasPassed = $normalizedLogText -match '(?m)^\s*\d+\s+passed(?:\s*\(|$)'
     $hasFlaky = $normalizedLogText -match '(?m)^\s*\d+\s+flaky(?:\s*\(|$)'
-    $hasFailed = $normalizedLogText -match '(?m)^\s*\d+\s+failed(?:\s*\(|$)' -or
-      $normalizedLogText -match '(?m)^\s*\d+\s+did not pass(?:\s*\(|$)'
+    $hasFailed = $normalizedLogText -match '(?m)^\s*\d+\s+(?:failed|did not pass)(?:\s*\(|$)' -or
+      $normalizedLogText -match '(?m)^\s*\d+\s+failed\s*$' -or
+      $normalizedLogText -match '(?m)^\s*\[[^\]]+\].*\sfailed\s*$'
 
-    if (($hasPassed -or $hasFlaky) -and -not $hasFailed) {
+    if ($hasFailed) {
+      $status = "failed"
+    } elseif ($hasPassed -or $hasFlaky) {
       $status = "passed"
       if ($hasFlaky) {
         $summary = "Playwright recovered on retry; final result recorded as flaky but green."

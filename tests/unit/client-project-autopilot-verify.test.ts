@@ -23,4 +23,16 @@ describe("client-project-autopilot-verify route probe", () => {
     expect(script).toContain('$status = "failed"');
     expect(script).toContain('} elseif ($hasPassed -or $hasFlaky) {');
   });
+
+  test("falls back to portal Secret Manager bootstrap when storage-state secret is unavailable", () => {
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain("Invoke-SocialOpsPortalStorageBootstrap");
+    expect(script).toContain('"socialops-portal-password"');
+    expect(script).toContain('"socialops-portal-admin-password"');
+    expect(script).toContain('"clerk-secret-key"');
+    expect(script).toContain("$env:SOCIALOPS_PORTAL_PASSWORD = $null");
+    expect(script).toContain("$env:SOCIALOPS_SIGNIN_URL = $null");
+    expect(script).toContain("Storage state refreshed via Secret Manager");
+  });
 });

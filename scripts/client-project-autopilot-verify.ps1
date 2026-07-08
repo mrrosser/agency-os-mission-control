@@ -228,6 +228,225 @@ function Get-PlaywrightOutcome {
   }
 }
 
+function Resolve-SecretText {
+  param(
+    [string]$ProjectId,
+    [string]$ProjectNumber,
+    [string]$SecretName,
+    [string]$EventName,
+    [string]$RunId,
+    [string]$CorrelationId,
+    [string]$SecretAccessJsonlPath
+  )
+
+  try {
+    $secretLines = & gcloud secrets versions access latest --secret=$SecretName --project=$ProjectId 2>$null
+    $secretText = ($secretLines -join "`n").Trim()
+    Append-Jsonl -Path $SecretAccessJsonlPath -Value @{
+      project = $ProjectNumber
+      secret = $SecretName
+      run_id = $RunId
+      correlation_id = $CorrelationId
+      captured_at = (Get-Date).ToString("o")
+      event = $EventName
+      version = "latest"
+      ok = $true
+    }
+    return $secretText
+  } catch {
+    Append-Jsonl -Path $SecretAccessJsonlPath -Value @{
+      project = $ProjectNumber
+      secret = $SecretName
+      run_id = $RunId
+      correlation_id = $CorrelationId
+      captured_at = (Get-Date).ToString("o")
+      event = $EventName
+      version = "latest"
+      ok = $false
+    }
+    return ""
+  }
+}
+
+function New-ClerkSignInUrl {
+  param(
+    [string]$ClerkSecretKey,
+    [string]$ClientId,
+    [string]$RunId,
+    [string]$CorrelationId,
+    [string]$SecretAccessJsonlPath
+  )
+
+  $capturedAt = (Get-Date).ToString("o")
+  $headers = @{
+    Authorization = "Bearer $ClerkSecretKey"
+    "Content-Type" = "application/json"
+    "X-Correlation-Id" = $CorrelationId
+  }
+
+  try {
+    $orgResp = Invoke-RestMethod -Method GET -Uri "https://api.clerk.com/v1/organizations?limit=25" -Headers $headers -TimeoutSec 30
+    $orgs = @($orgResp.data)
+    if ($orgs.Count -lt 1) { throw "No Clerk organizations returned." }
+
+    $needle = $ClientId.Replace("_", "-")
+    $org = $orgs | Where-Object { $_.slug -and ($_.slug -like "*$needle*") } | Select-Object -First 1
+    if (-not $org) { $org = $orgs | Where-Object { $_.slug -and ($_.slug -like "*fortifyy*") } | Select-Object -First 1 }
+    if (-not $org) { $org = $orgs | Select-Object -First 1 }
+
+    $memResp = Invoke-RestMethod -Method GET -Uri ("https://api.clerk.com/v1/organizations/{0}/memberships?limit=10" -f $org.id) -Headers $headers -TimeoutSec 30
+    $members = @($memResp.data)
+    if ($members.Count -lt 1) { throw "No Clerk org memberships returned." }
+    $member = $members | Where-Object { $_.role -eq "org:admin" } | Select-Object -First 1
+    if (-not $member) { $member = $members | Select-Object -First 1 }
+    $userId = $member.public_user_data.user_id
+    if (-not $userId) { throw "Missing user_id in Clerk membership public_user_data." }
+
+    $payload = @{ user_id = $userId; expires_in_seconds = 600 } | ConvertTo-Json -Depth 4
+    $tokenResp = Invoke-RestMethod -Method POST -Uri "https://api.clerk.com/v1/sign_in_tokens" -Headers $headers -Body $payload -TimeoutSec 30
+    $url = [string]$tokenResp.url
+    if (-not $url.Trim()) { throw "Clerk sign_in_tokens response missing url." }
+
+    Append-Jsonl -Path $SecretAccessJsonlPath -Value @{
+      event = "clerk.sign_in_token.created"
+      run_id = $RunId
+      correlation_id = $CorrelationId
+      captured_at = $capturedAt
+      organization_id = $org.id
+      organization_slug = $org.slug
+      membership_role = $member.role
+      ok = $true
+    }
+    return $url
+  } catch {
+    Append-Jsonl -Path $SecretAccessJsonlPath -Value @{
+      event = "clerk.sign_in_token.failed"
+      run_id = $RunId
+      correlation_id = $CorrelationId
+      captured_at = $capturedAt
+      ok = $false
+      message = $_.Exception.Message
+    }
+    return ""
+  }
+}
+
+function Invoke-SocialOpsStorageBootstrap {
+  param(
+    [string]$BaseUrl,
+    [string]$StorageStatePath,
+    [string]$RunId,
+    [string]$CorrelationId,
+    [string]$AuthBootstrapLogPath,
+    [string]$SignInUrl,
+    [string]$Identifier,
+    [string]$Password
+  )
+
+  Push-Location "C:\\CTO Projects\\ui-tests"
+  try {
+    $env:RUN_ID = $RunId
+    $env:CORRELATION_ID = $CorrelationId
+    $env:SOCIALOPS_CLIENT_URL = $BaseUrl
+    $env:SOCIALOPS_STORAGE_STATE_PATH = $StorageStatePath
+    $env:SOCIALOPS_SIGNIN_URL = $SignInUrl
+    $env:SOCIALOPS_PORTAL_IDENTIFIER = $Identifier
+    $env:SOCIALOPS_PORTAL_PASSWORD = $Password
+    $fallbackOutput = & node scripts\\bootstrap_socialops_storage_state.cjs 2>&1
+    Add-Content -Path $AuthBootstrapLogPath -Encoding UTF8 -Value $fallbackOutput
+    return ($LASTEXITCODE -eq 0)
+  } catch {
+    Add-Content -Path $AuthBootstrapLogPath -Encoding UTF8 -Value $_.Exception.Message
+    return $false
+  } finally {
+    $env:SOCIALOPS_SIGNIN_URL = $null
+    $env:SOCIALOPS_PORTAL_PASSWORD = $null
+    Pop-Location
+  }
+}
+
+function Invoke-SocialOpsPortalStorageBootstrap {
+  param(
+    [string]$BaseUrl,
+    [string]$ClientId,
+    [string]$StorageStatePath,
+    [string]$RunId,
+    [string]$CorrelationId,
+    [string]$AuthBootstrapLogPath,
+    [string]$SecretAccessJsonlPath,
+    [string]$GcloudProjectId,
+    [string]$GcloudProjectNumber
+  )
+
+  $clerkSecretKey = Resolve-SecretText `
+    -ProjectId $GcloudProjectId `
+    -ProjectNumber $GcloudProjectNumber `
+    -SecretName "clerk-secret-key" `
+    -EventName "secret_manager.clerk_secret_key.access" `
+    -RunId $RunId `
+    -CorrelationId $CorrelationId `
+    -SecretAccessJsonlPath $SecretAccessJsonlPath
+
+  if ($clerkSecretKey) {
+    $signInUrl = New-ClerkSignInUrl `
+      -ClerkSecretKey $clerkSecretKey `
+      -ClientId $ClientId `
+      -RunId $RunId `
+      -CorrelationId $CorrelationId `
+      -SecretAccessJsonlPath $SecretAccessJsonlPath
+
+    if ($signInUrl) {
+      $ok = Invoke-SocialOpsStorageBootstrap `
+        -BaseUrl $BaseUrl `
+        -StorageStatePath $StorageStatePath `
+        -RunId $RunId `
+        -CorrelationId $CorrelationId `
+        -AuthBootstrapLogPath $AuthBootstrapLogPath `
+        -SignInUrl $signInUrl `
+        -Identifier "" `
+        -Password ""
+
+      if ($ok) {
+        return "Storage state refreshed via Secret Manager clerk_signin_token fallback."
+      }
+    }
+  }
+
+  $candidates = @(
+    @{ secret = "socialops-portal-password"; identifier = $ClientId; event = "secret_manager.socialops_portal_password.access"; mode = "portal_password" },
+    @{ secret = "socialops-portal-admin-password"; identifier = "admin"; event = "secret_manager.socialops_portal_admin_password.access"; mode = "portal_admin_password" }
+  )
+
+  foreach ($candidate in $candidates) {
+    $password = Resolve-SecretText `
+      -ProjectId $GcloudProjectId `
+      -ProjectNumber $GcloudProjectNumber `
+      -SecretName $candidate.secret `
+      -EventName $candidate.event `
+      -RunId $RunId `
+      -CorrelationId $CorrelationId `
+      -SecretAccessJsonlPath $SecretAccessJsonlPath
+
+    if (-not $password) { continue }
+
+    $ok = Invoke-SocialOpsStorageBootstrap `
+      -BaseUrl $BaseUrl `
+      -StorageStatePath $StorageStatePath `
+      -RunId $RunId `
+      -CorrelationId $CorrelationId `
+      -AuthBootstrapLogPath $AuthBootstrapLogPath `
+      -SignInUrl "" `
+      -Identifier ([string]$candidate.identifier) `
+      -Password $password
+
+    if ($ok) {
+      return "Storage state refreshed via Secret Manager $($candidate.mode) fallback."
+    }
+  }
+
+  return ""
+}
+
 function Invoke-RouteProbe {
   param(
     [string]$RunId,
@@ -643,6 +862,24 @@ try {
   Add-Content -Path $authBootstrapLogPath -Encoding UTF8 -Value $_.Exception.Message
   $bootstrapSummary = "Storage state bootstrap failed."
   $bootstrapStatus = "failed"
+}
+
+if ($bootstrapStatus -ne "passed") {
+  $fallbackSummary = Invoke-SocialOpsPortalStorageBootstrap `
+    -BaseUrl $BaseUrl `
+    -ClientId $ClientId `
+    -StorageStatePath $env:SOCIALOPS_STORAGE_STATE_PATH `
+    -RunId $runId `
+    -CorrelationId $correlationId `
+    -AuthBootstrapLogPath $authBootstrapLogPath `
+    -SecretAccessJsonlPath $secretAccessJsonlPath `
+    -GcloudProjectId $gcloudProjectId `
+    -GcloudProjectNumber $gcloudProjectNumber
+
+  if ($fallbackSummary) {
+    $bootstrapSummary = $fallbackSummary
+    $bootstrapStatus = "passed"
+  }
 }
 
 $testResults += @{

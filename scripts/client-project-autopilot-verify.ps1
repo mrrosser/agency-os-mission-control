@@ -197,11 +197,26 @@ function Write-ClientAutopilotReports {
 function Get-PlaywrightOutcome {
   param(
     [string]$LogPath,
-    [string]$FallbackStatus
+    [string]$FallbackStatus,
+    [string]$OutputDir
   )
 
   $status = $FallbackStatus
   $summary = $null
+
+  $lastRunPath = Join-Path $OutputDir ".last-run.json"
+  if (Test-Path $lastRunPath) {
+    try {
+      $lastRun = Get-Content -Raw -Path $lastRunPath | ConvertFrom-Json
+      if ($lastRun.status -eq "passed") {
+        $status = "passed"
+      } elseif ($lastRun.status -eq "failed") {
+        $status = "failed"
+      }
+    } catch {
+      $summary = "Playwright result metadata was unreadable; console log and process status were used."
+    }
+  }
 
   if (Test-Path $LogPath) {
     $logText = Get-Content -Raw -Path $LogPath
@@ -831,7 +846,7 @@ try {
 }
 Pop-Location
 
-$pwPublicOutcome = Get-PlaywrightOutcome -LogPath $publicPwLogPath -FallbackStatus $pwPublicStatus
+$pwPublicOutcome = Get-PlaywrightOutcome -LogPath $publicPwLogPath -FallbackStatus $pwPublicStatus -OutputDir $publicPwOutDir
 
 $testResults += @{
   name = "playwright-public-review"
@@ -906,7 +921,7 @@ try {
 }
 Pop-Location
 
-$pwAuthOutcome = Get-PlaywrightOutcome -LogPath $authPwLogPath -FallbackStatus $pwAuthStatus
+$pwAuthOutcome = Get-PlaywrightOutcome -LogPath $authPwLogPath -FallbackStatus $pwAuthStatus -OutputDir $authPwOutDir
 
 $testResults += @{
   name = "playwright-auth-smoke"

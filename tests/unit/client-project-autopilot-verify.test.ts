@@ -24,6 +24,16 @@ describe("client-project-autopilot-verify route probe", () => {
     expect(script).toContain('} elseif ($hasPassed -or $hasFlaky) {');
   });
 
+  test("uses Playwright result metadata when redirected console output is incomplete", () => {
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain('$lastRunPath = Join-Path $OutputDir ".last-run.json"');
+    expect(script).toContain('if ($lastRun.status -eq "passed") {');
+    expect(script).toContain('$status = "passed"');
+    expect(script).toContain("-OutputDir $publicPwOutDir");
+    expect(script).toContain("-OutputDir $authPwOutDir");
+  });
+
   test("falls back to portal Secret Manager bootstrap when storage-state secret is unavailable", () => {
     const script = readFileSync(scriptPath, "utf8");
 

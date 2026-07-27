@@ -2,8 +2,8 @@
 
 ## What it does
 
-`POST /api/integrations/rosser-gallery/collector-leads` accepts the pinned
-The Braider / Atlanta v1 payload and transactionally writes:
+`POST /api/integrations/rosser-gallery/collector-leads` accepts strict,
+campaign-pinned browser lead contracts and transactionally writes:
 
 - one projected CRM customer in `leads`;
 - one inquiry event in `activities`;
@@ -12,13 +12,43 @@ The Braider / Atlanta v1 payload and transactionally writes:
 - one payload-and-route-bound receipt in `crm_ingest_receipts`;
 - one per-credential daily create counter in `crm_ingest_rate_limits`.
 
-The route has a 32 KiB body limit and a 500-new-events-per-UTC-day limit. Exact
+The route has a 32 KiB body limit and a 500-new-events-per-UTC-day limit shared
+across its authenticated credential. Exact
 receipt replays do not consume quota. It does not send email or SMS, activate an
-ad, write Square, or grant RT Solutions consent. An unchecked Gallery marketing
-box never inherits or relabels consent from another business unit.
+ad, publish a campaign, write Square or Etsy, or grant RT Solutions consent. An
+unchecked Gallery marketing box never inherits or relabels consent from another
+business unit.
 
 `GET /api/integrations/rosser-gallery/collector-leads` is the authenticated,
 non-writing readiness check used for candidate smoke tests.
+
+## Supported lead contracts
+
+| Schema | Campaign ID / namespace | Browser lead events |
+| --- | --- | --- |
+| v1 | `the-braider-atlanta` | legacy `collector_request` payload (no root `eventType`) |
+| v2 | `white_linen_night_nola_2026` | `event_preview_lead`, `private_viewing_inquiry`, `commission_inquiry` |
+| v2 | `etsy_store_launch_20260801` | `etsy_waitlist_submit`, `etsy_product_inquiry` |
+
+Examples are in `contracts/rosser-gallery/collector-lead.v1.json`,
+`contracts/rosser-gallery/white-linen-preview-lead.v2.json`, and
+`contracts/rosser-gallery/etsy-launch-waitlist.v2.json`.
+
+V2 pins the root lane, campaign ID and namespace, market, language, event/shop,
+external-event prefix, consent version, event/interest pairing, and first/last
+touch UTM namespace. A touch may omit all UTMs for direct traffic; a partial or
+mismatched UTM tuple is rejected. Tags are never accepted from the sender. The
+receiver derives and append-dedupes only the campaign and explicit-intent tags
+documented by the CRM projection.
+
+This endpoint is intentionally lead-only. Page views, directions/outbound
+clicks, check-ins, purchases, orders, refunds, and provider commerce events are
+not valid receiver payloads. Signed Square and future signed Etsy/server paths
+own those events.
+
+Contract support is not campaign activation. Each website sender must retain a
+separate, fail-closed per-lane enable gate. This receiver cannot create, publish,
+activate, resume, or spend on Meta, Etsy, Square, or any other provider.
 
 ## Required configuration
 
@@ -86,10 +116,11 @@ same key returns `409`. The emulator may be cleared after verification.
 - Treat `400`, `403`, `409`, and `413` as terminal and retain for operator review.
 - Never log contact fields or either credential.
 
-V1 accepts only `rg_collector_<UUID>` with campaign identity
-`the-braider-atlanta` / `atlanta` / `en-US` / `the-braider`. Nested touch fields
-are pinned to the same identity. Delivery, attribution, and consent timestamps
-are bounded. Introduce a reviewed contract version for another campaign.
+V1 remains pinned to `rg_collector_<UUID>` and campaign identity
+`the-braider-atlanta` / `atlanta` / `en-US` / `the-braider`. V2 uses
+lane-specific `rg_white_linen_*`, `rg_etsy_waitlist_*`, and `rg_etsy_inquiry_*`
+identifiers. Delivery, attribution, and consent timestamps are bounded for all
+versions.
 
 ## Audited target
 

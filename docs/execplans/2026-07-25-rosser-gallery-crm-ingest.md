@@ -2,7 +2,7 @@
 
 ## Objective
 
-Add a safe, retryable service-to-service receiver that projects Rosser Gallery collector requests into the existing Mission Control Firestore CRM without letting the public sender choose an owner, workspace, or business unit.
+Add a safe, retryable service-to-service receiver that projects allowlisted Rosser Gallery campaign leads into the existing Mission Control Firestore CRM without letting the public sender choose an owner, workspace, business unit, or CRM tags.
 
 ## Scope
 
@@ -14,8 +14,9 @@ Add a safe, retryable service-to-service receiver that projects Rosser Gallery c
 - Existing CRM list/timeline compatibility for the projected record.
 - Unit and route smoke tests with a fake store/mocked external boundary.
 - Local and Cloud Run configuration documentation.
+- Versioned White Linen Night and Etsy launch browser-lead contracts on the same endpoint and person/receipt infrastructure.
 
-Not in scope: production-traffic promotion without a separate readback, Secret Manager writes, production data migration, outbound email/SMS, Meta campaign activation, or Square catalog mutation. The approved release may create a tagged zero-traffic candidate and perform its authenticated non-writing readiness check.
+Not in scope: production-traffic promotion without a separate readback, Secret Manager writes, production data migration, outbound email/SMS, Meta campaign activation, Square/Etsy mutation, provider commerce ingestion, or any campaign enablement. The approved release may create a tagged zero-traffic candidate and perform its authenticated non-writing readiness check.
 
 ## Design decisions
 
@@ -24,11 +25,14 @@ Not in scope: production-traffic promotion without a separate readback, Secret M
 3. Receipt, identity, quota, customer, inquiry, and consent evidence are committed in one transaction. Exact receipt replay is free; changed payload or tenant route returns `409`.
 4. Gallery consent is purpose scoped under `consentScopes.rosser_gallery_collector`; every submission has a deterministic append-only evidence record. Generic or RT Solutions consent is never inherited, relabeled, revoked, or overwritten.
 5. `latest*`, current offer, contact, and next-action fields update only for the newest captured event. Delayed events still append history without regressing current state.
-6. V1 pins top-level and nested attribution to The Braider Atlanta Meta campaign, enforces timestamp ordering, and accepts delivery only within bounded age/future-skew windows.
+6. V1 pins top-level and nested attribution to The Braider Atlanta Meta campaign. V2 adds exact White Linen Night and Etsy lane/campaign namespaces, browser-lead event allowlists, and source/medium/content matrices. All versions enforce timestamp ordering and bounded age/future-skew windows.
 7. Body size is capped at 32 KiB and the authenticated integration is capped at 500 new events per UTC day in a distributed Firestore transaction.
 8. The collector-preview code remains receiver-local; no global Square/offer catalog or knowledge-pack behavior is changed.
 9. Production currently reads Firestore because Paperclip is not configured. Configuration fails closed if Paperclip later becomes canonical without a separately approved PII-bearing mirror.
 10. Logs contain operational identifiers and classification only, never contact fields, city, note, or credentials.
+11. CRM tags are derived server-side, append-deduped with existing tags, and cannot be supplied by the sender. White Linen explicit collector intents and Etsy launch leads receive only their documented Gallery tags.
+12. The shared browser receiver rejects check-ins, purchases, orders, refunds, and other provider events. Signed provider/server receivers remain separate.
+13. Readiness reports only supported schema versions, campaign IDs, and lead-event names. It exposes no routing IDs, credentials, or feature state and does not imply sender or campaign activation.
 
 ## Progress
 
@@ -45,6 +49,10 @@ Not in scope: production-traffic promotion without a separate readback, Secret M
 - [x] Staged-diff secret scan passed with no leaks.
 - [ ] Clean commit attestation and approved zero-traffic candidate readiness check.
 - [x] Tagged no-traffic candidate, authenticated read-only smoke, exact revision promotion, and rollback commands documented. None were run.
+- [x] White Linen Night and Etsy launch v2 schemas added on the same endpoint without changing Atlanta v1.
+- [x] Lane-specific receipt sources, server-owned tags, timeline actions, and lead-only event allowlists implemented.
+- [x] Cross-lane customer dedupe, append-only Gallery consent, exact replay, attribution pinning, and forbidden provider-event tests added.
+- [ ] Review, commit, and deploy the v2 extension; existing candidate and production traffic are unchanged by this source-only step.
 
 ## Verification plan
 

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "@/contracts/rosser-gallery/collector-lead.v1.json";
+import etsyFixtureJson from "@/contracts/rosser-gallery/etsy-launch-waitlist.v2.json";
+import whiteLinenFixtureJson from "@/contracts/rosser-gallery/white-linen-preview-lead.v2.json";
 import {
   GET,
   POST,
@@ -116,8 +118,13 @@ describe("Rosser Gallery collector-lead integration route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      receiver: "rosser-gallery-collector-leads-v1",
-      campaignId: "the-braider-atlanta",
+      receiver: "rosser-gallery-collector-leads",
+      contractVersions: [1, 2],
+      supportedLanes: [
+        expect.objectContaining({ campaignId: "the-braider-atlanta" }),
+        expect.objectContaining({ campaignId: "white_linen_night_nola_2026" }),
+        expect.objectContaining({ campaignId: "etsy_store_launch_20260801" }),
+      ],
       correlationId: "rng-readiness-test-0001",
     });
     expect(ingestMock).not.toHaveBeenCalled();
@@ -214,5 +221,49 @@ describe("Rosser Gallery collector-lead integration route", () => {
     const response = await invoke(createRequest());
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ replayed: true });
+  });
+
+  it("accepts the allowlisted White Linen and Etsy browser lead contracts", async () => {
+    for (const payload of [whiteLinenFixtureJson, etsyFixtureJson]) {
+      ingestMock.mockClear();
+      const body = structuredClone(payload) as Record<string, unknown>;
+      const response = await invoke(createRequest({ body }));
+
+      expect(response.status).toBe(201);
+      expect(ingestMock).toHaveBeenCalledOnce();
+      expect(ingestMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schemaVersion: 2,
+          lane: body.lane,
+          eventType: body.eventType,
+        }),
+        expect.objectContaining({ businessUnit: "rosser_nft_gallery" }),
+        { correlationId: "rng-smoke-test-0001" }
+      );
+    }
+  });
+
+  it("rejects provider commerce, check-in, and caller-supplied CRM tags", async () => {
+    for (const eventType of [
+      "purchase",
+      "event_checkin",
+      "etsy_order_created",
+      "etsy_order_paid",
+      "etsy_order_refunded",
+    ]) {
+      const source = eventType.startsWith("etsy_")
+        ? etsyFixtureJson
+        : whiteLinenFixtureJson;
+      const body = structuredClone(source) as Record<string, unknown>;
+      body.eventType = eventType;
+      const response = await invoke(createRequest({ body }));
+      expect(response.status).toBe(400);
+    }
+
+    const tagged = structuredClone(etsyFixtureJson) as Record<string, unknown>;
+    tagged.tags = ["rt_ai_workflow"];
+    const taggedResponse = await invoke(createRequest({ body: tagged }));
+    expect(taggedResponse.status).toBe(400);
+    expect(ingestMock).not.toHaveBeenCalled();
   });
 });

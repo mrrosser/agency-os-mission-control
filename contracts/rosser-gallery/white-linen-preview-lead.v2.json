@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 2,
+  "lane": "white_linen_night_nola_2026",
+  "eventType": "event_preview_lead",
+  "externalEventId": "rg_white_linen_4e3e7a9b-d236-47e8-b576-3d8318f824e1",
+  "capturedAt": "2026-07-27T15:30:00.000Z",
+  "contact": {
+    "name": "Example Event Guest",
+    "email": "guest@example.com"
+  },
+  "collector": {
+    "city": "New Orleans, LA",
+    "interest": "event-preview",
+    "note": "Please send me the White Linen Night preview."
+  },
+  "permissions": {
+    "responseEmail": true,
+    "marketingEmail": false,
+    "sms": false,
+    "rtSolutions": false,
+    "consentVersion": "white-linen-preview-v2",
+    "consentedAt": null
+  },
+  "campaign": {
+    "id": "white_linen_night_nola_2026",
+    "namespace": "white_linen_night_nola_2026",
+    "market": "new_orleans",
+    "language": "en-US",
+    "event": "white_linen_night_2026",
+    "firstTouch": {
+      "captured_at": "2026-07-27T15:20:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "white_linen_night_nola_2026",
+      "utm_content": "career_progression_34s_reel",
+      "utm_term": "broad_local",
+      "market": "new_orleans",
+      "language": "en-US",
+      "event": "white_linen_night_2026"
+    },
+    "lastTouch": {
+      "captured_at": "2026-07-27T15:29:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "white_linen_night_nola_2026",
+      "utm_content": "career_progression_34s_reel",
+      "utm_term": "broad_local",
+      "market": "new_orleans",
+      "language": "en-US",
+      "event": "white_linen_night_2026"
+    }
+  }
+}

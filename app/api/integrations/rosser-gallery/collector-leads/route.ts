@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { ingestRosserGalleryCollectorLead } from "@/lib/crm/rosser-gallery-collector-ingest";
 import {
-  rosserGalleryCollectorLeadV1Schema,
-  type RosserGalleryCollectorLeadV1,
+  ROSSER_GALLERY_SUPPORTED_LEAD_LANES,
+  rosserGalleryCollectorLeadSchema,
+  type RosserGalleryCollectorLead,
 } from "@/lib/crm/rosser-gallery-collector-contract";
 import {
   readRosserGalleryCrmConfig,
@@ -15,7 +16,7 @@ const MAX_BODY_BYTES = 32 * 1024;
 
 async function parseBoundedCollectorLead(
   request: Request
-): Promise<RosserGalleryCollectorLeadV1> {
+): Promise<RosserGalleryCollectorLead> {
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
     throw new ApiError(413, "Request body is too large");
@@ -32,7 +33,7 @@ async function parseBoundedCollectorLead(
   } catch {
     throw new ApiError(400, "Invalid JSON body");
   }
-  const parsed = rosserGalleryCollectorLeadV1Schema.safeParse(candidate);
+  const parsed = rosserGalleryCollectorLeadSchema.safeParse(candidate);
   if (!parsed.success) {
     throw new ApiError(400, "Invalid request body", {
       issues: parsed.error.issues,
@@ -46,12 +47,13 @@ export const GET = withApiHandler(
     const config = readRosserGalleryCrmConfig();
     requireRosserGalleryServiceToken(request.headers.get("authorization"), config);
     log.info("crm.rosser_gallery_collector_receiver_ready", {
-      campaignId: "the-braider-atlanta",
+      supportedLaneCount: ROSSER_GALLERY_SUPPORTED_LEAD_LANES.length,
     });
     const response = NextResponse.json({
       ok: true,
-      receiver: "rosser-gallery-collector-leads-v1",
-      campaignId: "the-braider-atlanta",
+      receiver: "rosser-gallery-collector-leads",
+      contractVersions: [1, 2],
+      supportedLanes: ROSSER_GALLERY_SUPPORTED_LEAD_LANES,
       correlationId,
     });
     response.headers.set("cache-control", "no-store");
@@ -88,6 +90,8 @@ export const POST = withApiHandler(
     log.info("crm.rosser_gallery_collector_ingested", {
       receiptId: result.receiptId,
       campaignId: payload.campaign.id,
+      schemaVersion: payload.schemaVersion,
+      eventType: "eventType" in payload ? payload.eventType : "collector_request",
       interest: payload.collector.interest,
       replayed: result.replayed,
     });

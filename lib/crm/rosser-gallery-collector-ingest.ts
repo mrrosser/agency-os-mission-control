@@ -6,13 +6,20 @@ import { ApiError } from "@/lib/api/handler";
 import type { RosserGalleryCrmConfig } from "@/lib/crm/rosser-gallery-crm-config";
 import {
   assertRosserGalleryCollectorLeadTimestampBounds,
-  offerCodeForCollectorInterest,
-  type RosserGalleryCollectorInterest,
-  type RosserGalleryCollectorLeadV1,
+  offerCodeForRosserGalleryLead,
+  type RosserGalleryCollectorLead,
 } from "@/lib/crm/rosser-gallery-collector-contract";
 import { getAdminDb } from "@/lib/firebase-admin";
 
-const SOURCE = "rosser_gallery_collector_request";
+interface LaneProjection {
+  source: string;
+  sourceLabel: string;
+  eventType: string;
+  timelineAction: string;
+  timelineSummary: string;
+  nextAction: string;
+  tags: string[];
+}
 
 interface DocumentSnapshotLike {
   exists: boolean;
@@ -87,7 +94,7 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-export function payloadFingerprint(payload: RosserGalleryCollectorLeadV1): string {
+export function payloadFingerprint(payload: RosserGalleryCollectorLead): string {
   return sha256(JSON.stringify(canonicalize(payload)));
 }
 
@@ -120,11 +127,72 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function nextActionForInterest(interest: RosserGalleryCollectorInterest): string {
-  if (interest === "commission") return "review_commission_request";
-  if (interest === "private-viewing") return "schedule_private_viewing";
-  if (interest === "mini") return "send_mini_availability";
-  return "send_collector_preview";
+function laneProjectionForLead(payload: RosserGalleryCollectorLead): LaneProjection {
+  if (payload.schemaVersion === 1) {
+    const interestTags =
+      payload.collector.interest === "private-viewing"
+        ? ["gallery_private_viewing"]
+        : payload.collector.interest === "commission"
+          ? ["gallery_commission"]
+          : [];
+    const nextAction =
+      payload.collector.interest === "commission"
+        ? "review_commission_request"
+        : payload.collector.interest === "private-viewing"
+          ? "schedule_private_viewing"
+          : payload.collector.interest === "mini"
+            ? "send_mini_availability"
+            : "send_collector_preview";
+    return {
+      source: "rosser_gallery_collector_request",
+      sourceLabel: "Rosser Gallery collector request",
+      eventType: "collector_request",
+      timelineAction: "crm.collector_inquiry_received",
+      timelineSummary: "Collector request received for The Braider.",
+      nextAction,
+      tags: ["gallery_collector", ...interestTags],
+    };
+  }
+
+  if (payload.lane === "white_linen_night_nola_2026") {
+    const intentTags =
+      payload.collector.interest === "private-viewing"
+        ? ["gallery_collector", "gallery_private_viewing"]
+        : payload.collector.interest === "commission"
+          ? ["gallery_collector", "gallery_commission"]
+          : [];
+    const nextAction =
+      payload.eventType === "commission_inquiry"
+        ? "review_commission_request"
+        : payload.eventType === "private_viewing_inquiry"
+          ? "schedule_private_viewing"
+          : "send_white_linen_preview";
+    return {
+      source: "rosser_gallery_white_linen_preview",
+      sourceLabel: "Rosser Gallery White Linen Night preview",
+      eventType: payload.eventType,
+      timelineAction: `crm.${payload.eventType}_received`,
+      timelineSummary: "White Linen Night preview inquiry received.",
+      nextAction,
+      tags: ["gallery_event_white_linen_2026", ...intentTags],
+    };
+  }
+
+  return {
+    source: "rosser_gallery_etsy_launch_lead",
+    sourceLabel: "Rosser Gallery Etsy launch lead",
+    eventType: payload.eventType,
+    timelineAction: `crm.${payload.eventType}_received`,
+    timelineSummary:
+      payload.eventType === "etsy_product_inquiry"
+        ? "Etsy launch product inquiry received."
+        : "Etsy launch waitlist request received.",
+    nextAction:
+      payload.eventType === "etsy_product_inquiry"
+        ? "review_etsy_product_inquiry"
+        : "send_etsy_launch_update",
+    tags: ["gallery_etsy_launch_2026", "gallery_collector"],
+  };
 }
 
 export function stableRosserGalleryCustomerId(
@@ -205,6 +273,8 @@ function readReceiptResult(
   receiptId: string,
   receipt: Record<string, unknown>,
   expectedFingerprint: string,
+  expectedProjection: LaneProjection,
+  payload: RosserGalleryCollectorLead,
   config: RosserGalleryCrmConfig
 ): RosserGalleryCollectorIngestResult {
   if (receipt.payloadFingerprint !== expectedFingerprint) {
@@ -216,6 +286,23 @@ function readReceiptResult(
     receipt.businessUnit !== config.businessUnit
   ) {
     throw new ApiError(409, "Idempotency key is bound to a different CRM route");
+  }
+  if (receipt.source !== expectedProjection.source) {
+    throw new ApiError(409, "Idempotency key is bound to a different campaign lane");
+  }
+  const receiptMetadataMatches =
+    payload.schemaVersion === 2
+      ? receipt.contractSchemaVersion === 2 &&
+        receipt.campaignId === payload.campaign.id &&
+        receipt.eventType === expectedProjection.eventType
+      : (receipt.contractSchemaVersion === undefined ||
+          receipt.contractSchemaVersion === 1) &&
+        (receipt.campaignId === undefined ||
+          receipt.campaignId === payload.campaign.id) &&
+        (receipt.eventType === undefined ||
+          receipt.eventType === expectedProjection.eventType);
+  if (!receiptMetadataMatches) {
+    throw new ApiError(409, "Idempotency receipt metadata does not match the request");
   }
 
   const customerId = receipt.customerId;
@@ -243,7 +330,7 @@ function readReceiptResult(
 }
 
 export async function ingestRosserGalleryCollectorLead(
-  payload: RosserGalleryCollectorLeadV1,
+  payload: RosserGalleryCollectorLead,
   config: RosserGalleryCrmConfig,
   dependencies: RosserGalleryCollectorIngestDependencies
 ): Promise<RosserGalleryCollectorIngestResult> {
@@ -255,17 +342,18 @@ export async function ingestRosserGalleryCollectorLead(
   const receivedAtDate = now();
 
   const fingerprint = payloadFingerprint(payload);
+  const projection = laneProjectionForLead(payload);
   const receiptId = stableDocumentId(
     "rng_receipt",
-    `${SOURCE}:${payload.externalEventId}`
+    `${projection.source}:${payload.externalEventId}`
   );
   const timelineEventId = stableDocumentId(
     "rng_activity",
-    `${SOURCE}:${payload.externalEventId}`
+    `${projection.source}:${payload.externalEventId}`
   );
   const consentEventId = stableDocumentId(
     "rng_consent",
-    `${SOURCE}:${payload.externalEventId}`
+    `${projection.source}:${payload.externalEventId}`
   );
   const deterministicCustomerId = stableRosserGalleryCustomerId(
     payload.contact.email,
@@ -297,6 +385,8 @@ export async function ingestRosserGalleryCollectorLead(
       receiptId,
       preflightReceipt.data() || {},
       fingerprint,
+      projection,
+      payload,
       config
     );
   }
@@ -322,6 +412,8 @@ export async function ingestRosserGalleryCollectorLead(
         receiptId,
         receiptSnapshot.data() || {},
         fingerprint,
+        projection,
+        payload,
         config
       );
     }
@@ -380,7 +472,13 @@ export async function ingestRosserGalleryCollectorLead(
         config.businessUnit,
       ])
     );
-    const offerCode = offerCodeForCollectorInterest(payload.collector.interest);
+    const offerCode = offerCodeForRosserGalleryLead(payload);
+    const existingTags = Array.isArray(existingCustomer.tags)
+      ? existingCustomer.tags.filter(
+          (value): value is string => typeof value === "string" && value.length > 0
+        )
+      : [];
+    const tags = Array.from(new Set([...existingTags, ...projection.tags]));
     const timestamp = serverTimestamp();
     const existingLastInquiryMillis = temporalMillis(existingCustomer.lastInquiryAt);
     const incomingInquiryMillis = temporalMillis(payload.capturedAt);
@@ -402,6 +500,7 @@ export async function ingestRosserGalleryCollectorLead(
       owner: config.ownerUid,
       workspaceId: config.workspaceId,
       businessUnits,
+      tags,
       consentScopes: {
         ...existingConsentScopes,
         rosser_gallery_collector: {
@@ -428,7 +527,7 @@ export async function ingestRosserGalleryCollectorLead(
       Object.assign(customerWrite, {
         contactName: payload.contact.name,
         latestContactName: payload.contact.name,
-        latestSource: "Rosser Gallery collector request",
+        latestSource: projection.sourceLabel,
         latestSourceSystem: "rngwebsite",
         sourceEventId: payload.externalEventId,
         latestBusinessUnit: config.businessUnit,
@@ -438,12 +537,16 @@ export async function ingestRosserGalleryCollectorLead(
         collectorProfile: {
           city: payload.collector.city,
           interest: payload.collector.interest,
+          ...("work" in payload.collector && payload.collector.work
+            ? { work: payload.collector.work }
+            : {}),
         },
+        latestEventType: projection.eventType,
         latestSubmissionPermissions: payload.permissions,
         lastInquiryAt: payload.capturedAt,
         latestTimelineAt: payload.capturedAt,
         lastTouch: payload.campaign.lastTouch,
-        next_action: nextActionForInterest(payload.collector.interest),
+        next_action: projection.nextAction,
         correlationId: dependencies.correlationId,
       });
       if (
@@ -467,7 +570,7 @@ export async function ingestRosserGalleryCollectorLead(
         founderName: payload.contact.name,
         phone: null,
         recordType: "individual_collector",
-        source: "Rosser Gallery collector request",
+        source: projection.sourceLabel,
         sourceSystem: "rngwebsite",
         businessUnit: config.businessUnit,
         route: "rng",
@@ -512,21 +615,26 @@ export async function ingestRosserGalleryCollectorLead(
       workspaceId: config.workspaceId,
       customerId,
       externalEventId: payload.externalEventId,
-      action: "crm.collector_inquiry_received",
+      action: projection.timelineAction,
       type: "system",
-      summary: "Collector request received for The Braider.",
+      summary: projection.timelineSummary,
       details: payload.collector.note || null,
       collector: {
         city: payload.collector.city,
         interest: payload.collector.interest,
+        ...("work" in payload.collector && payload.collector.work
+          ? { work: payload.collector.work }
+          : {}),
       },
       permissions: payload.permissions,
       campaign: payload.campaign,
-      next_action: nextActionForInterest(payload.collector.interest),
+      eventType: projection.eventType,
+      tags: projection.tags,
+      next_action: projection.nextAction,
       correlationId: dependencies.correlationId,
       timestamp: payload.capturedAt,
       ingestedAt: timestamp,
-      source: SOURCE,
+      source: projection.source,
       sourceOfTruth: "firestore_projected",
     });
     transaction.set(consentRef, {
@@ -548,12 +656,17 @@ export async function ingestRosserGalleryCollectorLead(
       consentedAt: payload.permissions.consentedAt,
       submittedAt: payload.capturedAt,
       correlationId: dependencies.correlationId,
-      source: SOURCE,
+      campaignId: payload.campaign.id,
+      eventType: projection.eventType,
+      source: projection.source,
       createdAt: timestamp,
     });
     transaction.set(receiptRef, {
-      schemaVersion: 1,
-      source: SOURCE,
+      schemaVersion: payload.schemaVersion,
+      contractSchemaVersion: payload.schemaVersion,
+      source: projection.source,
+      campaignId: payload.campaign.id,
+      eventType: projection.eventType,
       externalEventId: payload.externalEventId,
       payloadFingerprint: fingerprint,
       ownerUid: config.ownerUid,

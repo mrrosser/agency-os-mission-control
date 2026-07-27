@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import fixtureJson from "@/contracts/rosser-gallery/collector-lead.v1.json";
+import etsyFixtureJson from "@/contracts/rosser-gallery/etsy-launch-waitlist.v2.json";
+import whiteLinenFixtureJson from "@/contracts/rosser-gallery/white-linen-preview-lead.v2.json";
 import {
   ingestRosserGalleryCollectorLead,
   stableRosserGalleryCustomerId,
   type CrmIngestStore,
 } from "@/lib/crm/rosser-gallery-collector-ingest";
-import { rosserGalleryCollectorLeadV1Schema } from "@/lib/crm/rosser-gallery-collector-contract";
+import {
+  rosserGalleryCollectorLeadV1Schema,
+  rosserGalleryEtsyLeadV2Schema,
+  rosserGalleryWhiteLinenLeadV2Schema,
+} from "@/lib/crm/rosser-gallery-collector-contract";
 import type { RosserGalleryCrmConfig } from "@/lib/crm/rosser-gallery-crm-config";
 
 interface FakeReference {
@@ -142,6 +148,13 @@ function dependencies(store: FakeCrmStore, dailyCreateLimit?: number) {
   };
 }
 
+function v2Dependencies(store: FakeCrmStore) {
+  return {
+    ...dependencies(store),
+    now: () => new Date("2026-07-27T16:31:00.000Z"),
+  };
+}
+
 describe("Rosser Gallery collector-lead CRM projection", () => {
   it("atomically writes the customer, timeline event, and PII-free receipt", async () => {
     const store = new FakeCrmStore();
@@ -273,6 +286,29 @@ describe("Rosser Gallery collector-lead CRM projection", () => {
       ingestRosserGalleryCollectorLead(changed, config, dependencies(store))
     ).rejects.toMatchObject({ status: 409 });
     expect(store.records("activities")).toHaveLength(1);
+  });
+
+  it("fails closed when a v2 receipt loses its lane metadata", async () => {
+    const store = new FakeCrmStore();
+    const payload = rosserGalleryWhiteLinenLeadV2Schema.parse(
+      structuredClone(whiteLinenFixtureJson)
+    );
+    const first = await ingestRosserGalleryCollectorLead(
+      payload,
+      config,
+      v2Dependencies(store)
+    );
+    const receipt = store.records("crm_ingest_receipts")[0][1];
+    store.seed(`crm_ingest_receipts/${first.receiptId}`, {
+      ...receipt,
+      campaignId: "the-braider-atlanta",
+    });
+
+    await expect(
+      ingestRosserGalleryCollectorLead(payload, config, v2Dependencies(store))
+    ).rejects.toMatchObject({ status: 409 });
+    expect(store.records("activities")).toHaveLength(1);
+    expect(store.records("crm_ingest_receipts")).toHaveLength(1);
   });
 
   it("rejects a replay when the server-owned CRM route changes", async () => {
@@ -546,6 +582,134 @@ describe("Rosser Gallery collector-lead CRM projection", () => {
         },
       },
     });
+  });
+
+  it("dedupes one person across White Linen and Etsy while appending server-owned tags", async () => {
+    const store = new FakeCrmStore();
+    const whiteRaw = structuredClone(whiteLinenFixtureJson) as Record<string, unknown>;
+    whiteRaw.eventType = "commission_inquiry";
+    const whiteContact = whiteRaw.contact as Record<string, unknown>;
+    whiteContact.email = "shared.collector@example.com";
+    const whiteCollector = whiteRaw.collector as Record<string, unknown>;
+    whiteCollector.interest = "commission";
+    const white = rosserGalleryWhiteLinenLeadV2Schema.parse(whiteRaw);
+
+    const etsyRaw = structuredClone(etsyFixtureJson) as Record<string, unknown>;
+    etsyRaw.eventType = "etsy_product_inquiry";
+    etsyRaw.externalEventId =
+      "rg_etsy_inquiry_1d4708d3-e42f-48a7-a6e1-b71fd19fa3b7";
+    const etsyContact = etsyRaw.contact as Record<string, unknown>;
+    etsyContact.email = "SHARED.COLLECTOR@example.com";
+    const etsyCollector = etsyRaw.collector as Record<string, unknown>;
+    etsyCollector.interest = "product-inquiry";
+    etsyCollector.work = "transceiver";
+    etsyCollector.note = "How will the Transceiver finish look in natural light?";
+    const etsy = rosserGalleryEtsyLeadV2Schema.parse(etsyRaw);
+
+    const whiteResult = await ingestRosserGalleryCollectorLead(
+      white,
+      config,
+      v2Dependencies(store)
+    );
+    const etsyResult = await ingestRosserGalleryCollectorLead(
+      etsy,
+      config,
+      v2Dependencies(store)
+    );
+    const replay = await ingestRosserGalleryCollectorLead(
+      etsy,
+      config,
+      v2Dependencies(store)
+    );
+
+    expect(etsyResult.customerId).toBe(whiteResult.customerId);
+    expect(replay).toEqual({ ...etsyResult, replayed: true });
+    expect(store.records("leads")).toHaveLength(1);
+    expect(store.records("activities")).toHaveLength(2);
+    expect(store.records("crm_ingest_receipts")).toHaveLength(2);
+    expect(store.records("crm_consent_events")).toHaveLength(2);
+    expect(store.records("crm_ingest_rate_limits")[0][1].createCount).toBe(2);
+
+    const customer = store.records("leads")[0][1];
+    expect(customer.tags).toEqual([
+      "gallery_event_white_linen_2026",
+      "gallery_collector",
+      "gallery_commission",
+      "gallery_etsy_launch_2026",
+    ]);
+    expect(customer).toMatchObject({
+      latestSource: "Rosser Gallery Etsy launch lead",
+      latestEventType: "etsy_product_inquiry",
+      latestOfferCode: "RNG-MINI-REPLICA",
+      next_action: "review_etsy_product_inquiry",
+      collectorProfile: {
+        interest: "product-inquiry",
+        work: "transceiver",
+      },
+      consentScopes: {
+        rosser_gallery_collector: {
+          marketingEmail: true,
+          marketingConsentVersion: "etsy-waitlist-v2",
+          sms: false,
+          rtSolutions: false,
+        },
+      },
+    });
+
+    expect(store.records("activities")).toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining([
+          expect.any(String),
+          expect.objectContaining({
+            eventType: "commission_inquiry",
+            action: "crm.commission_inquiry_received",
+            tags: [
+              "gallery_event_white_linen_2026",
+              "gallery_collector",
+              "gallery_commission",
+            ],
+          }),
+        ]),
+        expect.arrayContaining([
+          expect.any(String),
+          expect.objectContaining({
+            eventType: "etsy_product_inquiry",
+            action: "crm.etsy_product_inquiry_received",
+            collector: expect.objectContaining({ work: "transceiver" }),
+            tags: ["gallery_etsy_launch_2026", "gallery_collector"],
+          }),
+        ]),
+      ])
+    );
+
+    expect(store.records("crm_ingest_receipts")).toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining([
+          expect.any(String),
+          expect.objectContaining({
+            schemaVersion: 2,
+            contractSchemaVersion: 2,
+            campaignId: "white_linen_night_nola_2026",
+            eventType: "commission_inquiry",
+            source: "rosser_gallery_white_linen_preview",
+          }),
+        ]),
+        expect.arrayContaining([
+          expect.any(String),
+          expect.objectContaining({
+            schemaVersion: 2,
+            contractSchemaVersion: 2,
+            campaignId: "etsy_store_launch_20260801",
+            eventType: "etsy_product_inquiry",
+            source: "rosser_gallery_etsy_launch_lead",
+          }),
+        ]),
+      ])
+    );
+
+    const serializedConsent = JSON.stringify(store.records("crm_consent_events"));
+    expect(serializedConsent).not.toContain("rt_ai_workflow");
+    expect(serializedConsent).not.toContain("square");
   });
 
   it("derives opaque customer IDs from workspace, email, and a stable HMAC secret", () => {

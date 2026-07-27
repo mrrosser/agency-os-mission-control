@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 2,
+  "lane": "etsy_store_launch_20260801",
+  "eventType": "etsy_waitlist_submit",
+  "externalEventId": "rg_etsy_waitlist_b1a8a3da-f273-47f5-97ea-066867642cb8",
+  "capturedAt": "2026-07-27T16:30:00.000Z",
+  "contact": {
+    "name": "Example Mini Collector",
+    "email": "mini.collector@example.com"
+  },
+  "collector": {
+    "city": "Chicago, IL",
+    "interest": "store-launch",
+    "work": "the-braider",
+    "note": "Please send the verified shop link when the collection opens."
+  },
+  "permissions": {
+    "responseEmail": true,
+    "marketingEmail": true,
+    "sms": false,
+    "rtSolutions": false,
+    "consentVersion": "etsy-waitlist-v2",
+    "consentedAt": "2026-07-27T16:29:30.000Z"
+  },
+  "campaign": {
+    "id": "etsy_store_launch_20260801",
+    "namespace": "etsy_store_launch_20260801",
+    "market": "united_states",
+    "language": "en-US",
+    "shop": "RosserGallery",
+    "firstTouch": {
+      "captured_at": "2026-07-27T16:20:00.000Z",
+      "utm_source": "instagram",
+      "utm_medium": "paid_social",
+      "utm_campaign": "etsy_store_launch_20260801",
+      "utm_content": "prelaunch_reel_v1",
+      "utm_term": "warm",
+      "market": "united_states",
+      "language": "en-US",
+      "shop": "RosserGallery"
+    },
+    "lastTouch": {
+      "captured_at": "2026-07-27T16:29:00.000Z",
+      "utm_source": "instagram",
+      "utm_medium": "paid_social",
+      "utm_campaign": "etsy_store_launch_20260801",
+      "utm_content": "prelaunch_reel_v1",
+      "utm_term": "warm",
+      "market": "united_states",
+      "language": "en-US",
+      "shop": "RosserGallery"
+    }
+  }
+}

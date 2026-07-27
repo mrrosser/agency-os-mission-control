@@ -132,6 +132,21 @@ versions.
 - Existing secret versions: `mission-control-crm-ingest-token:3` and
   `mission-control-crm-customer-id-hmac:3`
 
+### Current multi-lane release result
+
+- Reviewed implementation commit: `080ca9b57f85c2bb727ac45a7f481e6c47d3ce7f`
+- Firebase review channel: `rosser-crm-lanes-20260727`
+- Firebase code revision: `ssrleadflowreview-00391-geh`
+- Secret-bound candidate revision: `ssrleadflowreview-rosser-crm-lanes-20260727`
+- Candidate tag URL: `https://rosser-crm-candidate---ssrleadflowreview-gdyt2qma6a-uc.a.run.app`
+- Candidate production traffic: zero percent
+- Production traffic: 100% on baseline `ssrleadflowreview-00264-xmm`
+- Authenticated non-writing readiness: passed for versions 1 and 2 and all three campaign IDs, correlation ID `rng-candidate-lanes-readiness-20260727-0001`
+
+No write-bearing POST was sent to the candidate or production service. Contract
+support and readiness do not enable any website lane, publish a campaign, or
+authorize Meta, Etsy, Square, or CRM mutations.
+
 The live target had no `PAPERCLIP_*` bindings during audit, so the CRM reads the
 Firestore projection. If any Paperclip binding appears before release, stop and
 design a separately approved canonical write path; this receiver does not export

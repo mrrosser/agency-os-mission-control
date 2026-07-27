@@ -47,12 +47,12 @@ Not in scope: production-traffic promotion without a separate readback, Secret M
 - [x] Reproducible clean install, 37-test focused suite, and scoped lint passed on the patched dependency tree.
 - [x] Patched production build completed successfully; the only warning is the inherited protobuf dynamic-import warning.
 - [x] Staged-diff secret scan passed with no leaks.
-- [ ] Clean commit attestation and approved zero-traffic candidate readiness check.
-- [x] Tagged no-traffic candidate, authenticated read-only smoke, exact revision promotion, and rollback commands documented. None were run.
+- [x] Clean release commits attested; the multi-lane implementation commit is `080ca9b57f85c2bb727ac45a7f481e6c47d3ce7f`.
+- [x] Tagged no-traffic candidate created and authenticated read-only readiness check completed. Exact revision promotion and rollback commands remain documented but were not run.
 - [x] White Linen Night and Etsy launch v2 schemas added on the same endpoint without changing Atlanta v1.
 - [x] Lane-specific receipt sources, server-owned tags, timeline actions, and lead-only event allowlists implemented.
 - [x] Cross-lane customer dedupe, append-only Gallery consent, exact replay, attribution pinning, and forbidden provider-event tests added.
-- [ ] Review, commit, and deploy the v2 extension; existing candidate and production traffic are unchanged by this source-only step.
+- [x] Reviewed, committed, and deployed the v2 extension as zero-traffic candidate `ssrleadflowreview-rosser-crm-lanes-20260727`; production remains on baseline revision `ssrleadflowreview-00264-xmm` at 100% traffic.
 
 ## Verification plan
 
@@ -75,8 +75,9 @@ gitleaks git --staged --redact --no-banner --no-color
 ```
 
 External APIs and Firestore writes are mocked/faked in tests. Production Firestore
-was queried read-only only to resolve tenant routing. No deploy command will be run
-as part of this implementation.
+was queried read-only only to resolve tenant routing. The only external release
+mutation was an approved preview build and zero-traffic candidate; no production
+traffic promotion or write-bearing smoke was performed.
 
 ## Verification results
 
@@ -87,6 +88,14 @@ as part of this implementation.
 - `npm run build`: PASS on Next.js `15.5.22`; 96 static pages generated and the collector receiver route is present in the final route manifest. One inherited protobuf dynamic-import warning remains.
 - Staged-diff `gitleaks`: PASS; 97.64 KB scanned with no leaks.
 - `npm audit --omit=dev`: 22 inherited findings remain (11 moderate, 11 high, 0 critical). The remaining high findings are constrained to upstream-incompatible Sharp/PostCSS ranges or build/outbound-client dependency paths; image optimization is disabled and attacker-controlled image processing is prohibited for this release. Follow-up lock/override cleanup is required, but the critical public-release blocker and direct Next.js advisories have been patched.
+- Multi-lane receiver suite: PASS, 46 tests across 5 files after the White Linen and Etsy v2 extension.
+- Scoped ESLint and TypeScript `--noEmit`: PASS with zero findings.
+- Production Next.js build: PASS; only the inherited protobuf dynamic-import warning remains.
+- Firebase review channel: `rosser-crm-lanes-20260727`, URL `https://leadflow-review--rosser-crm-lanes-20260727-4vba1rme.web.app`, expires 2026-08-03 02:55:38 America/Chicago.
+- Firebase code revision: `ssrleadflowreview-00391-geh`.
+- Secret-bound candidate: `ssrleadflowreview-rosser-crm-lanes-20260727`, tagged at `https://rosser-crm-candidate---ssrleadflowreview-gdyt2qma6a-uc.a.run.app`, with zero production traffic.
+- Authenticated non-writing readiness: PASS for schema versions 1 and 2 and all three campaign IDs; correlation ID `rng-candidate-lanes-readiness-20260727-0001`.
+- Production traffic readback: unchanged at 100% on `ssrleadflowreview-00264-xmm`.
 
 ## Rollback
 

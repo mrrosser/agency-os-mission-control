@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "externalEventId": "rg_collector_7a1f5330-d71f-4dc0-aefe-1f9ad76da5a9",
+  "capturedAt": "2026-07-25T15:30:00.000Z",
+  "contact": {
+    "name": "Example Collector",
+    "email": "collector@example.com"
+  },
+  "collector": {
+    "city": "Atlanta, GA",
+    "interest": "private-viewing",
+    "note": "I would like to learn more about The Braider."
+  },
+  "permissions": {
+    "responseEmail": true,
+    "marketingEmail": false,
+    "sms": false,
+    "rtSolutions": false,
+    "consentVersion": "collector-v1",
+    "consentedAt": null
+  },
+  "campaign": {
+    "id": "the-braider-atlanta",
+    "market": "atlanta",
+    "language": "en-US",
+    "sculpture": "the-braider",
+    "creativeHook": "process",
+    "firstTouch": {
+      "captured_at": "2026-07-25T15:20:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_atlanta_45plus",
+      "utm_content": "process_22_en",
+      "market": "atlanta",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "process"
+    },
+    "lastTouch": {
+      "captured_at": "2026-07-25T15:29:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_atlanta_45plus",
+      "utm_content": "process_22_en",
+      "market": "atlanta",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "process"
+    }
+  }
+}

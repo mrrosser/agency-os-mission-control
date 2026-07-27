@@ -41,7 +41,11 @@ export function createLogger(context: LogContext): Logger {
 }
 
 export function getCorrelationId(request: NextRequest): string {
-  return request.headers.get("x-correlation-id") || randomUUID();
+  const candidate = request.headers.get("x-correlation-id")?.trim();
+  // Never copy control characters or unbounded caller input into structured logs.
+  return candidate && /^[A-Za-z0-9._:-]{1,128}$/.test(candidate)
+    ? candidate
+    : randomUUID();
 }
 
 export function sanitizeError(error: unknown) {

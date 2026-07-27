@@ -9,7 +9,7 @@ npm ci
 ```
 2) Create `.env.local` from the template:
 ```bash
-copy .env.local.example .env.local
+copy .env.example .env.local
 ```
 3) Fill in required values in `.env.local`:
 - `NEXT_PUBLIC_FIREBASE_*` (Firebase web app config)
@@ -75,6 +75,7 @@ npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_c
 ```
 - Omit `--uid` to backfill all leads in the configured scope. Use `--dry-run` to preview counts without writing.
 - Timeline replay is idempotent through Paperclip `externalKey` values, so rerunning the backfill will not duplicate imported customer-history events.
+- Rosser Gallery collector ingest: `POST /api/integrations/rosser-gallery/collector-leads` (service-to-service only). See `docs/runbook-rosser-gallery-crm-ingest.md`; the shared synthetic sender fixture is `contracts/rosser-gallery/collector-lead.v1.json`.
 
 ## Ad Ops Control
 - Campaign listing route: `GET /api/ad-ops/campaigns`

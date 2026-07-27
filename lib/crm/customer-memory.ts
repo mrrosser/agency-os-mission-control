@@ -296,14 +296,19 @@ export async function listProjectedCustomers(
     return leadSnap.docs
       .map((doc) => {
         const row = doc.data() as Record<string, unknown>;
-        const businessUnit = normalizeBusinessUnit(row.businessUnit);
+        const businessUnit = normalizeBusinessUnit(
+          row.latestBusinessUnit || row.businessUnit
+        );
         const offerCode =
-          normalizeOfferCode(row.offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[businessUnit];
+          normalizeOfferCode(row.latestOfferCode || row.offerCode) ||
+          DEFAULT_OFFER_CODE_BY_BUSINESS[businessUnit];
         const email = asString(row.email);
         const phone = asString(row.phone);
         const stats = activityStats.get(doc.id);
         const lastTimelineAt = newestIso([
           stats?.lastAt || null,
+          toIso(row.latestTimelineAt),
+          toIso(row.lastInquiryAt),
           toIso(row.updatedAt),
           toIso(row.createdAt),
         ]);
@@ -311,10 +316,14 @@ export async function listProjectedCustomers(
           customerId: doc.id,
           companyName:
             asString(row.companyName) || asString(row.company) || asString(row.name) || "Untitled Lead",
-          contactName: asString(row.founderName) || asString(row.name),
+          contactName:
+            asString(row.latestContactName) ||
+            (asString(row.recordType) === "individual_collector"
+              ? asString(row.contactName) || asString(row.founderName) || asString(row.name)
+              : asString(row.founderName) || asString(row.contactName) || asString(row.name)),
           email,
           phone,
-          sourceLabel: asString(row.source),
+          sourceLabel: asString(row.latestSource) || asString(row.source),
           businessUnit,
           offerCode,
           pipelineStage: normalizeCrmPipelineStage(row.pipelineStage || row.status),
@@ -323,7 +332,7 @@ export async function listProjectedCustomers(
             phone,
           }),
           lastTimelineAt,
-          timelineCount: (stats?.count || 0) + 1,
+          timelineCount: Math.max((stats?.count || 0) + 1, asNumber(row.timelineCount) || 1),
           duplicateProtection: true,
           dncProtection: true,
           sourceOfTruth: "firestore_projected" as const,
@@ -351,7 +360,7 @@ export async function getProjectedCustomerTimeline(
   try {
     const [leadSnap, activitySnap] = await Promise.all([
       getAdminDb().collection("leads").doc(customerId).get(),
-      getAdminDb().collection("activities").where("userId", "==", uid).limit(200).get(),
+      getAdminDb().collection("activities").where("customerId", "==", customerId).limit(200).get(),
     ]);
 
     if (!leadSnap.exists) return [];
@@ -388,7 +397,9 @@ export async function getProjectedCustomerTimeline(
     const activityEvents: CustomerTimelineEvent[] = [];
     for (const doc of activitySnap.docs) {
       const row = doc.data() as Record<string, unknown>;
-      if (asString(row.customerId) !== customerId) continue;
+      if (asString(row.userId) !== uid || asString(row.customerId) !== customerId) {
+        continue;
+      }
       const type = asString(row.type) || "system";
       activityEvents.push({
         eventId: doc.id,

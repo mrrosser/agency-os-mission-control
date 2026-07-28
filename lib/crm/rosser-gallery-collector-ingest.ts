@@ -129,6 +129,12 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function laneProjectionForLead(payload: RosserGalleryCollectorLead): LaneProjection {
   if (payload.schemaVersion === 1) {
+    const campaignTags =
+      payload.campaign.id === "the-braider-dmv"
+        ? ["gallery_the_braider", "gallery_market_dmv"]
+        : payload.campaign.id === "the-braider-houston"
+          ? ["gallery_the_braider", "gallery_market_houston"]
+          : [];
     const interestTags =
       payload.collector.interest === "private-viewing"
         ? ["gallery_private_viewing"]
@@ -150,7 +156,7 @@ function laneProjectionForLead(payload: RosserGalleryCollectorLead): LaneProject
       timelineAction: "crm.collector_inquiry_received",
       timelineSummary: "Collector request received for The Braider.",
       nextAction,
-      tags: ["gallery_collector", ...interestTags],
+      tags: ["gallery_collector", ...campaignTags, ...interestTags],
     };
   }
 

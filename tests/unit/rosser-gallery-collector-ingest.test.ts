@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixtureJson from "@/contracts/rosser-gallery/collector-lead.v1.json";
+import dmvFixtureJson from "@/contracts/rosser-gallery/collector-lead-dmv.v1.json";
+import houstonFixtureJson from "@/contracts/rosser-gallery/collector-lead-houston.v1.json";
 import etsyFixtureJson from "@/contracts/rosser-gallery/etsy-launch-waitlist.v2.json";
 import whiteLinenFixtureJson from "@/contracts/rosser-gallery/white-linen-preview-lead.v2.json";
 import {
@@ -138,6 +140,10 @@ function fixture() {
   return rosserGalleryCollectorLeadV1Schema.parse(structuredClone(fixtureJson));
 }
 
+function cityFixture(source: typeof dmvFixtureJson | typeof houstonFixtureJson) {
+  return rosserGalleryCollectorLeadV1Schema.parse(structuredClone(source));
+}
+
 function dependencies(store: FakeCrmStore, dailyCreateLimit?: number) {
   return {
     db: store as unknown as CrmIngestStore,
@@ -219,6 +225,57 @@ describe("Rosser Gallery collector-lead CRM projection", () => {
       grants: ["rosser_gallery.inquiry_response"],
       correlationId: "rng-ingest-unit-test-0001",
     });
+  });
+
+  it("derives the exact DMV and Houston tags on the configured Gallery route", async () => {
+    for (const [source, campaignId, cityTag] of [
+      [dmvFixtureJson, "the-braider-dmv", "gallery_market_dmv"],
+      [houstonFixtureJson, "the-braider-houston", "gallery_market_houston"],
+    ] as const) {
+      const store = new FakeCrmStore();
+      const payload = cityFixture(source);
+
+      const result = await ingestRosserGalleryCollectorLead(
+        payload,
+        config,
+        dependencies(store)
+      );
+
+      const customer = store.records("leads")[0][1];
+      const activity = store.records("activities")[0][1];
+      const receipt = store.records("crm_ingest_receipts")[0][1];
+      expect(customer).toMatchObject({
+        userId: config.ownerUid,
+        ownerUid: config.ownerUid,
+        workspaceId: config.workspaceId,
+        businessUnit: config.businessUnit,
+        latestBusinessUnit: config.businessUnit,
+        latestCampaign: { id: campaignId },
+        tags: [
+          "gallery_collector",
+          "gallery_the_braider",
+          cityTag,
+          "gallery_private_viewing",
+        ],
+      });
+      expect(activity).toMatchObject({
+        customerId: result.customerId,
+        workspaceId: config.workspaceId,
+        campaign: { id: campaignId },
+        tags: [
+          "gallery_collector",
+          "gallery_the_braider",
+          cityTag,
+          "gallery_private_viewing",
+        ],
+      });
+      expect(receipt).toMatchObject({
+        ownerUid: config.ownerUid,
+        workspaceId: config.workspaceId,
+        businessUnit: config.businessUnit,
+        campaignId,
+      });
+    }
   });
 
   it("returns the stored result for an identical retry without duplicate writes", async () => {

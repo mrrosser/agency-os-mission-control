@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixtureJson from "@/contracts/rosser-gallery/collector-lead.v1.json";
+import dmvFixtureJson from "@/contracts/rosser-gallery/collector-lead-dmv.v1.json";
+import houstonFixtureJson from "@/contracts/rosser-gallery/collector-lead-houston.v1.json";
 import etsyFixtureJson from "@/contracts/rosser-gallery/etsy-launch-waitlist.v2.json";
 import whiteLinenFixtureJson from "@/contracts/rosser-gallery/white-linen-preview-lead.v2.json";
 import {
@@ -14,6 +16,14 @@ import {
 
 function fixture(): Record<string, unknown> {
   return structuredClone(fixtureJson) as Record<string, unknown>;
+}
+
+function dmvFixture(): Record<string, unknown> {
+  return structuredClone(dmvFixtureJson) as Record<string, unknown>;
+}
+
+function houstonFixture(): Record<string, unknown> {
+  return structuredClone(houstonFixtureJson) as Record<string, unknown>;
 }
 
 function whiteLinenFixture(): Record<string, unknown> {
@@ -32,6 +42,47 @@ describe("Rosser Gallery collector-lead v1 contract", () => {
     expect(parsed.contact.email).toBe("collector@example.com");
     expect(parsed.campaign.id).toBe("the-braider-atlanta");
     expect(parsed.permissions.marketingEmail).toBe(false);
+  });
+
+  it("accepts the exact DMV and Houston campaign fixtures", () => {
+    const dmv = rosserGalleryCollectorLeadV1Schema.parse(dmvFixture());
+    const houston = rosserGalleryCollectorLeadV1Schema.parse(houstonFixture());
+
+    expect(dmv.campaign).toMatchObject({
+      id: "the-braider-dmv",
+      market: "dmv",
+      firstTouch: { utm_campaign: "the_braider_dmv_45plus" },
+      lastTouch: { utm_campaign: "the_braider_dmv_45plus" },
+    });
+    expect(houston.campaign).toMatchObject({
+      id: "the-braider-houston",
+      market: "houston",
+      firstTouch: { utm_campaign: "the_braider_houston_45plus" },
+      lastTouch: { utm_campaign: "the_braider_houston_45plus" },
+    });
+  });
+
+  it("rejects cross-city attribution and caller-provided CRM tags", () => {
+    const campaignDrift = dmvFixture();
+    const campaign = campaignDrift.campaign as Record<string, unknown>;
+    campaign.id = "the-braider-houston";
+    expect(rosserGalleryCollectorLeadV1Schema.safeParse(campaignDrift).success).toBe(
+      false
+    );
+
+    const marketDrift = dmvFixture();
+    const marketCampaign = marketDrift.campaign as Record<string, unknown>;
+    marketCampaign.market = "houston";
+    const firstTouch = marketCampaign.firstTouch as Record<string, unknown>;
+    firstTouch.market = "houston";
+    firstTouch.utm_campaign = "the_braider_houston_45plus";
+    expect(rosserGalleryCollectorLeadV1Schema.safeParse(marketDrift).success).toBe(
+      false
+    );
+
+    const tagged = houstonFixture();
+    tagged.tags = ["gallery_market_dmv"];
+    expect(rosserGalleryCollectorLeadV1Schema.safeParse(tagged).success).toBe(false);
   });
 
   it("rejects unknown root and attribution fields", () => {

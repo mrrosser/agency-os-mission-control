@@ -27,12 +27,23 @@ non-writing readiness check used for candidate smoke tests.
 | Schema | Campaign ID / namespace | Browser lead events |
 | --- | --- | --- |
 | v1 | `the-braider-atlanta` | legacy `collector_request` payload (no root `eventType`) |
+| v1 | `the-braider-dmv` | `collector_request` payload (no root `eventType`) |
+| v1 | `the-braider-houston` | `collector_request` payload (no root `eventType`) |
 | v2 | `white_linen_night_nola_2026` | `event_preview_lead`, `private_viewing_inquiry`, `commission_inquiry` |
 | v2 | `etsy_store_launch_20260801` | `etsy_waitlist_submit`, `etsy_product_inquiry` |
 
 Examples are in `contracts/rosser-gallery/collector-lead.v1.json`,
+`contracts/rosser-gallery/collector-lead-dmv.v1.json`,
+`contracts/rosser-gallery/collector-lead-houston.v1.json`,
 `contracts/rosser-gallery/white-linen-preview-lead.v2.json`, and
 `contracts/rosser-gallery/etsy-launch-waitlist.v2.json`.
+
+The three v1 The Braider campaign discriminants pin campaign ID, market, and the
+matching Meta UTM campaign. The receiver derives tags; callers cannot provide
+them. DMV receives `gallery_collector`, `gallery_the_braider`, and
+`gallery_market_dmv`; Houston receives `gallery_collector`,
+`gallery_the_braider`, and `gallery_market_houston`, plus any existing
+receiver-owned explicit-interest tag.
 
 V2 pins the root lane, campaign ID and namespace, market, language, event/shop,
 external-event prefix, consent version, event/interest pairing, and first/last
@@ -116,8 +127,9 @@ same key returns `409`. The emulator may be cleared after verification.
 - Treat `400`, `403`, `409`, and `413` as terminal and retain for operator review.
 - Never log contact fields or either credential.
 
-V1 remains pinned to `rg_collector_<UUID>` and campaign identity
-`the-braider-atlanta` / `atlanta` / `en-US` / `the-braider`. V2 uses
+V1 remains pinned to `rg_collector_<UUID>` and one exact The Braider campaign
+identity: Atlanta / `atlanta`, DMV / `dmv`, or Houston / `houston`, with
+`en-US` / `the-braider` shared by all three. V2 uses
 lane-specific `rg_white_linen_*`, `rg_etsy_waitlist_*`, and `rg_etsy_inquiry_*`
 identifiers. Delivery, attribution, and consent timestamps are bounded for all
 versions.

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fixtureJson from "@/contracts/rosser-gallery/collector-lead.v1.json";
+import dmvFixtureJson from "@/contracts/rosser-gallery/collector-lead-dmv.v1.json";
+import houstonFixtureJson from "@/contracts/rosser-gallery/collector-lead-houston.v1.json";
 import etsyFixtureJson from "@/contracts/rosser-gallery/etsy-launch-waitlist.v2.json";
 import whiteLinenFixtureJson from "@/contracts/rosser-gallery/white-linen-preview-lead.v2.json";
 import {
@@ -121,7 +123,24 @@ describe("Rosser Gallery collector-lead integration route", () => {
       receiver: "rosser-gallery-collector-leads",
       contractVersions: [1, 2],
       supportedLanes: [
-        expect.objectContaining({ campaignId: "the-braider-atlanta" }),
+        expect.objectContaining({
+          schemaVersion: 1,
+          campaignId: "the-braider-atlanta",
+          market: "atlanta",
+          utmCampaign: "the_braider_atlanta_45plus",
+        }),
+        expect.objectContaining({
+          schemaVersion: 1,
+          campaignId: "the-braider-dmv",
+          market: "dmv",
+          utmCampaign: "the_braider_dmv_45plus",
+        }),
+        expect.objectContaining({
+          schemaVersion: 1,
+          campaignId: "the-braider-houston",
+          market: "houston",
+          utmCampaign: "the_braider_houston_45plus",
+        }),
         expect.objectContaining({ campaignId: "white_linen_night_nola_2026" }),
         expect.objectContaining({ campaignId: "etsy_store_launch_20260801" }),
       ],
@@ -243,6 +262,30 @@ describe("Rosser Gallery collector-lead integration route", () => {
     }
   });
 
+  it("accepts both city fixtures on the same server-owned CRM route", async () => {
+    for (const payload of [dmvFixtureJson, houstonFixtureJson]) {
+      ingestMock.mockClear();
+      const body = structuredClone(payload) as Record<string, unknown>;
+      const campaign = body.campaign as Record<string, unknown>;
+      const response = await invoke(createRequest({ body }));
+
+      expect(response.status).toBe(201);
+      expect(ingestMock).toHaveBeenCalledOnce();
+      expect(ingestMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schemaVersion: 1,
+          campaign: expect.objectContaining({ id: campaign.id }),
+        }),
+        expect.objectContaining({
+          ownerUid: "owner-uid",
+          workspaceId: "rosser-gallery-workspace",
+          businessUnit: "rosser_nft_gallery",
+        }),
+        { correlationId: "rng-smoke-test-0001" }
+      );
+    }
+  });
+
   it("rejects provider commerce, check-in, and caller-supplied CRM tags", async () => {
     for (const eventType of [
       "purchase",
@@ -260,8 +303,8 @@ describe("Rosser Gallery collector-lead integration route", () => {
       expect(response.status).toBe(400);
     }
 
-    const tagged = structuredClone(etsyFixtureJson) as Record<string, unknown>;
-    tagged.tags = ["rt_ai_workflow"];
+    const tagged = structuredClone(dmvFixtureJson) as Record<string, unknown>;
+    tagged.tags = ["gallery_market_dmv"];
     const taggedResponse = await invoke(createRequest({ body: tagged }));
     expect(taggedResponse.status).toBe(400);
     expect(ingestMock).not.toHaveBeenCalled();

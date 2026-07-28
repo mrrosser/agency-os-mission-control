@@ -81,6 +81,75 @@ describe("Rosser Gallery projected CRM visibility", () => {
     });
   });
 
+  it("keeps both city-lane projections visible in the shared owner workspace", async () => {
+    const ownerQueries: Array<{ collection: string; field: string; value: unknown }> = [];
+    const cityCustomers = [
+      {
+        id: "dmv-customer",
+        data: {
+          userId: "owner-uid",
+          companyName: "DMV Collector",
+          latestContactName: "DMV Collector",
+          latestBusinessUnit: "rosser_nft_gallery",
+          latestOfferCode: "RNG-COLLECTOR-PREVIEW",
+          latestSource: "Rosser Gallery collector request",
+          tags: [
+            "gallery_collector",
+            "gallery_the_braider",
+            "gallery_market_dmv",
+          ],
+          lastInquiryAt: "2026-07-25T15:30:00.000Z",
+        },
+      },
+      {
+        id: "houston-customer",
+        data: {
+          userId: "owner-uid",
+          companyName: "Houston Collector",
+          latestContactName: "Houston Collector",
+          latestBusinessUnit: "rosser_nft_gallery",
+          latestOfferCode: "RNG-COLLECTOR-PREVIEW",
+          latestSource: "Rosser Gallery collector request",
+          tags: [
+            "gallery_collector",
+            "gallery_the_braider",
+            "gallery_market_houston",
+          ],
+          lastInquiryAt: "2026-07-25T15:31:00.000Z",
+        },
+      },
+    ];
+    getAdminDbMock.mockReturnValue({
+      collection: (name: string) => ({
+        where: (field: string, _operator: string, value: unknown) => {
+          ownerQueries.push({ collection: name, field, value });
+          return queryResult(name === "leads" ? cityCustomers : []);
+        },
+      }),
+    } as never);
+
+    const customers = await listProjectedCustomers("owner-uid", log as never, 100);
+
+    expect(ownerQueries).toEqual([
+      { collection: "leads", field: "userId", value: "owner-uid" },
+      { collection: "activities", field: "userId", value: "owner-uid" },
+    ]);
+    expect(customers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          customerId: "dmv-customer",
+          businessUnit: "rosser_nft_gallery",
+          sourceLabel: "Rosser Gallery collector request",
+        }),
+        expect.objectContaining({
+          customerId: "houston-customer",
+          businessUnit: "rosser_nft_gallery",
+          sourceLabel: "Rosser Gallery collector request",
+        }),
+      ])
+    );
+  });
+
   it("queries the selected customer directly so its collector inquiry remains visible", async () => {
     const customerId = "rng-customer";
     let activityQuery: { field: string; value: unknown } | null = null;

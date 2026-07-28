@@ -18,6 +18,93 @@ Add a safe, retryable service-to-service receiver that projects allowlisted Ross
 
 Not in scope: production-traffic promotion without a separate readback, Secret Manager writes, production data migration, outbound email/SMS, Meta campaign activation, Square/Etsy mutation, provider commerce ingestion, or any campaign enablement. The approved release may create a tagged zero-traffic candidate and perform its authenticated non-writing readiness check.
 
+## 2026-07-28 local DMV and Houston receiver extension
+
+### Definition of done
+
+- [x] Versioned v1 fixtures and strict contract tests accept only campaign
+  `the-braider-dmv` / market `dmv` / UTM campaign
+  `the_braider_dmv_45plus` and campaign `the-braider-houston` / market
+  `houston` / UTM campaign `the_braider_houston_45plus`.
+- [x] Caller-provided tags and cross-city campaign, market, or UTM combinations
+  fail contract validation.
+- [x] The ingest projection reuses the configured Atlanta owner, workspace, and
+  `rosser_nft_gallery` business unit and derives only server-owned tags:
+  `gallery_collector`, `gallery_the_braider`, and the matching
+  `gallery_market_dmv` or `gallery_market_houston` tag.
+- [x] Authenticated readiness reports both new v1 lanes without disclosing tenant
+  routing or invoking ingest, and route tests accept both fixtures without a real
+  provider or Firestore call.
+- [x] Existing projected-customer visibility remains owner-scoped for city-lane
+  records.
+- [ ] Focused tests, scoped lint, TypeScript, build, and local security checks pass,
+  with results recorded in this section.
+
+### No feature creep
+
+In scope: the two v1 receiver contracts, two fixtures, server-derived city tags,
+readiness metadata, focused contract/ingest/readiness/visibility/route tests, and
+this plan update. Out of scope: deployment, traffic changes, provider calls,
+synthetic or production writes, secret changes, sender deployment, campaign
+activation, and unrelated receiver refactors. Stop if work outside these gates is
+needed.
+
+### Milestones and files
+
+1. Add `contracts/rosser-gallery/collector-lead-dmv.v1.json` and
+   `contracts/rosser-gallery/collector-lead-houston.v1.json`; validate them in
+   `tests/unit/rosser-gallery-collector-contract.test.ts`.
+2. Extend the v1 campaign allowlist in
+   `lib/crm/rosser-gallery-collector-contract.ts`; verify cross-city drift and
+   caller tags are rejected.
+3. Add deterministic lane projection tags in
+   `lib/crm/rosser-gallery-collector-ingest.ts`; verify fake-store customer and
+   timeline writes in `tests/unit/rosser-gallery-collector-ingest.test.ts`.
+4. Extend readiness and route coverage in
+   `tests/smoke/rosser-gallery-collector-leads-route.test.ts` and owner-scoped
+   visibility coverage in `tests/unit/rosser-gallery-crm-visibility.test.ts`.
+5. Run the local gates below and record their exact results here. The existing
+   `docs/runbook-rosser-gallery-crm-ingest.md` remains the local-run and Cloud Run
+   deployment reference; no deployment command is authorized for this extension.
+
+### Local verification gates
+
+```powershell
+npx vitest run tests/unit/rosser-gallery-collector-contract.test.ts `
+  tests/unit/rosser-gallery-collector-ingest.test.ts `
+  tests/unit/rosser-gallery-crm-visibility.test.ts `
+  tests/smoke/rosser-gallery-collector-leads-route.test.ts
+npx eslint lib/crm/rosser-gallery-collector-contract.ts `
+  lib/crm/rosser-gallery-collector-ingest.ts `
+  tests/unit/rosser-gallery-collector-contract.test.ts `
+  tests/unit/rosser-gallery-collector-ingest.test.ts `
+  tests/unit/rosser-gallery-crm-visibility.test.ts `
+  tests/smoke/rosser-gallery-collector-leads-route.test.ts
+npx tsc --noEmit
+npm run build
+git diff --check
+gitleaks dir . --redact --no-banner --no-color
+```
+
+Pass criteria: all focused tests pass without network or Firestore access; lint,
+TypeScript, and build exit zero; diff check reports no whitespace errors; secret
+scan reports no leaks. No live readiness request, deployment, provider request, or
+synthetic write is part of verification.
+
+### Local verification results
+
+- Focused Vitest suites: PASS, 48 tests across four files. The first run exposed
+  one test-only variable-scope typo; the corrected rerun passed 48/48.
+- Scoped ESLint: PASS with zero findings.
+- `npx tsc --noEmit`: PASS.
+- `git diff --check`: PASS; Git emitted only the repository's existing LF-to-CRLF
+  conversion notices.
+- Scoped `gitleaks 8.30.0` stdin scan: PASS, 27.74 KB scanned with no leaks.
+- `npm run build`: INTERRUPTED while still compiling at the parent task's request
+  to hand off immediately after the scoped gates; no build failure was reported.
+- No deployment, live readiness request, provider call, Firestore access, or
+  synthetic write was performed.
+
 ## Design decisions
 
 1. `userId` and `workspaceId` are both written so the existing LeadFlow view and workspace-scoped reconciler can see the same projected record.
@@ -53,6 +140,8 @@ Not in scope: production-traffic promotion without a separate readback, Secret M
 - [x] Lane-specific receipt sources, server-owned tags, timeline actions, and lead-only event allowlists implemented.
 - [x] Cross-lane customer dedupe, append-only Gallery consent, exact replay, attribution pinning, and forbidden provider-event tests added.
 - [x] Reviewed, committed, and deployed the v2 extension as zero-traffic candidate `ssrleadflowreview-rosser-crm-lanes-20260727`; production remains on baseline revision `ssrleadflowreview-00264-xmm` at 100% traffic.
+- [x] Owner-approved synthetic Atlanta write plus exact replay passed against the tagged candidate: first response `201/replayed=false`, replay `200/replayed=true`, with stable receipt, customer, and timeline IDs.
+- [x] Service-wide promotion was deliberately withheld after environment-parity review found unrelated Mission Control bindings missing from the candidate. The bounded release route is the tagged candidate URL from the RNG server-side sender; global production remains on `ssrleadflowreview-00264-xmm`.
 
 ## Verification plan
 

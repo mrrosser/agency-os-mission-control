@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "externalEventId": "rg_collector_1c5e9a60-4b74-4e7f-9f63-70a401f8cd31",
+  "capturedAt": "2026-07-25T15:30:00.000Z",
+  "contact": {
+    "name": "Example Collector",
+    "email": "collector@example.com"
+  },
+  "collector": {
+    "city": "Washington, DC",
+    "interest": "private-viewing",
+    "note": "I would like to learn more about The Braider."
+  },
+  "permissions": {
+    "responseEmail": true,
+    "marketingEmail": false,
+    "sms": false,
+    "rtSolutions": false,
+    "consentVersion": "collector-v1",
+    "consentedAt": null
+  },
+  "campaign": {
+    "id": "the-braider-dmv",
+    "market": "dmv",
+    "language": "en-US",
+    "sculpture": "the-braider",
+    "creativeHook": "lineage",
+    "firstTouch": {
+      "captured_at": "2026-07-25T15:20:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_dmv_45plus",
+      "utm_content": "lineage_22_en",
+      "market": "dmv",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "lineage"
+    },
+    "lastTouch": {
+      "captured_at": "2026-07-25T15:29:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_dmv_45plus",
+      "utm_content": "lineage_22_en",
+      "market": "dmv",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "lineage"
+    }
+  }
+}

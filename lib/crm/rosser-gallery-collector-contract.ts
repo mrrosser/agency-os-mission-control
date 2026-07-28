@@ -90,28 +90,68 @@ export type RosserGalleryCollectorInterest = z.infer<
   typeof rosserGalleryCollectorInterestSchema
 >;
 
-const atlantaCampaignTouchSchema = z
-  .object({
-    captured_at: isoDateTime,
-    utm_source: z.literal("meta").optional(),
-    utm_medium: z.literal("paid_social").optional(),
-    utm_campaign: z.literal("the_braider_atlanta_45plus").optional(),
-    utm_content: z
-      .string()
-      .trim()
-      .regex(/^[a-z0-9][a-z0-9_-]{0,79}$/)
-      .optional(),
-    utm_term: z
-      .string()
-      .trim()
-      .regex(/^[A-Za-z0-9][A-Za-z0-9 _-]{0,79}$/)
-      .optional(),
-    market: z.literal("atlanta").optional(),
-    language: z.literal("en-US").optional(),
-    sculpture: z.literal("the-braider").optional(),
-    creative_hook: z.enum(["lineage", "process", "futurity"]).optional(),
-  })
-  .strict();
+function theBraiderCampaignTouchSchema<
+  const TMarket extends string,
+  const TUtmCampaign extends string,
+>(market: TMarket, utmCampaign: TUtmCampaign) {
+  return z
+    .object({
+      captured_at: isoDateTime,
+      utm_source: z.literal("meta").optional(),
+      utm_medium: z.literal("paid_social").optional(),
+      utm_campaign: z.literal(utmCampaign).optional(),
+      utm_content: z
+        .string()
+        .trim()
+        .regex(/^[a-z0-9][a-z0-9_-]{0,79}$/)
+        .optional(),
+      utm_term: z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9 _-]{0,79}$/)
+        .optional(),
+      market: z.literal(market).optional(),
+      language: z.literal("en-US").optional(),
+      sculpture: z.literal("the-braider").optional(),
+      creative_hook: z.enum(["lineage", "process", "futurity"]).optional(),
+    })
+    .strict();
+}
+
+function theBraiderCampaignSchema<
+  const TCampaignId extends string,
+  const TMarket extends string,
+  const TUtmCampaign extends string,
+>(campaignId: TCampaignId, market: TMarket, utmCampaign: TUtmCampaign) {
+  const touchSchema = theBraiderCampaignTouchSchema(market, utmCampaign);
+  return z
+    .object({
+      id: z.literal(campaignId),
+      market: z.literal(market),
+      language: z.literal("en-US"),
+      sculpture: z.literal("the-braider"),
+      creativeHook: z.enum(["lineage", "process", "futurity"]).optional(),
+      firstTouch: touchSchema,
+      lastTouch: touchSchema,
+    })
+    .strict();
+}
+
+const atlantaCampaignSchema = theBraiderCampaignSchema(
+  "the-braider-atlanta",
+  "atlanta",
+  "the_braider_atlanta_45plus"
+);
+const dmvCampaignSchema = theBraiderCampaignSchema(
+  "the-braider-dmv",
+  "dmv",
+  "the_braider_dmv_45plus"
+);
+const houstonCampaignSchema = theBraiderCampaignSchema(
+  "the-braider-houston",
+  "houston",
+  "the_braider_houston_45plus"
+);
 
 const sharedV1Shape = {
   schemaVersion: z.literal(1),
@@ -131,17 +171,11 @@ const sharedV1Shape = {
     })
     .strict(),
   permissions: permissionsSchema("collector-v1"),
-  campaign: z
-    .object({
-      id: z.literal("the-braider-atlanta"),
-      market: z.literal("atlanta"),
-      language: z.literal("en-US"),
-      sculpture: z.literal("the-braider"),
-      creativeHook: z.enum(["lineage", "process", "futurity"]).optional(),
-      firstTouch: atlantaCampaignTouchSchema,
-      lastTouch: atlantaCampaignTouchSchema,
-    })
-    .strict(),
+  campaign: z.discriminatedUnion("id", [
+    atlantaCampaignSchema,
+    dmvCampaignSchema,
+    houstonCampaignSchema,
+  ]),
 };
 
 function addTemporalOrderingIssues(
@@ -446,6 +480,22 @@ export const ROSSER_GALLERY_SUPPORTED_LEAD_LANES = [
   {
     schemaVersion: 1,
     campaignId: "the-braider-atlanta",
+    market: "atlanta",
+    utmCampaign: "the_braider_atlanta_45plus",
+    events: ["collector_request"],
+  },
+  {
+    schemaVersion: 1,
+    campaignId: "the-braider-dmv",
+    market: "dmv",
+    utmCampaign: "the_braider_dmv_45plus",
+    events: ["collector_request"],
+  },
+  {
+    schemaVersion: 1,
+    campaignId: "the-braider-houston",
+    market: "houston",
+    utmCampaign: "the_braider_houston_45plus",
     events: ["collector_request"],
   },
   {

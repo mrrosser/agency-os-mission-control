@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "externalEventId": "rg_collector_2d6fa791-8c35-45a8-a270-6b03f189de42",
+  "capturedAt": "2026-07-25T15:30:00.000Z",
+  "contact": {
+    "name": "Example Collector",
+    "email": "collector@example.com"
+  },
+  "collector": {
+    "city": "Houston, TX",
+    "interest": "private-viewing",
+    "note": "I would like to learn more about The Braider."
+  },
+  "permissions": {
+    "responseEmail": true,
+    "marketingEmail": false,
+    "sms": false,
+    "rtSolutions": false,
+    "consentVersion": "collector-v1",
+    "consentedAt": null
+  },
+  "campaign": {
+    "id": "the-braider-houston",
+    "market": "houston",
+    "language": "en-US",
+    "sculpture": "the-braider",
+    "creativeHook": "futurity",
+    "firstTouch": {
+      "captured_at": "2026-07-25T15:20:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_houston_45plus",
+      "utm_content": "futurity_22_en",
+      "market": "houston",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "futurity"
+    },
+    "lastTouch": {
+      "captured_at": "2026-07-25T15:29:00.000Z",
+      "utm_source": "meta",
+      "utm_medium": "paid_social",
+      "utm_campaign": "the_braider_houston_45plus",
+      "utm_content": "futurity_22_en",
+      "market": "houston",
+      "language": "en-US",
+      "sculpture": "the-braider",
+      "creative_hook": "futurity"
+    }
+  }
+}

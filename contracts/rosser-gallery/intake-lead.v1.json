@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "externalEventId": "intake_d5d5cbb7-6fd5-4e71-a537-f3975646630f",
+  "lane": "meeting_interest",
+  "businessUnit": "rosser_gallery",
+  "occurredAt": "2026-07-28T20:30:00.000Z",
+  "source": "website_chat",
+  "contact": {
+    "name": "Example Community Member",
+    "email": "community.member@example.com"
+  },
+  "summary": "I would love to arrange a private walkthrough and learn more about The Nurturer.",
+  "transactionalContactConsent": true,
+  "marketingConsent": false,
+  "marketingInterests": [],
+  "intent": "private_gallery_walkthrough",
+  "pagePath": "/visit"
+}

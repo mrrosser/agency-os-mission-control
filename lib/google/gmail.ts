@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { callGoogleAPI } from "./tokens";
 import type { Logger } from "@/lib/logging";
 
@@ -68,6 +69,8 @@ export interface EmailMessage {
     bcc?: string[];
     subject: string;
     body: string;
+    htmlBody?: string;
+    messageId?: string;
     isHtml?: boolean;
     attachments?: Array<{
         filename: string;
@@ -154,13 +157,38 @@ export async function sendEmail(
     // Subject
     messageParts.push(`Subject: ${email.subject}`);
 
-    // Content-Type
-    const contentType = email.isHtml ? 'text/html' : 'text/plain';
-    messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
-    messageParts.push('');
+    if (email.messageId) {
+        if (!/^<[A-Za-z0-9._-]{1,180}@[A-Za-z0-9.-]{1,120}>$/.test(email.messageId)) {
+            throw new Error('Invalid RFC 5322 Message-ID');
+        }
+        messageParts.push(`Message-ID: ${email.messageId}`);
+    }
 
-    // Body
-    messageParts.push(body);
+    if (email.htmlBody !== undefined) {
+        const htmlBody = normalizeEmailBodyForDelivery(email.htmlBody);
+        // A fresh opaque boundary keeps untrusted body text from predicting and
+        // terminating MIME parts. Delivery idempotency comes from Message-ID.
+        const boundary = `----=_MissionControl_${randomUUID().replace(/-/g, '')}`;
+        messageParts.push('MIME-Version: 1.0');
+        messageParts.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+        messageParts.push('');
+        messageParts.push(`--${boundary}`);
+        messageParts.push('Content-Type: text/plain; charset=utf-8');
+        messageParts.push('Content-Transfer-Encoding: 8bit');
+        messageParts.push('');
+        messageParts.push(body);
+        messageParts.push(`--${boundary}`);
+        messageParts.push('Content-Type: text/html; charset=utf-8');
+        messageParts.push('Content-Transfer-Encoding: 8bit');
+        messageParts.push('');
+        messageParts.push(htmlBody);
+        messageParts.push(`--${boundary}--`);
+    } else {
+        const contentType = email.isHtml ? 'text/html' : 'text/plain';
+        messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
+        messageParts.push('');
+        messageParts.push(body);
+    }
 
     // Build the raw message
     const rawMessage = messageParts.join('\r\n');

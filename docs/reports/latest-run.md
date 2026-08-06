@@ -14,6 +14,8 @@
 [2026-08-06T17:31:00Z] gate=typescript cmd=npx-tsc-noEmit result=PASS
 [2026-08-06T17:33:00Z] gate=build cmd=npm-run-build result=PASS routes=96
 [2026-08-06T17:34:00Z] gate=playwright-auth-list result=PASS projects=chromium,mobile-chrome tests=2
+[2026-08-06T17:57:00Z] gate=playwright-authenticated-local result=PASS projects=chromium,mobile-chrome tests=2 temporary_account_cleanup=PASS
+[2026-08-06T17:54:13Z] gate=github-pr-checks result=INFRASTRUCTURE_CANCELLED jobs_started=0 cause=github-actions-major-outage rerun_required=true
 [2026-08-06T17:34:00Z] gate=dependency-audit result=PASS_WITH_EXCEPTION full=12 moderate=8 high=4 critical=0 production=13 moderate=9 high=4 critical=0 breaking_major_fixes_only=true
 [2026-08-06T17:34:00Z] gate=gitleaks-staged result=PASS leaks=0
 [2026-08-06T17:29:00Z] gate=rollback-snapshot result=PASS cloud_run_revision=ssrleadflowreview-00297-dnx hosting_channel=rollback-crm-audit-20260806 expires=2026-08-13T17:29:00Z

@@ -80,7 +80,7 @@ These samples are diagnostic snapshots, not a statistically complete performance
 - Responsive CRM unit tests: 6 passed.
 - Desktop Chrome and Pixel 7 responsive public-shell Playwright tests: 4 passed.
 - TypeScript and touched-file ESLint passed after integration.
-- Authenticated desktop/mobile Playwright coverage now signs in through real Firebase Auth and mocks only CRM/autonomy business endpoints; production execution evidence is pending the deployment gate.
+- Authenticated desktop/mobile Playwright coverage signs in through real Firebase Auth and mocks only CRM/autonomy business endpoints. The local candidate passed Chromium and Pixel 7 end to end with temporary-account cleanup; production execution evidence is pending the deployment gate.
 - Final local unit gate: 90 files and 340 tests passed. The full smoke suite passed.
 - Final production build generated 96 application routes and passed type validation. Post-deploy and production performance evidence remain pending the merge deployment.
 - Staged secret scan passed with no leaks. Workflow YAML and the JSON deployment manifest parsed successfully.

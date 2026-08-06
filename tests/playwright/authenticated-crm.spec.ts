@@ -5,7 +5,17 @@ const testPassword = process.env.PLAYWRIGHT_TEST_PASSWORD;
 
 async function signIn(page: Page) {
   await page.goto("/login", { waitUntil: "domcontentloaded" });
-  await page.getByRole("tab", { name: "Direct" }).click();
+  const directTab = page.getByRole("tab", { name: "Direct" });
+  await expect
+    .poll(
+      async () => {
+        await directTab.click();
+        return directTab.getAttribute("aria-selected");
+      },
+      { timeout: 10_000 }
+    )
+    .toBe("true");
+  await expect(page.getByLabel("Email")).toBeVisible();
   await page.getByLabel("Email").fill(testEmail || "");
   await page.getByLabel("Password").fill(testPassword || "");
   await page.getByRole("button", { name: "Sign In" }).click();

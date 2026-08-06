@@ -82,6 +82,30 @@ export interface Day2RevenueAutomationResult {
   warnings: string[];
 }
 
+export function describeRevenueAutomationError(error: unknown): string {
+  if (!error || typeof error !== "object") return String(error || "Unknown error");
+
+  const record = error as Record<string, unknown>;
+  const isUsefulMessage = (candidate: unknown): candidate is string => {
+    if (typeof candidate !== "string" || !candidate.trim()) return false;
+    const compact = candidate.toLowerCase().replace(/[\s:;,._/-]+/g, "");
+    return !/^(undefined|null|unknown|error)+$/.test(compact);
+  };
+  const messageCandidates = [record.details, record.reason, record.message];
+  const message = messageCandidates.find(
+    isUsefulMessage,
+  );
+  const code =
+    typeof record.code === "number" || typeof record.code === "string"
+      ? String(record.code).trim()
+      : "";
+
+  if (code && message) return `${code}: ${message.trim()}`;
+  if (message) return message.trim();
+  if (code) return `Error code ${code}`;
+  return "Unknown structured error";
+}
+
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -304,7 +328,7 @@ export async function runDay2RevenueAutomation(
         error: null,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeRevenueAutomationError(error);
       warnings.push(`template '${templateId}' failed: ${message}`);
       args.log.warn("revenue.day2.template_failed", { templateId, error: message });
       templates.push({

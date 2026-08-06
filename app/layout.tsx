@@ -51,6 +51,9 @@ export default function RootLayout({
           id="firebase-client-config"
           dangerouslySetInnerHTML={{ __html: firebaseClientConfigScript }}
         />
+        {process.env.FIGMA_CAPTURE_ENABLED === "1" ? (
+          <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async />
+        ) : null}
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-foreground bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]`}

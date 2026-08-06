@@ -42,6 +42,12 @@ import {
     workspaceKeyFromBusinessUnit,
     type BusinessWorkspaceKey,
 } from "@/lib/revenue/offers";
+import {
+    OPERATIONS_POLL_INTERVAL_MS,
+    isTerminalLeadRunStatus,
+    shouldRefreshRunReceipts,
+    type LeadRunPollSnapshot,
+} from "@/lib/operations/polling";
 
 interface DriveCreateFolderResponse {
     success?: boolean;
@@ -263,6 +269,12 @@ interface LeadRunJob {
     lastError?: string | null;
 }
 
+interface LoadRunReceiptsOptions {
+    silent?: boolean;
+    includeDiagnostics?: boolean;
+    signal?: AbortSignal;
+}
+
 type ApiErrorIssue = { path?: Array<string | number>; message?: string };
 type ApiErrorDetails = { issues?: ApiErrorIssue[] };
 
@@ -358,8 +370,8 @@ export default function OperationsPage() {
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
     const [businessKey, setBusinessKey] = useState<BusinessWorkspaceKey>("aicf");
     const [offerCode, setOfferCode] = useState<string>(DEFAULT_OFFER_CODE_BY_BUSINESS.ai_cofoundry);
-    const [draftFirst, setDraftFirst] = useState(false);
-    const [dryRun, setDryRun] = useState(false);
+    const [draftFirst, setDraftFirst] = useState(true);
+    const [dryRun, setDryRun] = useState(true);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
     const [receiptLeads, setReceiptLeads] = useState<LeadReceiptLeadView[]>([]);
     const [receiptRunMeta, setReceiptRunMeta] = useState<NonNullable<LeadRunReceiptsResponse["run"]> | null>(null);
@@ -389,6 +401,9 @@ export default function OperationsPage() {
     const [loadingReceipts, setLoadingReceipts] = useState(false);
     const [receiptRunIdInput, setReceiptRunIdInput] = useState("");
     const [backgroundJob, setBackgroundJob] = useState<LeadRunJob | null>(null);
+    const receiptsInFlightRef = useRef(false);
+    const backgroundPollInFlightRef = useRef(false);
+    const backgroundPollSnapshotRef = useRef<LeadRunPollSnapshot | null>(null);
     const [startingBackgroundRun, setStartingBackgroundRun] = useState(false);
     const [jobActionLoading, setJobActionLoading] = useState(false);
     const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null);
@@ -792,12 +807,16 @@ export default function OperationsPage() {
         }
     };
 
-    const loadRunReceipts = async (runId: string) => {
-        if (!user) return;
+    const loadRunReceipts = async (runId: string, options: LoadRunReceiptsOptions = {}) => {
+        if (!user) return false;
         const normalizedRunId = runId.trim();
-        if (!normalizedRunId) return;
+        if (!normalizedRunId || receiptsInFlightRef.current) return false;
 
-        setLoadingReceipts(true);
+        const silent = options.silent === true;
+        const includeDiagnostics = options.includeDiagnostics !== false;
+        receiptsInFlightRef.current = true;
+
+        if (!silent) setLoadingReceipts(true);
         try {
             const headers = await buildAuthHeaders(user, {
                 correlationId: normalizedRunId,
@@ -805,6 +824,7 @@ export default function OperationsPage() {
             const res = await fetch(`/api/lead-runs/${normalizedRunId}/receipts`, {
                 method: "GET",
                 headers,
+                signal: options.signal,
             });
             const data = await readApiJson<LeadRunReceiptsResponse & { error?: string }>(res);
             if (!res.ok) {
@@ -838,17 +858,23 @@ export default function OperationsPage() {
             }));
 
             localStorage.setItem("mission_control_last_run_id", normalizedRunId);
-            void loadTelemetryGroups(normalizedRunId);
-            void loadQuotaSummary();
-            void loadAlerts();
-            toast.success(`Loaded receipts for run ${normalizedRunId.slice(0, 8)}`);
+            if (includeDiagnostics) {
+                void loadTelemetryGroups(normalizedRunId);
+                void loadQuotaSummary();
+                void loadAlerts();
+            }
+            if (!silent) toast.success(`Loaded receipts for run ${normalizedRunId.slice(0, 8)}`);
+            return true;
         } catch (error: unknown) {
+            if (error instanceof Error && error.name === "AbortError") return false;
             const message = error instanceof Error ? error.message : String(error);
             setLastErrorMessage(message);
-            toast.error("Could not load run receipts", { description: message });
+            if (!silent) toast.error("Could not load run receipts", { description: message });
             reportClientError(message, { source: "operations.load_receipts" });
+            return false;
         } finally {
-            setLoadingReceipts(false);
+            receiptsInFlightRef.current = false;
+            if (!silent) setLoadingReceipts(false);
         }
     };
 
@@ -857,7 +883,7 @@ export default function OperationsPage() {
         const stored = localStorage.getItem("mission_control_last_run_id");
         if (stored) {
             setReceiptRunIdInput(stored);
-            void loadRunReceipts(stored);
+            void loadRunReceipts(stored, { silent: true, includeDiagnostics: true });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid]);
@@ -1097,8 +1123,8 @@ export default function OperationsPage() {
         addLog("\n🛑 Lead run stopped by user.");
     };
 
-    const refreshBackgroundJob = async (runId: string) => {
-        if (!user) return;
+    const refreshBackgroundJob = async (runId: string, signal?: AbortSignal): Promise<LeadRunJob | null> => {
+        if (!user) return null;
         try {
             const headers = await buildAuthHeaders(user, {
                 correlationId: runId,
@@ -1106,6 +1132,7 @@ export default function OperationsPage() {
             const res = await fetch(`/api/lead-runs/${runId}/jobs`, {
                 method: "GET",
                 headers,
+                signal,
             });
             const data = await readApiJson<{ job?: LeadRunJob | null; error?: string }>(res);
             if (!res.ok) {
@@ -1115,43 +1142,43 @@ export default function OperationsPage() {
                     `Failed to load background job (status ${res.status}${cid ? ` cid=${cid}` : ""})`
                 );
             }
-            setBackgroundJob(data.job || null);
-            if (data.job) {
+            const job = data.job || null;
+            setBackgroundJob(job);
+            if (job) {
                 setDiagnostics((prev) => ({
                     ...prev,
-                    candidateTotal: data.job?.diagnostics?.sourceFetched ?? prev.candidateTotal ?? 0,
-                    scoredCount: data.job?.diagnostics?.sourceScored ?? prev.scoredCount ?? 0,
+                    candidateTotal: job.diagnostics?.sourceFetched ?? prev.candidateTotal ?? 0,
+                    scoredCount: job.diagnostics?.sourceScored ?? prev.scoredCount ?? 0,
                     filteredOut:
-                        data.job?.diagnostics?.sourceFilteredByScore ??
+                        job.diagnostics?.sourceFilteredByScore ??
                         prev.filteredOut ??
                         0,
-                    sourceWithEmail: data.job?.diagnostics?.sourceWithEmail ?? prev.sourceWithEmail ?? 0,
-                    sourceWithoutEmail: data.job?.diagnostics?.sourceWithoutEmail ?? prev.sourceWithoutEmail ?? 0,
-                    queueLagSeconds: data.job?.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
-                    processed: data.job?.diagnostics?.processedLeads || prev.processed || 0,
-                    failedLeads: data.job?.diagnostics?.failedLeads || prev.failedLeads || 0,
+                    sourceWithEmail: job.diagnostics?.sourceWithEmail ?? prev.sourceWithEmail ?? 0,
+                    sourceWithoutEmail: job.diagnostics?.sourceWithoutEmail ?? prev.sourceWithoutEmail ?? 0,
+                    queueLagSeconds: job.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
+                    processed: job.diagnostics?.processedLeads || prev.processed || 0,
+                    failedLeads: job.diagnostics?.failedLeads || prev.failedLeads || 0,
                     calendarRetries:
-                        data.job?.diagnostics?.calendarRetries || prev.calendarRetries || 0,
-                    meetingsScheduled: data.job?.diagnostics?.meetingsScheduled || prev.meetingsScheduled || 0,
-                    meetingsDrafted: data.job?.diagnostics?.meetingsDrafted || prev.meetingsDrafted || 0,
-                    emailsSent: data.job?.diagnostics?.emailsSent || prev.emailsSent || 0,
-                    emailsDrafted: data.job?.diagnostics?.emailsDrafted || prev.emailsDrafted || 0,
-                    noEmail: data.job?.diagnostics?.noEmail || prev.noEmail || 0,
-                    noSlot: data.job?.diagnostics?.noSlot || prev.noSlot || 0,
-                    smsSent: data.job?.diagnostics?.smsSent || prev.smsSent || 0,
-                    callsPlaced: data.job?.diagnostics?.callsPlaced || prev.callsPlaced || 0,
-                    avatarsQueued: data.job?.diagnostics?.avatarsQueued || prev.avatarsQueued || 0,
-                    channelFailures: data.job?.diagnostics?.channelFailures || prev.channelFailures || 0,
+                        job.diagnostics?.calendarRetries || prev.calendarRetries || 0,
+                    meetingsScheduled: job.diagnostics?.meetingsScheduled || prev.meetingsScheduled || 0,
+                    meetingsDrafted: job.diagnostics?.meetingsDrafted || prev.meetingsDrafted || 0,
+                    emailsSent: job.diagnostics?.emailsSent || prev.emailsSent || 0,
+                    emailsDrafted: job.diagnostics?.emailsDrafted || prev.emailsDrafted || 0,
+                    noEmail: job.diagnostics?.noEmail || prev.noEmail || 0,
+                    noSlot: job.diagnostics?.noSlot || prev.noSlot || 0,
+                    smsSent: job.diagnostics?.smsSent || prev.smsSent || 0,
+                    callsPlaced: job.diagnostics?.callsPlaced || prev.callsPlaced || 0,
+                    avatarsQueued: job.diagnostics?.avatarsQueued || prev.avatarsQueued || 0,
+                    channelFailures: job.diagnostics?.channelFailures || prev.channelFailures || 0,
                 }));
-                if (data.job.status === "completed" || data.job.status === "failed") {
-                    void loadQuotaSummary();
-                    void loadAlerts();
-                }
             }
+            return job;
         } catch (error: unknown) {
+            if (error instanceof Error && error.name === "AbortError") return null;
             const message = error instanceof Error ? error.message : String(error);
             setLastErrorMessage(message);
             reportClientError(message, { source: "operations.refresh_background_job", runId });
+            return null;
         }
     };
 
@@ -1398,12 +1425,44 @@ export default function OperationsPage() {
         if (!backgroundJob) return;
         if (!(backgroundJob.status === "queued" || backgroundJob.status === "running")) return;
 
-        const interval = window.setInterval(() => {
-            void refreshBackgroundJob(sourceRunId);
-            void loadRunReceipts(sourceRunId);
-        }, 5000);
+        const controller = new AbortController();
+        let disposed = false;
 
-        return () => window.clearInterval(interval);
+        const poll = async () => {
+            if (disposed || document.visibilityState === "hidden" || backgroundPollInFlightRef.current) return;
+            backgroundPollInFlightRef.current = true;
+            try {
+                const job = await refreshBackgroundJob(sourceRunId, controller.signal);
+                if (!job || disposed) return;
+
+                const snapshot: LeadRunPollSnapshot = {
+                    runId: job.runId,
+                    status: job.status,
+                    nextIndex: job.nextIndex,
+                };
+                const receiptsChanged = shouldRefreshRunReceipts(backgroundPollSnapshotRef.current, snapshot);
+                backgroundPollSnapshotRef.current = snapshot;
+                if (receiptsChanged) {
+                    const terminal = isTerminalLeadRunStatus(job.status);
+                    await loadRunReceipts(sourceRunId, {
+                        silent: true,
+                        includeDiagnostics: terminal,
+                        signal: terminal ? undefined : controller.signal,
+                    });
+                }
+            } finally {
+                backgroundPollInFlightRef.current = false;
+            }
+        };
+
+        void poll();
+        const interval = window.setInterval(() => void poll(), OPERATIONS_POLL_INTERVAL_MS);
+
+        return () => {
+            disposed = true;
+            controller.abort();
+            window.clearInterval(interval);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid, sourceRunId, backgroundJob?.status]);
 

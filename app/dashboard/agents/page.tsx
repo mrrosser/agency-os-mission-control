@@ -8,6 +8,7 @@ import { buildLiveFeedItems, filterLiveFeed, summarizeLiveFeed, type TimelineFil
 import type { AutonomyClass } from "@/lib/control-plane/autonomous-business";
 import { RepoImprovementInbox } from "@/components/operations/RepoImprovementInbox";
 import { GrowthResearchInbox } from "@/components/operations/GrowthResearchInbox";
+import { AutonomyPolicyControls } from "@/components/agents/AutonomyPolicyControls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -529,6 +530,8 @@ export default function AgentNexusPage() {
             </div>
           )}
         </section>
+
+        <AutonomyPolicyControls />
 
         {snapshot && (
           <>

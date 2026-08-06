@@ -16,8 +16,9 @@ OpenClaw schema-v2 multi-account registry and Secret Manager vault.
   connected account.
 - Keep the legacy single-account reader as a compatibility fallback for callers
   that do not request a profile.
-- Externalize `@google-cloud/tasks` so its runtime JSON assets are included in
-  the server artifact, and ignore bind-all addresses as HTTP fallback targets.
+- Externalize `@google-cloud/tasks` and `@google-cloud/secret-manager` so their
+  runtime JSON assets are included in the server artifact, and ignore bind-all
+  addresses as HTTP fallback targets.
 - Preserve draft-first and per-item approval gates. This repair does not send
   email, submit applications, create meetings, or enable SMS/calls.
 
@@ -33,24 +34,27 @@ OpenClaw schema-v2 multi-account registry and Secret Manager vault.
    completed.
 5. Deploy a zero-traffic candidate, verify secret-binding parity and health,
    then promote and run one idempotent production smoke per lane. Status: in
-   progress. The first candidate smoke reached both bound profiles and Cloud
-   Tasks, then exposed that Firebase supplies `GCLOUD_PROJECT` to this helper;
-   traffic was rolled back to `ssrleadflowreview-00285-r98` while that runtime
-   compatibility fix is released.
+   progress. Revision `ssrleadflowreview-00293-nwb` confirmed the project-id
+   fix and Cloud Tasks dispatch, but its controlled dry runs exposed the same
+   Next server-bundling failure in `@google-cloud/secret-manager`. Both lanes
+   remained dry-run-only, all outbound counters stayed zero, quota slots were
+   released, and traffic was restored to `ssrleadflowreview-00285-r98` before
+   preparing the Secret Manager externalization.
 
 ## Local verification
 
 ```powershell
 npm ci --no-audit --no-fund
-npx vitest run tests/unit/google-account-token-store.test.ts tests/unit/google-oauth-account-tokens.test.ts tests/unit/lead-run-jobs-trigger.test.ts tests/smoke/revenue-automation-daily-worker-task-route.test.ts
-npx eslint lib/google/account-token-store.ts lib/google/oauth.ts lib/lead-runs/jobs.ts 'app/api/lead-runs/[runId]/jobs/worker/route.ts' next.config.ts tests/unit/google-account-token-store.test.ts tests/unit/google-oauth-account-tokens.test.ts tests/unit/lead-run-jobs-trigger.test.ts
+npx vitest run tests/unit/cloud-tasks-packaging-config.test.ts tests/unit/secret-manager-project-env.test.ts tests/unit/google-account-token-store.test.ts tests/unit/google-oauth-account-tokens.test.ts tests/unit/lead-run-jobs-trigger.test.ts tests/smoke/revenue-automation-daily-worker-task-route.test.ts
+npx eslint lib/google/account-token-store.ts lib/google/oauth.ts lib/lead-runs/jobs.ts 'app/api/lead-runs/[runId]/jobs/worker/route.ts' next.config.ts tests/unit/cloud-tasks-packaging-config.test.ts tests/unit/google-account-token-store.test.ts tests/unit/google-oauth-account-tokens.test.ts tests/unit/lead-run-jobs-trigger.test.ts
 npx tsc --noEmit --incremental false --pretty false
 npm run build
 ```
 
-After the build, verify the lead-worker NFT trace includes
-`@google-cloud/tasks/**/cloud_tasks_client_config.json` and that compiled server
-chunks contain no absolute local build path.
+After the build, verify the lead-worker NFT trace includes the Cloud Tasks
+`cloud_tasks_client_config.json` asset plus Secret Manager
+`secret_manager_service_client_config.json` and `protos.json`, and that
+compiled server chunks contain no absolute local build path.
 
 ## Deployment and rollback
 

@@ -33,7 +33,10 @@ OpenClaw schema-v2 multi-account registry and Secret Manager vault.
    completed.
 5. Deploy a zero-traffic candidate, verify secret-binding parity and health,
    then promote and run one idempotent production smoke per lane. Status: in
-   progress.
+   progress. The first candidate smoke reached both bound profiles and Cloud
+   Tasks, then exposed that Firebase supplies `GCLOUD_PROJECT` to this helper;
+   traffic was rolled back to `ssrleadflowreview-00285-r98` while that runtime
+   compatibility fix is released.
 
 ## Local verification
 

@@ -8,10 +8,13 @@ function getProjectId(): string {
   const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    process.env.GOOGLE_CLOUD_PROJECT;
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCLOUD_PROJECT;
 
   if (!projectId) {
-    throw new Error("Missing FIREBASE_PROJECT_ID/GOOGLE_CLOUD_PROJECT for Secret Manager");
+    throw new Error(
+      "Missing FIREBASE_PROJECT_ID/GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT for Secret Manager"
+    );
   }
 
   return projectId;

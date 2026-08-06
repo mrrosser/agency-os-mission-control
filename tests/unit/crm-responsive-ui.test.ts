@@ -42,11 +42,31 @@ describe("CRM responsive UI source", () => {
     expect(identity.match(/grid-cols-1 gap-4 sm:grid-cols-2/g)).toHaveLength(2);
   });
 
+  it("cancels stale customer timeline requests before applying responses", () => {
+    const source = readSource("app", "dashboard", "crm", "page.tsx");
+
+    expect(source).toContain("timelineAbortRef.current?.abort()");
+    expect(source).toContain("signal: controller.signal");
+    expect(source).toContain("timelineAbortRef.current !== controller");
+    expect(source).toContain("selectedLeadIdRef.current === leadId");
+  });
+
   it("runs the public responsive shell on a representative phone project", () => {
     const config = readSource("playwright.config.ts");
 
     expect(config).toContain('name: "mobile-chrome"');
     expect(config).toContain('devices["Pixel 7"]');
-    expect(config).toContain("responsive-shell\\.spec\\.ts");
+    expect(config).toContain("responsive-shell|authenticated-crm");
+  });
+
+  it("keeps the authenticated CRM audit isolated and aligned with rendered test ids", () => {
+    const source = readSource("tests", "playwright", "authenticated-crm.spec.ts");
+
+    expect(source).toContain('mobile ? "crm-mobile-list" : "crm-desktop-board"');
+    expect(source).not.toContain('getByTestId("crm-mobile-board")');
+    expect(source).toContain('page.route("**/api/agents/control-plane"');
+    expect(source).toContain('page.route("**/api/telemetry/error"');
+    expect(source).toContain('page.route("**/api/crm/**"');
+    expect(source).not.toContain("route.continue()");
   });
 });

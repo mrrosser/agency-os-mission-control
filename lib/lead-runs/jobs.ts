@@ -64,6 +64,34 @@ export interface LeadRunJobDoc {
   updatedAt?: unknown;
 }
 
+/**
+ * Lead-run provider writes do not yet have a durable per-action approval record.
+ * Keep those boundaries draft-only until that approval workflow is available.
+ * This is also applied by the worker so previously queued jobs cannot bypass it.
+ */
+export function enforceLeadRunApprovalGates(
+  config: LeadRunJobConfig
+): LeadRunJobConfig {
+  return {
+    ...config,
+    draftFirst: true,
+    requireBookingConfirmation: true,
+    useSMS: false,
+    useAvatar: false,
+    useOutboundCall: false,
+  };
+}
+
+export function hasUngatedLeadRunActions(config: LeadRunJobConfig): boolean {
+  return (
+    config.draftFirst !== true ||
+    config.requireBookingConfirmation !== true ||
+    config.useSMS === true ||
+    config.useAvatar === true ||
+    config.useOutboundCall === true
+  );
+}
+
 export const LEAD_RUN_JOB_DOC_ID = "default";
 
 const DEFAULT_GOOGLE_PROFILE_BY_BUSINESS_KEY: Record<string, string> = {

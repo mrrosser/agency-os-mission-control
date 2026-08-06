@@ -137,9 +137,9 @@ export function AutonomyPolicyControls() {
               Organization autonomy
             </CardTitle>
             <p className="max-w-3xl text-xs leading-5 text-zinc-400">
-              Choose how far agents can carry internal work for each organization. Email sends, public publishing,
-              calls, SMS, spending, contracts, pricing, final submissions, and external calendar bookings always need
-              your approval.
+              Save the intended posture for each organization while capability-by-capability runtime enforcement rolls
+              out. Email sends, public publishing, calls, SMS, spending, contracts, pricing, final submissions, and
+              external calendar bookings always need your approval.
             </p>
           </div>
           {policy ? <Badge className="border-zinc-700 bg-zinc-900 text-zinc-300">Policy v{policy.version}</Badge> : null}
@@ -169,6 +169,9 @@ export function AutonomyPolicyControls() {
                 <div key={businessId} className="rounded-xl border border-zinc-800 bg-black/40 p-4">
                   <p className="font-medium text-white">{AUTONOMY_BUSINESSES[businessId]}</p>
                   <p className="mt-1 text-xs text-zinc-500">{MODE_COPY[businessModes[businessId]].detail}</p>
+                  <p className="mt-2 text-[11px] leading-4 text-amber-200/80">
+                    Saved policy posture; organization-mode enforcement is still being connected at each provider boundary.
+                  </p>
                   <div className="mt-4 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label={`${AUTONOMY_BUSINESSES[businessId]} autonomy mode`}>
                     {AUTONOMY_MODES.map((mode) => {
                       const selected = businessModes[businessId] === mode;
@@ -199,7 +202,11 @@ export function AutonomyPolicyControls() {
                 <p className="flex items-center gap-2 font-medium text-white">
                   <LockKeyhole className="h-4 w-4 text-rose-300" /> Global execution pause
                 </p>
-                <p className="text-xs text-zinc-400">Immediately blocks autonomous execution across both organizations.</p>
+                <p className="max-w-2xl text-xs leading-5 text-zinc-400">
+                  Stops new RT Solutions and Rosser Gallery scheduled revenue work, lead-run workers, and execution-starting
+                  Agent Nexus actions. Work already in flight may finish. Jobs paused here stay paused until you resume them
+                  from Operations after clearing this control.
+                </p>
               </div>
               <button
                 type="button"
@@ -215,7 +222,9 @@ export function AutonomyPolicyControls() {
                     globalKillSwitch ? "translate-x-5" : "translate-x-0.5"
                   }`}
                 />
-                <span className="sr-only">{globalKillSwitch ? "Resume autonomous execution" : "Pause autonomous execution"}</span>
+                <span className="sr-only">
+                  {globalKillSwitch ? "Clear global pause for new work" : "Pause new autonomous work"}
+                </span>
               </button>
             </div>
 

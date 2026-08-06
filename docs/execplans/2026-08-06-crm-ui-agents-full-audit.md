@@ -41,9 +41,14 @@
 - [x] Implemented fail-closed CRM ownership, draft-first, and approval-gate corrections.
 - [x] Implemented versioned RT Solutions/Rosser Gallery autonomy policy controls and non-bypassable protected actions.
 - [x] Serialized Operations polling, stopped hidden-tab polling, and limited deep receipt/telemetry refreshes to progress transitions.
-- [ ] Integrate the responsive desktop/mobile shell and CRM board patch after its final build gate.
-- [ ] Integrate the canonical agent/API heartbeat and connector-health protocol patch after review.
-- [ ] Run local and production verification gates.
+- [x] Integrated the responsive desktop/mobile shell and CRM board patch.
+- [x] Integrated the canonical agent/API heartbeat and connector-health protocol patch.
+- [x] Added separate RT Solutions and Rosser Gallery Google Workspace profiles with fail-closed context checks.
+- [x] Connected the global execution pause to new RT Solutions/Rosser Gallery revenue work, lead workers, and execution-starting Nexus actions.
+- [x] Forced lead-run protected actions into draft/approval posture at creation and again at worker execution.
+- [x] Added credential-gated authenticated desktop and Pixel-class CRM Playwright coverage without a production auth bypass.
+- [x] Run final local verification gates, dependency audit, and staged secret scan.
+- [ ] Run production health, authenticated desktop/phone, performance, and cadence gates.
 - [ ] Deploy, verify rollback posture, update reports, and email the mobile link.
 
 ## Decisions
@@ -52,9 +57,23 @@
 - No existing CRM Figma source was discoverable in the repository, Drive, or Gmail, so use the newly observed audit file rather than inventing a mapping.
 - Figma audit file: `https://www.figma.com/design/KNtDTEkNkrwblkGcGUn0wm`; current-product capture node: `2:2`.
 - The Figma Starter plan reached its MCP call cap after library/component discovery. Preserve the capture and component inventory; do not claim a completed Code Connect mapping.
+- Organization modes are saved, audited policy posture in this increment. The global pause has runtime enforcement; provider-by-provider organization-mode enforcement remains staged so existing `assist` defaults do not silently stop approved schedules.
+- Protected external actions remain approval-gated in every posture. Lead-run configuration is normalized at both the create boundary and worker boundary so stale unsafe jobs fail into the safe posture.
+- Legacy/unscoped lead jobs consult the global pause fail-closed. Clearing the pause allows new work, but jobs already stopped by it require an explicit Operations resume.
+- PR preview and merge deployments share one non-cancelling, FIFO-style queued concurrency group because both update the same Cloud Run SSR service.
 
 ## Evidence captured
 - Public production URL: `https://leadflow-review.web.app`.
 - Desktop cold baseline: HTTP 200; wall 6478 ms; TTFB 3087 ms; DOM content loaded 3570 ms; load 5034 ms; 24 resources; about 343 KB transferred.
 - Phone warm baseline: HTTP 200; wall 2406 ms; TTFB 158 ms; DOM content loaded 230 ms; load 437 ms; 27 resources; about 350 KB transferred; no horizontal overflow.
 - Baseline lint and smoke suites passed. The first concurrent full-unit run exposed resource-sensitive timeouts that must be rerun serially with explicit evidence.
+- Final local gates after hardening: lint passed; TypeScript passed; 90 unit files/340 tests passed; full smoke passed; responsive desktop/phone browser tests passed 4/4; production build passed with 96 routes.
+- Dependency audit: full tree 12 findings (0 critical, 4 high, 8 moderate); production-only resolver 13 findings (0 critical, 4 high, 9 moderate). Remaining fixes require breaking major upgrades.
+- Pre-deploy rollback channel `rollback-crm-audit-20260806` preserves the previously serving Hosting state through 2026-08-13. Cloud Run rollback target remains `ssrleadflowreview-00297-dnx` until post-deploy verification completes.
+- Staged `gitleaks` scan passed with no leaks.
+
+## Local verification and deployment
+- Install and verify locally with `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run test:unit`, `npm run test:smoke`, and `npm run build`.
+- Run responsive browser coverage with `npx playwright test tests/playwright/responsive-shell.spec.ts --project=chromium --project=mobile-chrome`.
+- Authenticated CRM coverage requires temporary `PLAYWRIGHT_TEST_EMAIL` and `PLAYWRIGHT_TEST_PASSWORD` environment variables plus `PLAYWRIGHT_BASE_URL`; no credential is committed or logged.
+- Production deploys through `.github/workflows/firebase-hosting-merge.yml` after reviewed merge to the default branch. Monitor Firebase App Hosting/Cloud Run and keep the previously active ready revision as the rollback target until post-deploy verification passes.

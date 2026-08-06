@@ -32,6 +32,7 @@ These samples are diagnostic snapshots, not a statistically complete performance
 - Dashboard route loading and recovery states are explicit.
 - Visible organization naming is normalized to Rosser Gallery.
 - Agent Nexus contains separate RT Solutions and Rosser Gallery autonomy controls plus a global execution pause.
+- Organization modes are deliberately described as saved policy posture while provider-by-provider enforcement is staged. The global pause is runtime-enforced for new RT Solutions/Rosser Gallery scheduled revenue work, lead workers (including legacy/unscoped jobs), and execution-starting Nexus actions; already in-flight work may finish. Jobs stopped by the pause require an explicit Operations resume after the pause is cleared.
 
 ## Safety and incomplete-loop corrections
 
@@ -42,6 +43,7 @@ These samples are diagnostic snapshots, not a statistically complete performance
 - Day 2 and scheduled daily revenue flows cannot disable approval gates.
 - Modes are `assist`, `supervised`, and `autonomous_safe`; malformed/unknown policy data resolves fail-closed.
 - Email sends, public publishing, SMS, voice calls, spending, payments, contracts, legal decisions, pricing, final submissions, and external calendar creation remain non-bypassable human-approval actions.
+- Lead-run creation and worker execution both normalize stale or unsafe configurations back to draft-first, booking-confirmation-required posture with direct SMS, avatar, and outbound-call execution disabled. Live calendar creation is skipped with an approval-required receipt.
 - Policy changes use Firebase authentication, operator allowlists, optimistic versions, idempotency, immutable audit history, correlation logs, and trust envelopes.
 
 ## Performance and reliability corrections
@@ -52,7 +54,7 @@ These samples are diagnostic snapshots, not a statistically complete performance
 - The dashboard lead fallback listener is bounded at 500 records. At the cap, the primary analytics document is preserved instead of presenting a partial total.
 - Firestore listener failures now release the loading state and emit structured client diagnostics with a correlation ID.
 - Next.js and eslint-config-next moved from 15.5.12 to 15.5.22; Vitest moved from 3.2.4 to 3.2.6; compatible transitive audit fixes were applied.
-- `npm audit` improved from 26 findings (including 2 critical) to 12 findings (0 critical, 4 high, 8 moderate). Remaining reported fixes require major/breaking Next.js, Firebase Admin, or firebase-frameworks changes and were not forced into this production patch.
+- `npm audit` improved from 26 findings (including 2 critical) to 12 total findings in the full dependency tree (0 critical, 4 high, 8 moderate). The production-only resolver reports 13 (0 critical, 4 high, 9 moderate). Remaining reported fixes require major/breaking Next.js, Firebase Admin, or firebase-frameworks changes and were not forced into this production patch.
 
 ## Tailscale and Gmail durability
 
@@ -67,15 +69,20 @@ These samples are diagnostic snapshots, not a statistically complete performance
 - All four audited jobs were enabled, used the expected route and America/Chicago timezone, and required approval gates. The daily jobs were bound to the correct `rts`, `rng`, and `aicf` business keys.
 - Additional live discovery/coordination jobs were enabled: artist-manager loops every 30 minutes, lead-generation inbox hourly, lead prospecting daily at 6:40 AM CT, Google OAuth health every four hours, and governance watchdog/tick jobs every 15/10 minutes.
 - The cadence audit script had still targeted scheduler jobs removed by consolidation. It now verifies the four real jobs, schedules, business keys, safe payload invariants, and authenticated local gcloud configuration.
-- Canonical registry/heartbeat/capability and connector-probe hardening: pending final integration evidence in this report.
-- RT Solutions/Rosser Gallery Google Workspace status and OAuth context preservation: pending final integration evidence in this report.
+- The canonical 12-agent registry now uses versioned, organization-scoped heartbeat envelopes and limits external-write capability to the governed action function. MCP probes are timeout-bounded and report observed initialization/tool-list health instead of optimistic placeholders. Legacy four-field heartbeats intentionally fail validation until their producers emit the v1 envelope.
+- RT Solutions and Rosser Gallery now use separate Google Workspace profiles (`rt_solutions_work` and `rosser_gallery_work`) with schema-v2 Secret Manager bindings. Connect, callback, and status flows preserve organization/profile context and fail closed on mismatches while retaining legacy no-context compatibility.
+- Nexus action starts now fail closed unless the authenticated operator UID appears in the deployment allowlist. The global pause blocks route/resume/wakeup starts, while emergency pause, terminate, and health-style ping remain available.
 
 ## Verification and deployment
 
-- Focused autonomy/polling tests: 26 passed.
-- Revenue cadence helper tests: 3 passed; live audit: 4/4 jobs, zero mismatches.
-- Responsive CRM unit tests: 4 passed.
+- Final focused hardening tests: 24 passed; independent review reruns also passed.
+- Revenue cadence helper tests: 4 passed; live audit: 4/4 jobs, zero mismatches.
+- Responsive CRM unit tests: 6 passed.
 - Desktop Chrome and Pixel 7 responsive public-shell Playwright tests: 4 passed.
 - TypeScript and touched-file ESLint passed after integration.
-- Full serial unit/smoke/build/post-deploy and production performance evidence: pending final update.
-- Deployment revision and rollback target: pending final update.
+- Authenticated desktop/mobile Playwright coverage now signs in through real Firebase Auth and mocks only CRM/autonomy business endpoints; production execution evidence is pending the deployment gate.
+- Final local unit gate: 90 files and 340 tests passed. The full smoke suite passed.
+- Final production build generated 96 application routes and passed type validation. Post-deploy and production performance evidence remain pending the merge deployment.
+- Staged secret scan passed with no leaks. Workflow YAML and the JSON deployment manifest parsed successfully.
+- Pre-deploy rollback is preserved in Hosting channel `rollback-crm-audit-20260806` through 2026-08-13; Cloud Run rollback target is the previously serving `ssrleadflowreview-00297-dnx` revision.
+- New serving deployment revision: pending merge rollout.

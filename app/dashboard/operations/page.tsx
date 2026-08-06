@@ -925,28 +925,16 @@ export default function OperationsPage() {
         const wantsSMS = Boolean(outreach.useSMS);
         const wantsCall = Boolean(outreach.useOutboundCall);
         const wantsAvatar = Boolean(outreach.useAvatar);
-        const wantsDraftFirst = Boolean(outreach.draftFirst);
-
-        if (wantsSMS && !hasTwilio) {
-            toast.warning("Template requested SMS, but Twilio config is incomplete.", {
-                description: "Set SID, token, and phone number in Settings. SMS has been disabled for this run.",
-            });
-        }
-        if (wantsCall && !(hasTwilio && hasElevenLabs)) {
-            toast.warning("Template requested outbound calls, but required keys are missing.", {
-                description: "Set Twilio SID/token/phone and ElevenLabs key. Outbound calls have been disabled for this run.",
-            });
-        }
-        if (wantsAvatar && !hasHeyGen) {
-            toast.warning("Template requested avatar video, but HeyGen key is missing.", {
-                description: "Avatar video has been disabled for this run.",
+        if (wantsSMS || wantsCall || wantsAvatar || outreach.draftFirst === false) {
+            toast.info("Protected template actions need approval", {
+                description: "This run will create Gmail drafts only. SMS, calls, avatar dispatch, direct email sends, and calendar creation stay disabled until their approval records are connected.",
             });
         }
 
-        setUseSMS(wantsSMS && hasTwilio);
-        setUseOutboundCall(wantsCall && hasTwilio && hasElevenLabs);
-        setUseAvatar(wantsAvatar && hasHeyGen);
-        setDraftFirst(wantsDraftFirst);
+        setUseSMS(false);
+        setUseOutboundCall(false);
+        setUseAvatar(false);
+        setDraftFirst(true);
     };
 
     const onSelectTemplate = (templateId: string) => {
@@ -1375,14 +1363,15 @@ export default function OperationsPage() {
                     action: "start",
                     config: {
                         dryRun,
-                        draftFirst,
+                        draftFirst: true,
+                        requireBookingConfirmation: true,
                         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                         businessKey,
                         businessUnit: selectedBusinessUnit,
                         offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
-                        useSMS,
-                        useAvatar,
-                        useOutboundCall,
+                        useSMS: false,
+                        useAvatar: false,
+                        useOutboundCall: false,
                     },
                 }),
             });
@@ -1441,14 +1430,18 @@ export default function OperationsPage() {
                     nextIndex: job.nextIndex,
                 };
                 const receiptsChanged = shouldRefreshRunReceipts(backgroundPollSnapshotRef.current, snapshot);
-                backgroundPollSnapshotRef.current = snapshot;
                 if (receiptsChanged) {
                     const terminal = isTerminalLeadRunStatus(job.status);
-                    await loadRunReceipts(sourceRunId, {
+                    const receiptsLoaded = await loadRunReceipts(sourceRunId, {
                         silent: true,
                         includeDiagnostics: terminal,
                         signal: terminal ? undefined : controller.signal,
                     });
+                    if (receiptsLoaded) {
+                        backgroundPollSnapshotRef.current = snapshot;
+                    }
+                } else {
+                    backgroundPollSnapshotRef.current = snapshot;
                 }
             } finally {
                 backgroundPollInFlightRef.current = false;
@@ -1467,7 +1460,9 @@ export default function OperationsPage() {
     }, [user?.uid, sourceRunId, backgroundJob?.status]);
 
     const handleRun = async () => {
-        const legacyInlineEnabled = process.env.NEXT_PUBLIC_ENABLE_LEGACY_INLINE_RUN === "true";
+        const legacyInlineEnabled =
+            process.env.NODE_ENV !== "production" &&
+            process.env.NEXT_PUBLIC_ENABLE_LEGACY_INLINE_RUN === "true";
         if (!legacyInlineEnabled) {
             addLog("ℹ Worker mode enabled: starting background run.");
             await startBackgroundRun();
@@ -2835,7 +2830,7 @@ export default function OperationsPage() {
                                 <div className="pt-4 border-t border-zinc-800 space-y-3">
                                     <div className="space-y-1">
                                         <h3 className="text-sm font-semibold text-white">Outreach Power-Ups ⚡</h3>
-                                        <p className="text-xs text-zinc-400">Enhance outreach with AI channels</p>
+                                        <p className="text-xs text-zinc-400">Protected channels remain visible here but require a future approval workflow.</p>
                                     </div>
 
                                     <div className="pt-4 border-t border-zinc-800">
@@ -2859,13 +2854,14 @@ export default function OperationsPage() {
                                                     id="useSMS"
                                                     checked={useSMS}
                                                     onChange={(e) => setUseSMS(e.target.checked)}
-                                                    disabled={!hasTwilio}
+                                                    disabled
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-blue-600 focus:ring-blue-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
                                                     <label htmlFor="useSMS" className="text-sm font-medium leading-none text-zinc-200">
                                                         Enable SMS Follow-up
                                                     </label>
+                                                    <p className="text-xs text-zinc-500">Approval-gated; disabled for automatic runs.</p>
                                                 </div>
                                             </div>
 
@@ -2875,7 +2871,7 @@ export default function OperationsPage() {
                                                     id="useOutboundCall"
                                                     checked={useOutboundCall}
                                                     onChange={(e) => setUseOutboundCall(e.target.checked)}
-                                                    disabled={!hasTwilio || !hasElevenLabs}
+                                                    disabled
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-red-600 focus:ring-red-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
@@ -2883,7 +2879,7 @@ export default function OperationsPage() {
                                                         AI Outbound Call
                                                     </label>
                                                     <p className="text-xs text-zinc-500">
-                                                        Calls lead & plays personalized message
+                                                        Approval-gated; disabled for automatic runs.
                                                     </p>
                                                 </div>
                                             </div>
@@ -2894,7 +2890,7 @@ export default function OperationsPage() {
                                                      id="useAvatar"
                                                      checked={useAvatar}
                                                      onChange={(e) => setUseAvatar(e.target.checked)}
-                                                     disabled={!hasHeyGen}
+                                                     disabled
                                                      className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-green-600 focus:ring-green-500/20 disabled:opacity-50"
                                                  />
                                                  <div className="grid gap-1.5 leading-none">
@@ -2902,7 +2898,7 @@ export default function OperationsPage() {
                                                          Context-Aware Avatar Video
                                                      </label>
                                                      <p className="text-xs text-zinc-500">
-                                                         Generates script from Knowledge Base
+                                                         Approval-gated; disabled for automatic runs.
                                                      </p>
                                                  </div>
                                              </div>
@@ -2913,14 +2909,15 @@ export default function OperationsPage() {
                                                      id="draftFirst"
                                                      checked={draftFirst}
                                                      onChange={(e) => setDraftFirst(e.target.checked)}
-                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20"
+                                                     disabled
+                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20 disabled:opacity-70"
                                                  />
                                                  <div className="grid gap-1.5 leading-none">
                                                      <label htmlFor="draftFirst" className="text-sm font-medium leading-none text-zinc-200">
                                                          Draft-first outreach mode
                                                      </label>
                                                      <p className="text-xs text-zinc-500">
-                                                         Save/send as Gmail drafts for review instead of immediate send.
+                                                         Enforced: automatic runs create Gmail drafts for review instead of sending.
                                                      </p>
                                                  </div>
                                              </div>

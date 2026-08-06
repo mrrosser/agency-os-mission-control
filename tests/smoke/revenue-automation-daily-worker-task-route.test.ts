@@ -3,6 +3,7 @@ import { POST } from "@/app/api/revenue/automation/daily/worker-task/route";
 import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
 import { runDay2RevenueAutomation } from "@/lib/revenue/day2-automation";
 import { runDay30RevenueAutomation } from "@/lib/revenue/day30-automation";
+import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
 
 vi.mock("@/lib/revenue/day1-automation", () => ({
   runDay1RevenueAutomation: vi.fn(),
@@ -16,9 +17,14 @@ vi.mock("@/lib/revenue/day30-automation", () => ({
   runDay30RevenueAutomation: vi.fn(),
 }));
 
+vi.mock("@/lib/agents/autonomy-runtime", () => ({
+  resolveRuntimePause: vi.fn(),
+}));
+
 const runDay1Mock = vi.mocked(runDay1RevenueAutomation);
 const runDay2Mock = vi.mocked(runDay2RevenueAutomation);
 const runDay30Mock = vi.mocked(runDay30RevenueAutomation);
+const resolveRuntimePauseMock = vi.mocked(resolveRuntimePause);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -32,6 +38,11 @@ describe("revenue automation daily worker-task route", () => {
     process.env = { ...originalEnv };
     process.env.REVENUE_DAY30_WORKER_TOKEN = "token-day30";
     process.env.REVENUE_AUTOMATION_UID = "uid-revenue";
+    resolveRuntimePauseMock.mockResolvedValue({
+      paused: false,
+      reason: "not_paused",
+      businessId: "rosser_gallery",
+    });
 
     runDay1Mock.mockResolvedValue({
       runId: "day1-run",
@@ -241,5 +252,38 @@ describe("revenue automation daily worker-task route", () => {
     expect(runDay1Mock).toHaveBeenCalledOnce();
     expect(runDay30Mock).not.toHaveBeenCalled();
     expect(runDay2Mock).not.toHaveBeenCalled();
+  });
+
+  it("returns a successful skip receipt while globally paused", async () => {
+    resolveRuntimePauseMock.mockResolvedValue({
+      paused: true,
+      reason: "operator_global_pause",
+      businessId: "rt_solutions",
+    });
+    const req = new Request("http://localhost/api/revenue/automation/daily/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer token-day30",
+      },
+      body: JSON.stringify({ businessKey: "rts", dueOnly: true }),
+    });
+
+    const res = await POST(
+      req as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data).toMatchObject({
+      ok: true,
+      skipped: true,
+      reason: "operator_global_pause",
+      businessKey: "rts",
+    });
+    expect(runDay1Mock).not.toHaveBeenCalled();
+    expect(runDay2Mock).not.toHaveBeenCalled();
+    expect(runDay30Mock).not.toHaveBeenCalled();
   });
 });

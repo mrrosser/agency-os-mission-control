@@ -8,6 +8,10 @@ permissions:
   contents: read
   id-token: write
   pull-requests: write
+concurrency:
+  group: firebase-shared-ssr-leadflow-review
+  queue: max
+  cancel-in-progress: false
 jobs:
   build_and_preview:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
@@ -97,6 +101,7 @@ jobs:
           SMAUTO_MCP_PROTOCOL_VERSION: ${{ vars.SMAUTO_MCP_PROTOCOL_VERSION || '2025-03-26' }}
           LEADOPS_MCP_SERVER_URL: ${{ vars.LEADOPS_MCP_SERVER_URL || 'https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp' }}
           LEADOPS_MCP_API_KEY: ${{ secrets.LEADOPS_MCP_API_KEY || '' }}
+          AGENT_ACTION_ALLOWED_UIDS: ${{ secrets.AGENT_ACTION_ALLOWED_UIDS || '' }}
         run: |
           set -euo pipefail
           SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
@@ -134,6 +139,8 @@ jobs:
           append_env_update "SMAUTO_MCP_PROTOCOL_VERSION" "$SMAUTO_MCP_PROTOCOL_VERSION"
           append_env_update "LEADOPS_MCP_SERVER_URL" "$LEADOPS_MCP_SERVER_URL"
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
+          # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
+          ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \

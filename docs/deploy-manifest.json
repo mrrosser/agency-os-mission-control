@@ -3,7 +3,10 @@
   "build_command": "npm run build",
   "smoke_command": "npm run test:postdeploy",
   "deploy_command": "npm run deploy:firebase",
-  "rollback_command": "manual://configure-firebase-hosting-rollback",
+  "rollback_command": "gcloud run services update-traffic ssrleadflowreview --project leadflow-review --region us-central1 --update-tags=sm-candidate=ssrleadflowreview-00297-dnx --to-revisions=ssrleadflowreview-00297-dnx=100 --quiet",
+  "hosting_rollback_command": "node scripts/firebase-deploy.mjs hosting:clone leadflow-review:rollback-crm-audit-20260806 leadflow-review:live --project leadflow-review --non-interactive",
+  "rollback_channel": "rollback-crm-audit-20260806",
+  "rollback_expires_at": "2026-08-13T17:29:00Z",
   "required_secret_refs": [
     "ENV_LOCAL",
     "FIREBASE_SERVICE_ACCOUNT_LEADFLOW_REVIEW"

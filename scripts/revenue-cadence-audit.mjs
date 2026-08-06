@@ -40,12 +40,18 @@ export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
     });
   }
 
-  return {
+  const writableEnv = {
     ...sourceEnv,
     CLOUDSDK_CONFIG: configRoot,
     CLOUDSDK_LOG_DIR: logDir,
-    CLOUDSDK_ACTIVE_CONFIG_NAME: "default",
   };
+  // Preserve the caller's named active configuration. When the variable is
+  // absent, gcloud reads the active_config marker from the selected config
+  // root. Only a newly-created isolated root should be pinned to default.
+  if (freshConfig) {
+    writableEnv.CLOUDSDK_ACTIVE_CONFIG_NAME = "default";
+  }
+  return writableEnv;
 }
 
 export function buildGcloudInvocation(args, options = {}) {

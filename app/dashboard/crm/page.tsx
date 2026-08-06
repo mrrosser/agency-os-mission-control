@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { Calendar, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -127,6 +127,8 @@ export default function CRMPage() {
     "firestore_projected"
   );
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const selectedLeadIdRef = useRef<string | null>(null);
+  const timelineAbortRef = useRef<AbortController | null>(null);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
   const [newLeadOpen, setNewLeadOpen] = useState(false);
@@ -178,11 +180,15 @@ export default function CRMPage() {
   }, [user?.uid]);
 
   useEffect(() => {
+    selectedLeadIdRef.current = selectedLeadId;
     if (!user || !selectedLeadId) {
+      timelineAbortRef.current?.abort();
       setTimelineEvents([]);
+      setLoadingTimeline(false);
       return;
     }
     void loadTimeline(selectedLeadId);
+    return () => timelineAbortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, selectedLeadId]);
 
@@ -235,6 +241,9 @@ export default function CRMPage() {
 
   async function loadTimeline(customerId: string) {
     if (!user) return;
+    timelineAbortRef.current?.abort();
+    const controller = new AbortController();
+    timelineAbortRef.current = controller;
     setLoadingTimeline(true);
     try {
       const headers = await buildAuthHeaders(user);
@@ -242,8 +251,10 @@ export default function CRMPage() {
         method: "GET",
         headers,
         cache: "no-store",
+        signal: controller.signal,
       });
       const data = await readApiJson<TimelineResponse & { error?: string }>(res);
+      if (controller.signal.aborted || timelineAbortRef.current !== controller) return;
       if (!res.ok) {
         const cid = getResponseCorrelationId(res);
         throw new Error(data.error || `Failed to load customer timeline${cid ? ` cid=${cid}` : ""}`);
@@ -251,12 +262,16 @@ export default function CRMPage() {
       setTimelineEvents(data.events || []);
       setTimelineSource(data.sourceOfTruth);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       toast.error("Failed to load timeline", {
         description: error instanceof Error ? error.message : String(error),
       });
-      setTimelineEvents([]);
+      if (timelineAbortRef.current === controller) setTimelineEvents([]);
     } finally {
-      setLoadingTimeline(false);
+      if (timelineAbortRef.current === controller) {
+        timelineAbortRef.current = null;
+        setLoadingTimeline(false);
+      }
     }
   }
 
@@ -267,6 +282,7 @@ export default function CRMPage() {
     if (!currentLead || currentLead.pipelineStage === nextStage) return;
 
     const previousStage = currentLead.pipelineStage;
+    selectedLeadIdRef.current = leadId;
     setSelectedLeadId(leadId);
     setUpdatingLeadId(leadId);
     setLeads((current) =>
@@ -290,7 +306,9 @@ export default function CRMPage() {
         throw new Error(data.error || `Failed to update stage${cid ? ` cid=${cid}` : ""}`);
       }
       toast.success("Pipeline stage updated");
-      await loadTimeline(leadId);
+      if (selectedLeadIdRef.current === leadId) {
+        await loadTimeline(leadId);
+      }
     } catch (error) {
       setLeads((current) =>
         current.map((lead) =>

@@ -14,6 +14,7 @@ import {
 import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
 import { runDay2RevenueAutomation } from "@/lib/revenue/day2-automation";
 import { runDay30RevenueAutomation } from "@/lib/revenue/day30-automation";
+import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
 
 const stageSchema = z.enum(["day1", "day2", "day30"]);
 
@@ -125,6 +126,27 @@ export const POST = withApiHandler(
         400,
         "Missing uid. Provide uid in request body or configure REVENUE_AUTOMATION_UID (or fallback revenue uid)."
       );
+    }
+
+    const pause = await resolveRuntimePause({
+      uid,
+      businessKey: body.businessKey,
+      log,
+    });
+    if (pause.paused) {
+      log.warn("revenue.automation.autonomy_paused", {
+        uid,
+        businessKey: body.businessKey,
+        businessId: pause.businessId,
+        reason: pause.reason,
+      });
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: pause.reason,
+        businessKey: body.businessKey,
+        correlationId,
+      });
     }
 
     const origin = request.nextUrl?.origin || new URL(request.url).origin;

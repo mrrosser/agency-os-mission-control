@@ -12,6 +12,7 @@ import {
   type PaperclipLifecycleAction,
 } from "@/lib/paperclip/client";
 import { resolveAgentDefinition } from "@/lib/agents/registry";
+import { getAutonomyPolicy } from "@/lib/agents/autonomy-policy-store";
 
 const actionSchema = z
   .object({
@@ -53,6 +54,10 @@ function isPaperclipLifecycleAction(action: z.infer<typeof actionSchema>["action
   return action === "resume" || action === "terminate" || action === "wakeup";
 }
 
+function startsAgentExecution(action: z.infer<typeof actionSchema>["action"]): boolean {
+  return action === "resume" || action === "route" || action === "wakeup";
+}
+
 export const POST = withApiHandler(
   async ({ request, correlationId, log }) => {
     const user = await requireFirebaseAuth(request, log);
@@ -72,6 +77,22 @@ export const POST = withApiHandler(
       throw new ApiError(400, "Unknown agentId");
     }
     const payload = { ...parsed.data, agentId: targetAgent.id };
+    if (startsAgentExecution(payload.action)) {
+      let policyPaused = true;
+      try {
+        policyPaused = (await getAutonomyPolicy(user.uid)).globalKillSwitch;
+      } catch (error) {
+        log.error("agents.action.autonomy_policy_read_failed", {
+          uid: user.uid,
+          agentId: payload.agentId,
+          action: payload.action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH") || policyPaused) {
+        throw new ApiError(423, "Mission Control global execution pause is enabled");
+      }
+    }
     const idempotencyKey = getIdempotencyKey(request, payload);
     const result = await withIdempotency(
       {
@@ -85,10 +106,6 @@ export const POST = withApiHandler(
         const requestId = randomUUID();
 
         if (isPaperclipLifecycleAction(payload.action)) {
-          if (readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH")) {
-            throw new ApiError(423, "Mission Control global kill switch is enabled");
-          }
-
           const config = readPaperclipClientConfig();
           if (!config) {
             throw new ApiError(503, "Paperclip proxy is not configured");

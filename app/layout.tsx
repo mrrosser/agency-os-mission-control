@@ -51,7 +51,7 @@ export default function RootLayout({
           id="firebase-client-config"
           dangerouslySetInnerHTML={{ __html: firebaseClientConfigScript }}
         />
-        {process.env.FIGMA_CAPTURE_ENABLED === "1" ? (
+        {process.env.NODE_ENV !== "production" && process.env.FIGMA_CAPTURE_ENABLED === "1" ? (
           <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async />
         ) : null}
       </head>

@@ -4,6 +4,8 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
+import { getAutonomyPolicy } from "@/lib/agents/autonomy-policy-store";
+import { createDefaultAutonomyPolicy } from "@/lib/agents/autonomy-policy";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -30,12 +32,17 @@ vi.mock("@/lib/paperclip/client", () => ({
   },
 }));
 
+vi.mock("@/lib/agents/autonomy-policy-store", () => ({
+  getAutonomyPolicy: vi.fn(),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const getIdempotencyKeyMock = vi.mocked(getIdempotencyKey);
 const withIdempotencyMock = vi.mocked(withIdempotency);
 const getAdminDbMock = vi.mocked(getAdminDb);
 const readPaperclipClientConfigMock = vi.mocked(readPaperclipClientConfig);
 const PaperclipClientMock = vi.mocked(PaperclipClient);
+const getAutonomyPolicyMock = vi.mocked(getAutonomyPolicy);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -49,6 +56,7 @@ describe("agents actions route", () => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
     process.env.AGENT_ACTION_ALLOWED_UIDS = "user-1";
+    getAutonomyPolicyMock.mockResolvedValue(createDefaultAutonomyPolicy("user-1"));
     setMock.mockReset();
     setMock.mockImplementation(async (_data: Record<string, unknown>) => undefined);
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
@@ -232,5 +240,48 @@ describe("agents actions route", () => {
     expect(data.status).toBe("forwarded");
     expect(data.proxied).toBe(true);
     expect(setMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks execution-starting actions while allowing emergency shutdown", async () => {
+    getAutonomyPolicyMock.mockResolvedValue({
+      ...createDefaultAutonomyPolicy("user-1"),
+      globalKillSwitch: true,
+    });
+
+    const resume = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: "orchestrator", action: "resume" }),
+    });
+    const resumeResponse = await POST(
+      resume as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    expect(resumeResponse.status).toBe(423);
+
+    readPaperclipClientConfigMock.mockReturnValue({
+      baseUrl: "https://paperclip.example/system",
+      serviceToken: "test-token",
+      timeoutMs: 1000,
+      defaultCompanyId: "company-1",
+      healthPath: "/api/health",
+      companiesPath: "/api/companies",
+      agentsPath: "/api/agents",
+      activeRunsPath: "/api/runs?state=active",
+      actionPathTemplate: "/api/agents/{agentId}/{action}",
+      customerRecordsPath: "/api/customers",
+      customerTimelinePathTemplate: "/api/customers/{customerId}/timeline",
+      customerUpdatePathTemplate: "/api/customers/{customerId}",
+    });
+    const terminate = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: "orchestrator", action: "terminate" }),
+    });
+    const terminateResponse = await POST(
+      terminate as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    expect(terminateResponse.status).toBe(200);
   });
 });

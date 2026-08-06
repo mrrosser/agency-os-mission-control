@@ -48,9 +48,13 @@ If both are set, the authenticated UID must be in both. If neither is set, the A
 
 Updates use both request idempotency and optimistic version checks. Firestore writes the policy document and immutable history entry in one transaction under `agentAutonomyPolicies/{uid}`. Client Firestore access remains denied; only the authenticated server API uses the Admin SDK.
 
-## Provider-boundary contract
+## Runtime enforcement status
 
-Provider routes are intentionally not wired in this foundation. Before a future provider call, the route must call `resolveAutonomyDecision` with:
+The global pause is enforced for the consolidated daily revenue worker, lead-run workers, and execution-starting Agent Nexus actions. Policy-read failure stops those new worker executions, and the environment kill switch is combined with the stored operator pause. Legacy or unknown lead-job scopes consult the stored pause fail-closed; explicitly scoped AI CoFoundry work remains governed by the environment switch in this increment. Already-running provider calls are not cancelled. Lead jobs stopped by the global pause stay paused until an operator clears the pause and resumes them from Operations.
+
+Lead-run email is forced to draft-first posture. SMS, outbound calls, avatar dispatch, and external calendar creation are disabled at both job creation and worker execution until a durable per-action approval record is connected. Pause and terminate remain available while the global pause is active.
+
+Organization modes are currently stored, versioned policy posture. They are not yet enforced across every provider boundary. Before enabling a provider-specific mode, the route must call `resolveAutonomyDecision` with:
 
 - the authenticated user's stored policy;
 - one of the two canonical business IDs;
@@ -59,7 +63,7 @@ Provider routes are intentionally not wired in this foundation. Before a future 
 - a complete execution envelope (`agentId`, `scope`, `trustLevel`, `evidenceRef`); and
 - the runtime global kill-switch state.
 
-Only `outcome: "auto_execute"` permits an unprotected provider call. `approval_required` must enter a human approval workflow; `blocked` must stop.
+Only `outcome: "auto_execute"` permits an unprotected provider call. `approval_required` must enter a human approval workflow; `blocked` must stop. UI copy must not describe organization modes as active provider enforcement until that provider has adopted this decision boundary.
 
 ## Local verification
 

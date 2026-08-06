@@ -7,6 +7,7 @@ import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 import { recordLeadRunOutcome, releaseLeadRunConcurrencySlot } from "@/lib/lead-runs/quotas";
 import { triggerLeadRunWorker } from "@/lib/lead-runs/jobs";
 import { findDncMatch } from "@/lib/outreach/dnc";
+import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
 
 vi.mock("@/lib/firebase-admin", () => ({
   getAdminDb: vi.fn(),
@@ -41,6 +42,10 @@ vi.mock("@/lib/outreach/dnc", () => ({
   findDncMatch: vi.fn(),
 }));
 
+vi.mock("@/lib/agents/autonomy-runtime", () => ({
+  resolveRuntimePause: vi.fn(),
+}));
+
 const getAdminDbMock = vi.mocked(getAdminDb);
 const getAccessTokenMock = vi.mocked(getAccessTokenForUser);
 const resolveSecretMock = vi.mocked(resolveSecret);
@@ -49,6 +54,7 @@ const recordLeadRunOutcomeMock = vi.mocked(recordLeadRunOutcome);
 const releaseLeadRunConcurrencySlotMock = vi.mocked(releaseLeadRunConcurrencySlot);
 const triggerLeadRunWorkerMock = vi.mocked(triggerLeadRunWorker);
 const findDncMatchMock = vi.mocked(findDncMatch);
+const resolveRuntimePauseMock = vi.mocked(resolveRuntimePause);
 
 function createContext(params: Record<string, string>) {
   return { params: Promise.resolve(params) };
@@ -60,6 +66,11 @@ describe("lead run worker SMS handling", () => {
 
     getAccessTokenMock.mockResolvedValue("access-token");
     findDncMatchMock.mockResolvedValue(null);
+    resolveRuntimePauseMock.mockResolvedValue({
+      paused: false,
+      reason: "not_paused",
+      businessId: null,
+    });
     resolveSecretMock.mockImplementation(async (_uid, key) => {
       if (key === "twilioSid") return "sid";
       if (key === "twilioToken") return "token";
@@ -68,7 +79,7 @@ describe("lead run worker SMS handling", () => {
     });
   });
 
-  it("does not require ElevenLabs when only SMS is enabled (dry run)", async () => {
+  it("forces a previously queued SMS job back to protected draft-only posture", async () => {
     const jobSet = vi.fn(async () => undefined);
     const lead = {
       companyName: "ACME Co",
@@ -183,7 +194,7 @@ describe("lead run worker SMS handling", () => {
     expect(res.status).toBe(200);
 
     const actionIds = recordLeadActionReceiptMock.mock.calls.map(([input]) => String(input.actionId));
-    expect(actionIds).toContain("twilio.sms");
+    expect(actionIds).not.toContain("twilio.sms");
     expect(actionIds).not.toContain("twilio.call");
     expect(
       recordLeadActionReceiptMock.mock.calls.some(
@@ -199,11 +210,18 @@ describe("lead run worker SMS handling", () => {
       )
     ).toBe(false);
 
-    expect(
-      recordLeadActionReceiptMock.mock.calls.some(
-        ([input]) => input.actionId === "twilio.sms" && input.status === "simulated"
-      )
-    ).toBe(true);
+    expect(jobSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          draftFirst: true,
+          requireBookingConfirmation: true,
+          useSMS: false,
+          useAvatar: false,
+          useOutboundCall: false,
+        }),
+      }),
+      { merge: true }
+    );
 
     expect(recordLeadRunOutcomeMock).toHaveBeenCalled();
     expect(releaseLeadRunConcurrencySlotMock).toHaveBeenCalled();

@@ -108,7 +108,18 @@ describe("lead run jobs route", () => {
     const req = new Request("http://localhost/api/lead-runs/run-1/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", config: { dryRun: true, timeZone: "UTC" } }),
+      body: JSON.stringify({
+        action: "start",
+        config: {
+          dryRun: true,
+          draftFirst: false,
+          requireBookingConfirmation: false,
+          useSMS: true,
+          useAvatar: true,
+          useOutboundCall: true,
+          timeZone: "UTC",
+        },
+      }),
     });
 
     const res = await POST(
@@ -123,6 +134,21 @@ describe("lead run jobs route", () => {
     expect(data.job.totalLeads).toBe(2);
     expect(data.job.config.draftFirst).toBe(true);
     expect(data.job.config.requireBookingConfirmation).toBe(true);
+    expect(data.job.config.useSMS).toBe(false);
+    expect(data.job.config.useAvatar).toBe(false);
+    expect(data.job.config.useOutboundCall).toBe(false);
+    expect(jobSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          draftFirst: true,
+          requireBookingConfirmation: true,
+          useSMS: false,
+          useAvatar: false,
+          useOutboundCall: false,
+        }),
+      }),
+      { merge: true }
+    );
     expect(jobSet).toHaveBeenCalledOnce();
     expect(triggerLeadRunWorkerMock).toHaveBeenCalledOnce();
     expect(resolveLeadRunOrgIdMock).toHaveBeenCalledWith("user-1", expect.anything());

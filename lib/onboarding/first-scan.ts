@@ -1,4 +1,5 @@
 export type FirstScanTourStepKey = "identity" | "api_keys" | "google" | "run_scan";
+export type FirstScanTourState = "dismissed" | "completed";
 
 export interface FirstScanTourSignals {
   hasIdentity: boolean;
@@ -69,4 +70,20 @@ export function firstIncompleteStepIndex(steps: FirstScanTourStep[]): number {
   if (index !== -1) return index;
   const runScanIndex = steps.findIndex((step) => step.key === "run_scan");
   return runScanIndex === -1 ? 0 : runScanIndex;
+}
+
+export function buildFirstScanTourStatePatch(
+  uid: string,
+  mode: FirstScanTourState,
+  timestamp: unknown
+): Record<string, unknown> {
+  return {
+    uid,
+    onboarding: {
+      firstScanTourV1: {
+        version: 1,
+        [`${mode}At`]: timestamp,
+      },
+    },
+  };
 }

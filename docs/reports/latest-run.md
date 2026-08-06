@@ -1,5 +1,25 @@
 # Latest Verification Run
 
+## 2026-08-06 CRM UI, agents, and autonomy audit
+
+- RUN_ID: 20260806-crm-ui-agents-full-audit
+- Scope: responsive CRM, polling reliability, protected lead actions, runtime global pause, Agent API protocol, dual Google profiles, deploy safety, and authenticated browser coverage
+
+[2026-08-06T17:24:00Z] gate=focused-final cmd=vitest result=PASS files=6 tests=24
+[2026-08-06T17:26:00Z] gate=unit cmd=npm-run-test-unit result=PASS files=90 tests=340
+[2026-08-06T17:27:00Z] gate=smoke cmd=npm-run-test-smoke result=PASS
+[2026-08-06T17:30:00Z] gate=workflow-yaml-manifest-json result=PASS
+[2026-08-06T17:30:00Z] gate=workflow-regression result=PASS files=2 tests=8
+[2026-08-06T17:31:00Z] gate=lint cmd=npm-run-lint result=PASS
+[2026-08-06T17:31:00Z] gate=typescript cmd=npx-tsc-noEmit result=PASS
+[2026-08-06T17:33:00Z] gate=build cmd=npm-run-build result=PASS routes=96
+[2026-08-06T17:34:00Z] gate=playwright-auth-list result=PASS projects=chromium,mobile-chrome tests=2
+[2026-08-06T17:34:00Z] gate=dependency-audit result=PASS_WITH_EXCEPTION full=12 moderate=8 high=4 critical=0 production=13 moderate=9 high=4 critical=0 breaking_major_fixes_only=true
+[2026-08-06T17:34:00Z] gate=gitleaks-staged result=PASS leaks=0
+[2026-08-06T17:29:00Z] gate=rollback-snapshot result=PASS cloud_run_revision=ssrleadflowreview-00297-dnx hosting_channel=rollback-crm-audit-20260806 expires=2026-08-13T17:29:00Z
+
+## 2026-08-06 agent API protocol hardening
+
 - RUN_ID: 20260806-agent-api-protocol-hardening
 - Scope: Canonical agent registry, authenticated heartbeat envelope, MCP connector probes, real OpenAPI contract
 

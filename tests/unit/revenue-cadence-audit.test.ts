@@ -22,7 +22,9 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
 
     expect(env.CLOUDSDK_CONFIG).toBeTruthy();
     expect(String(env.CLOUDSDK_LOG_DIR)).toContain("logs");
-    expect(env.CLOUDSDK_ACTIVE_CONFIG_NAME).toBe("default");
+    if (process.env.CLOUDSDK_ACTIVE_CONFIG_NAME) {
+      expect(env.CLOUDSDK_ACTIVE_CONFIG_NAME).toBe(process.env.CLOUDSDK_ACTIVE_CONFIG_NAME);
+    }
   });
 
   it("wraps gcloud through cmd.exe on win32", () => {
@@ -33,6 +35,14 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
     expect(invocation.command).toBe("cmd.exe");
     expect(invocation.args.slice(0, 4)).toEqual(["/d", "/s", "/c", "gcloud"]);
     expect(invocation.env.CLOUDSDK_CONFIG).toBeTruthy();
+  });
+
+  it("preserves an explicitly selected named gcloud configuration", () => {
+    const env = runAuditHelper(
+      `createWritableGcloudEnv({ ...process.env, CLOUDSDK_ACTIVE_CONFIG_NAME: "mission-control-audit" })`
+    );
+
+    expect(env.CLOUDSDK_ACTIVE_CONFIG_NAME).toBe("mission-control-audit");
   });
 
   it("audits the consolidated live revenue cadence instead of removed legacy jobs", () => {

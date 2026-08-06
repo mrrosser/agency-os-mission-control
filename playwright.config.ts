@@ -24,7 +24,7 @@ const projects = [
   },
   {
     name: "mobile-chrome",
-    testMatch: /responsive-shell\.spec\.ts/,
+    testMatch: /(responsive-shell|authenticated-crm)\.spec\.ts/,
     use: { ...devices["Pixel 7"] },
   },
 ];

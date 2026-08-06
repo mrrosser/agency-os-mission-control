@@ -69,7 +69,7 @@ export const POST = withApiHandler(
       followupSequence: body.followupSequence,
       processDueResponses: body.processDueResponses,
       responseLoopMaxTasks: body.responseLoopMaxTasks,
-      requireApprovalGates: body.requireApprovalGates,
+      requireApprovalGates: true,
     });
 
     return NextResponse.json({

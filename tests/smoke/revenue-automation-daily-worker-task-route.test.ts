@@ -170,7 +170,7 @@ describe("revenue automation daily worker-task route", () => {
         "Content-Type": "application/json",
         Authorization: "Bearer token-day30",
       },
-      body: JSON.stringify({ businessKey: "rng", dueOnly: true }),
+      body: JSON.stringify({ businessKey: "rng", dueOnly: true, requireApprovalGates: false }),
     });
 
     const res = await POST(
@@ -184,7 +184,37 @@ describe("revenue automation daily worker-task route", () => {
     expect(data.effectiveStage).toBe("day30");
     expect(data.metadata.job_name).toBe("revenue-automation-rng");
     expect(runDay30Mock).toHaveBeenCalledOnce();
+    expect(runDay30Mock).toHaveBeenCalledWith(
+      expect.objectContaining({ requireApprovalGates: true })
+    );
     expect(runDay2Mock).not.toHaveBeenCalled();
+    expect(runDay1Mock).not.toHaveBeenCalled();
+  });
+
+  it("keeps approval gates enabled for an explicitly requested day2 stage", async () => {
+    const req = new Request("http://localhost/api/revenue/automation/daily/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer token-day30",
+      },
+      body: JSON.stringify({
+        businessKey: "rts",
+        runStages: ["day2"],
+        requireApprovalGates: false,
+      }),
+    });
+
+    const res = await POST(
+      req as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+
+    expect(res.status).toBe(200);
+    expect(runDay2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({ requireApprovalGates: true })
+    );
+    expect(runDay30Mock).not.toHaveBeenCalled();
     expect(runDay1Mock).not.toHaveBeenCalled();
   });
 

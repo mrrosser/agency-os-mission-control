@@ -180,7 +180,7 @@ export const POST = withApiHandler(
         followupSequence: body.followupSequence,
         processDueResponses: body.processDueResponses,
         responseLoopMaxTasks: body.responseLoopMaxTasks,
-        requireApprovalGates: body.requireApprovalGates,
+        requireApprovalGates: true,
       });
 
       return NextResponse.json({
@@ -209,7 +209,7 @@ export const POST = withApiHandler(
       followupSequence: body.followupSequence,
       processDueResponses: body.processDueResponses,
       responseLoopMaxTasks: body.responseLoopMaxTasks,
-      requireApprovalGates: body.requireApprovalGates,
+      requireApprovalGates: true,
       runCloserQueue: body.runCloserQueue,
       runRevenueMemory: body.runRevenueMemory,
       runWeeklyKpi: body.runWeeklyKpi ?? !body.dueOnly,

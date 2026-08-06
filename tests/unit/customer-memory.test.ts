@@ -1,10 +1,57 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   normalizePaperclipCustomers,
   normalizePaperclipTimeline,
+  updateProjectedCustomerStage,
+  upsertProjectedCustomer,
 } from "@/lib/crm/customer-memory";
+import { getAdminDb } from "@/lib/firebase-admin";
+
+vi.mock("@/lib/firebase-admin", () => ({
+  getAdminDb: vi.fn(),
+}));
+
+const getAdminDbMock = vi.mocked(getAdminDb);
+
+function mockProjectedCustomerDb(ownerUid: string | null, exists = true) {
+  const transactionSet = vi.fn();
+  const activityAdd = vi.fn(async () => ({ id: "activity-1" }));
+  const leadSet = vi.fn(async () => undefined);
+  const leadRef = { id: "cust_1", set: leadSet };
+  const snapshot = {
+    exists,
+    data: () => (exists ? { userId: ownerUid } : undefined),
+  };
+  const db = {
+    collection: vi.fn((name: string) => {
+      if (name === "leads") {
+        return {
+          doc: vi.fn(() => leadRef),
+        };
+      }
+      if (name === "activities") {
+        return {
+          add: activityAdd,
+        };
+      }
+      throw new Error(`unexpected collection: ${name}`);
+    }),
+    runTransaction: vi.fn(async (executor: (tx: unknown) => Promise<unknown>) =>
+      executor({
+        get: vi.fn(async () => snapshot),
+        set: transactionSet,
+      })
+    ),
+  };
+  getAdminDbMock.mockReturnValue(db as unknown as ReturnType<typeof getAdminDb>);
+  return { activityAdd, transactionSet };
+}
 
 describe("customer-memory normalization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("normalizes Paperclip customers into the CRM shape", () => {
     const customers = normalizePaperclipCustomers({
       items: [
@@ -85,5 +132,69 @@ describe("customer-memory normalization", () => {
       channel: "email",
       summary: "Sent intro email",
     });
+  });
+
+  it("rejects a projected customer upsert owned by another uid", async () => {
+    const { activityAdd, transactionSet } = mockProjectedCustomerDb("user-2");
+
+    await expect(
+      upsertProjectedCustomer("user-1", {
+        customerId: "cust_1",
+        companyName: "Foreign Customer",
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-AI-LUNCH-LEARN",
+        pipelineStage: "proposal",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(transactionSet).not.toHaveBeenCalled();
+    expect(activityAdd).not.toHaveBeenCalled();
+  });
+
+  it("rejects a projected stage update owned by another uid", async () => {
+    const { activityAdd, transactionSet } = mockProjectedCustomerDb("user-2");
+
+    await expect(
+      updateProjectedCustomerStage("user-1", "cust_1", "proposal")
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(transactionSet).not.toHaveBeenCalled();
+    expect(activityAdd).not.toHaveBeenCalled();
+  });
+
+  it("rejects claiming an existing projected customer with no owner", async () => {
+    const { activityAdd, transactionSet } = mockProjectedCustomerDb(null);
+
+    await expect(
+      upsertProjectedCustomer("user-1", {
+        customerId: "cust_1",
+        companyName: "Unowned Customer",
+      })
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(transactionSet).not.toHaveBeenCalled();
+    expect(activityAdd).not.toHaveBeenCalled();
+  });
+
+  it("preserves same-owner projected upserts", async () => {
+    const { activityAdd, transactionSet } = mockProjectedCustomerDb("user-1");
+
+    const customer = await upsertProjectedCustomer("user-1", {
+      customerId: "cust_1",
+      companyName: "Owned Customer",
+      businessUnit: "rt_solutions",
+      offerCode: "RTS-AI-LUNCH-LEARN",
+      pipelineStage: "proposal",
+    });
+
+    expect(customer).toMatchObject({
+      customerId: "cust_1",
+      businessUnit: "rt_solutions",
+      offerCode: "RTS-AI-LUNCH-LEARN",
+      pipelineStage: "proposal",
+    });
+    expect(transactionSet).toHaveBeenCalledOnce();
+    expect(transactionSet.mock.calls[0]?.[2]).toEqual({ merge: true });
+    expect(activityAdd).toHaveBeenCalledOnce();
   });
 });

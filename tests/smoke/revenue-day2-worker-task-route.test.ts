@@ -72,7 +72,7 @@ describe("revenue day2 worker-task route", () => {
         uid: "user-1",
         templateIds: ["rng-south-day1"],
         dryRun: false,
-        requireApprovalGates: true,
+        requireApprovalGates: false,
         processDueResponses: true,
       }),
     });

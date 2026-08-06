@@ -62,7 +62,7 @@ function serializeJob(job: LeadRunJobDoc) {
     status: job.status,
     config: {
       dryRun: Boolean(job.config?.dryRun),
-      draftFirst: Boolean(job.config?.draftFirst),
+      draftFirst: job.config?.draftFirst !== false,
       requireBookingConfirmation: job.config?.requireBookingConfirmation !== false,
       timeZone: job.config?.timeZone || "UTC",
       businessKey: job.config?.businessKey || null,
@@ -184,7 +184,7 @@ export const POST = withApiHandler(
 
       const config: LeadRunJobConfig = {
         dryRun: Boolean(body.config?.dryRun),
-        draftFirst: Boolean(body.config?.draftFirst),
+        draftFirst: body.config?.draftFirst ?? true,
         requireBookingConfirmation: body.config?.requireBookingConfirmation ?? true,
         timeZone: body.config?.timeZone || "UTC",
         useSMS: Boolean(body.config?.useSMS),

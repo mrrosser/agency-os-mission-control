@@ -1,16 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireFirebaseAuth } from "@/lib/api/auth";
-import { withApiHandler } from "@/lib/api/handler";
+import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { parseJson } from "@/lib/api/validation";
 import {
+  assertProjectedCustomerWriteAccess,
   listProjectedCustomers,
   normalizePaperclipCustomers,
   upsertProjectedCustomer,
   type CustomerRecord,
 } from "@/lib/crm/customer-memory";
 import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
+import {
+  normalizeBusinessUnit,
+  normalizeCrmPipelineStage,
+  resolveOfferCodeForBusinessUnit,
+} from "@/lib/revenue/offers";
 
 const bodySchema = z.object({
   customerId: z.string().trim().min(1).max(160).optional(),
@@ -30,6 +36,8 @@ function asCustomerFromInput(
   body: z.infer<typeof bodySchema>,
   sourceOfTruth: "paperclip" | "firestore_projected"
 ): CustomerRecord {
+  const businessUnit = normalizeBusinessUnit(body.businessUnit);
+  const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, body.offerCode);
   return {
     customerId,
     companyName: body.companyName.trim(),
@@ -37,9 +45,9 @@ function asCustomerFromInput(
     email: body.email?.trim() || null,
     phone: body.phone?.trim() || null,
     sourceLabel: body.sourceLabel?.trim() || null,
-    businessUnit: "ai_cofoundry",
-    offerCode: body.offerCode?.trim().toUpperCase() || "AICF-DISCOVERY",
-    pipelineStage: "lead_capture",
+    businessUnit,
+    offerCode: offerResolution.offerCode,
+    pipelineStage: normalizeCrmPipelineStage(body.pipelineStage),
     channels: [
       ...(body.email?.trim() ? (["email"] as const) : []),
       ...(body.phone?.trim() ? (["sms", "voice"] as const) : []),
@@ -51,6 +59,18 @@ function asCustomerFromInput(
     dncProtection: true,
     sourceOfTruth,
   };
+}
+
+function rethrowCustomerOwnershipRejection(error: unknown): void {
+  const status =
+    error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : null;
+  if (status === 403 || status === 409) {
+    throw new ApiError(status, "Customer record is not writable by this user", {
+      reason: "upstream_ownership_rejection",
+    });
+  }
 }
 
 export const GET = withApiHandler(
@@ -95,6 +115,9 @@ export const POST = withApiHandler(
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
     const idempotencyKey = getIdempotencyKey(request, body);
+    if (body.customerId) {
+      await assertProjectedCustomerWriteAccess(user.uid, body.customerId);
+    }
 
     const result = await withIdempotency(
       { uid: user.uid, route: "crm.customers.upsert", key: idempotencyKey, log },
@@ -126,6 +149,7 @@ export const POST = withApiHandler(
                 asCustomerFromInput(body.customerId || crypto.randomUUID(), body, "paperclip"),
             };
           } catch (error) {
+            rethrowCustomerOwnershipRejection(error);
             log.warn("crm.customers.paperclip_write_fallback", {
               uid: user.uid,
               message: error instanceof Error ? error.message : String(error),

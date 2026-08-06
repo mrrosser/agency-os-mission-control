@@ -257,8 +257,15 @@ export async function runDay2RevenueAutomation(
 
   const dryRun = Boolean(args.dryRun);
   const processDueResponses = args.processDueResponses !== false;
-  const requireApprovalGates = args.requireApprovalGates !== false;
+  const requireApprovalGates = true;
   const responseLoopMaxTasks = clampInt(args.responseLoopMaxTasks, 1, 25, 10);
+
+  if (args.requireApprovalGates === false) {
+    args.log.warn("revenue.day2.approval_gate_override_ignored", {
+      uid: args.uid,
+      templateCount: templateIds.length,
+    });
+  }
 
   const templates: Day2TemplateResult[] = [];
   const warnings: string[] = [];
@@ -276,12 +283,10 @@ export async function runDay2RevenueAutomation(
 
   for (const templateId of templateIds) {
     try {
-      if (requireApprovalGates) {
-        await enforceApprovalGates({
-          uid: args.uid,
-          templateId,
-        });
-      }
+      await enforceApprovalGates({
+        uid: args.uid,
+        templateId,
+      });
 
       const day1 = await runDay1RevenueAutomation({
         uid: args.uid,

@@ -108,7 +108,7 @@ describe("lead run jobs route", () => {
     const req = new Request("http://localhost/api/lead-runs/run-1/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "start", config: { dryRun: true, draftFirst: true, timeZone: "UTC" } }),
+      body: JSON.stringify({ action: "start", config: { dryRun: true, timeZone: "UTC" } }),
     });
 
     const res = await POST(
@@ -121,6 +121,7 @@ describe("lead run jobs route", () => {
     expect(data.ok).toBe(true);
     expect(data.job.status).toBe("queued");
     expect(data.job.totalLeads).toBe(2);
+    expect(data.job.config.draftFirst).toBe(true);
     expect(data.job.config.requireBookingConfirmation).toBe(true);
     expect(jobSet).toHaveBeenCalledOnce();
     expect(triggerLeadRunWorkerMock).toHaveBeenCalledOnce();

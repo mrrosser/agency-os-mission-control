@@ -1,6 +1,7 @@
 import "server-only";
 
 import { FieldValue } from "firebase-admin/firestore";
+import { ApiError } from "@/lib/api/handler";
 import type { Logger } from "@/lib/logging";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
@@ -67,6 +68,28 @@ export interface CustomerUpsertInput {
   businessUnit?: unknown;
   offerCode?: unknown;
   pipelineStage?: unknown;
+}
+
+function assertCustomerOwner(
+  uid: string,
+  customerId: string,
+  snapshot: { exists: boolean; data: () => Record<string, unknown> | undefined }
+): void {
+  if (!snapshot.exists) return;
+
+  const ownerUid = asString(snapshot.data()?.userId);
+  if (!ownerUid) {
+    throw new ApiError(409, "Customer record has no owner and cannot be claimed", {
+      customerId,
+      reason: "owner_missing",
+    });
+  }
+  if (ownerUid !== uid) {
+    throw new ApiError(403, "Customer record is owned by another user", {
+      customerId,
+      reason: "owner_mismatch",
+    });
+  }
 }
 
 function asString(value: unknown): string | null {
@@ -421,6 +444,19 @@ export async function getProjectedCustomerTimeline(
   }
 }
 
+export async function assertProjectedCustomerWriteAccess(
+  uid: string,
+  customerId: string
+): Promise<void> {
+  const normalizedCustomerId = asString(customerId);
+  if (!normalizedCustomerId) {
+    throw new ApiError(400, "Customer ID is required");
+  }
+
+  const snapshot = await getAdminDb().collection("leads").doc(normalizedCustomerId).get();
+  assertCustomerOwner(uid, normalizedCustomerId, snapshot);
+}
+
 export async function upsertProjectedCustomer(
   uid: string,
   input: CustomerUpsertInput
@@ -444,7 +480,20 @@ export async function upsertProjectedCustomer(
 
   const customerId = asString(input.customerId);
   if (customerId) {
-    await getAdminDb().collection("leads").doc(customerId).set(payload, { merge: true });
+    const db = getAdminDb();
+    const ref = db.collection("leads").doc(customerId);
+    await db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(ref);
+      assertCustomerOwner(uid, customerId, snapshot);
+      tx.set(
+        ref,
+        {
+          ...payload,
+          ...(!snapshot.exists ? { createdAt: FieldValue.serverTimestamp() } : {}),
+        },
+        { merge: true }
+      );
+    });
   } else {
     const ref = getAdminDb().collection("leads").doc();
     await ref.set({
@@ -508,16 +557,33 @@ export async function updateProjectedCustomerStage(
   pipelineStageInput: unknown
 ): Promise<CustomerTimelineEvent> {
   const pipelineStage = normalizeCrmPipelineStage(pipelineStageInput);
-  await getAdminDb().collection("leads").doc(customerId).set(
-    {
-      pipelineStage,
-      status: legacyStatusFromPipelineStage(pipelineStage),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  const normalizedCustomerId = asString(customerId);
+  if (!normalizedCustomerId) {
+    throw new ApiError(400, "Customer ID is required");
+  }
 
-  return recordProjectedTimelineEvent(uid, customerId, {
+  const db = getAdminDb();
+  const ref = db.collection("leads").doc(normalizedCustomerId);
+  await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    if (!snapshot.exists) {
+      throw new ApiError(404, "Customer record not found", {
+        customerId: normalizedCustomerId,
+      });
+    }
+    assertCustomerOwner(uid, normalizedCustomerId, snapshot);
+    tx.set(
+      ref,
+      {
+        pipelineStage,
+        status: legacyStatusFromPipelineStage(pipelineStage),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+
+  return recordProjectedTimelineEvent(uid, normalizedCustomerId, {
     action: "crm.update_stage",
     type: "system",
     summary: `Pipeline stage changed to ${formatCrmPipelineStageLabel(pipelineStage)}.`,

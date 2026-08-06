@@ -51,6 +51,7 @@ describe("revenue day2 route", () => {
         templateIds: ["rng-south-day1"],
         processDueResponses: true,
         responseLoopMaxTasks: 10,
+        requireApprovalGates: false,
       }),
     });
 
@@ -68,6 +69,7 @@ describe("revenue day2 route", () => {
     expect(args?.uid).toBe("user-1");
     expect(args?.templateIds).toEqual(["rng-south-day1"]);
     expect(args?.processDueResponses).toBe(true);
+    expect(args?.requireApprovalGates).toBe(true);
   });
 
   it("returns 400 for invalid payload", async () => {

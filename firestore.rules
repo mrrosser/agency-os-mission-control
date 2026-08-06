@@ -46,6 +46,12 @@ service cloud.firestore {
       allow write: if false; // Only Admin SDK (API) should update analytics
     }
 
+    // Autonomy policies and their audit history are server-only. The API uses
+    // Firebase Admin after authentication and operator-allowlist checks.
+    match /agentAutonomyPolicies/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
     // Allow authenticated users to submit feedback
     match /feedback/{feedbackId} {
       allow create: if isSignedIn();

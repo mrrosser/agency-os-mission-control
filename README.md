@@ -535,6 +535,10 @@ npm run promptfoo:code-scan
 npm run promptfoo:redteam
 ```
 
+## Agent Autonomy Policy
+
+The server-side policy API supports fail-closed `assist`, `supervised`, and `autonomous_safe` modes for RT Solutions and Rosser Gallery. Setup, protected-action rules, local verification, and deployment checks are documented in [docs/autonomy-policy.md](docs/autonomy-policy.md).
+
 ## Hybrid Sprint Verification (Outcome Gates + Inbox Rubric v2)
 ```bash
 npm run lint

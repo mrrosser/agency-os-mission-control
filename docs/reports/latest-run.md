@@ -30,3 +30,13 @@
 [2026-02-26T21:04:54Z] gate=external-nonadmin-acceptance-script-user-mode-npm cmd=npm run social:acceptance:nonadmin result=PASS auth_mode=user uid=external-acceptance-20260226150448-npm draftId=KWx3P6fowuLp8TqSWR4B listed_status=approved dispatch_attempted=1 dispatch_dispatched=1 dispatch_failed=0
 [2026-02-26T21:40:03Z] gate=scheduler-dispatch-retry cmd=gcloud scheduler jobs resume social-dispatch-retry-failed result=PASS state=ENABLED
 [2026-02-26T21:43:21Z] gate=runtime-preflight-auth-post-secret-rotation cmd=GET /api/runtime/preflight result=PASS status=ok issues=none
+
+## 2026-08-06 CRM autonomy policy foundation
+
+- Scope: fail-closed policy helper plus authenticated Firestore policy API; no provider, dashboard, deployment, or production-data changes.
+- `npm run lint`: PASS
+- `tsc --noEmit`: PASS
+- focused unit tests: PASS (18)
+- focused API smoke tests: PASS (5)
+- `git diff --cached --check`: PASS
+- `gitleaks git --staged --redact --no-banner .`: PASS (no leaks)

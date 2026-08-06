@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 function runAuditHelper(expression: string) {
   const script = `
-    import { buildGcloudInvocation, createWritableGcloudEnv } from "./scripts/revenue-cadence-audit.mjs";
+    import { JOB_SPECS, buildGcloudInvocation, createWritableGcloudEnv } from "./scripts/revenue-cadence-audit.mjs";
     const result = ${expression};
     console.log(JSON.stringify(result));
   `;
@@ -33,5 +33,20 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
     expect(invocation.command).toBe("cmd.exe");
     expect(invocation.args.slice(0, 4)).toEqual(["/d", "/s", "/c", "gcloud"]);
     expect(invocation.env.CLOUDSDK_CONFIG).toBeTruthy();
+  });
+
+  it("audits the consolidated live revenue cadence instead of removed legacy jobs", () => {
+    const specs = runAuditHelper(
+      "JOB_SPECS.map(({ name, endpointPath, defaultSchedule }) => ({ name, endpointPath, defaultSchedule }))"
+    ) as unknown as Array<{ name: string; endpointPath: string; defaultSchedule: string }>;
+
+    expect(specs.map((spec) => spec.name)).toEqual([
+      "revenue-automation-rts",
+      "revenue-automation-rng",
+      "revenue-automation-aicf",
+      "revenue-weekly-brain",
+    ]);
+    expect(specs.every((spec) => Boolean(spec.endpointPath && spec.defaultSchedule))).toBe(true);
+    expect(specs.some((spec) => spec.name.startsWith("revenue-day"))).toBe(false);
   });
 });

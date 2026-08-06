@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -17,17 +17,28 @@ export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   const sourceEnv = { ...baseEnv };
 
   let configRoot = sourceEnv.CLOUDSDK_CONFIG?.trim();
+  let freshConfig = false;
+  if (!configRoot && !preferFresh) {
+    const defaultCandidates = [
+      sourceEnv.APPDATA ? join(sourceEnv.APPDATA, "gcloud") : "",
+      join(homedir(), ".config", "gcloud"),
+    ].filter(Boolean);
+    configRoot = defaultCandidates.find((candidate) => existsSync(candidate));
+  }
   if (!configRoot || preferFresh) {
     configRoot = mkdtempSync(join(tmpdir(), "mission-control-gcloud-"));
+    freshConfig = true;
   }
 
   const logDir = join(configRoot, "logs");
-  const configDir = join(configRoot, "configurations");
   mkdirSync(logDir, { recursive: true });
-  mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, "config_default"), "[core]\ndisable_usage_reporting = True\n", {
-    encoding: "utf8",
-  });
+  if (freshConfig) {
+    const configDir = join(configRoot, "configurations");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config_default"), "[core]\ndisable_usage_reporting = True\n", {
+      encoding: "utf8",
+    });
+  }
 
   return {
     ...sourceEnv,
@@ -56,56 +67,64 @@ export function buildGcloudInvocation(args, options = {}) {
   };
 }
 
-const JOB_SPECS = [
+export const JOB_SPECS = [
   {
-    name: "revenue-day1-rts-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-rts",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_RTS_CRON",
+    defaultSchedule: "5 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "rts",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day1-rng-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-rng",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_RNG_CRON",
+    defaultSchedule: "20 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "rng",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day1-aicf-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-aicf",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_AICF_CRON",
+    defaultSchedule: "35 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "aicf",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day2-rts-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day2-rng-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day2-aicf-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day30-rts-daily",
+    name: "revenue-weekly-brain",
     endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-rng-daily",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-aicf-daily",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-weekly-brain",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: true },
+    scheduleEnv: "REVENUE_WEEKLY_BRAIN_CRON",
+    defaultSchedule: "10 6 * * 1",
+    payload: {
+      templateIds: true,
+      uid: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: true,
+    },
   },
 ];
 
@@ -161,6 +180,32 @@ function validatePayload(payload, spec) {
 
   if (spec.uid && typeof payload.uid !== "string") {
     mismatches.push("payload.uid missing");
+  }
+
+  if (typeof spec.businessKey === "string" && payload.businessKey !== spec.businessKey) {
+    mismatches.push(
+      `payload.businessKey expected=${spec.businessKey} actual=${String(payload.businessKey)}`
+    );
+  }
+
+  for (const booleanField of ["dueOnly", "dryRun"]) {
+    if (
+      typeof spec[booleanField] === "boolean" &&
+      payload[booleanField] !== spec[booleanField]
+    ) {
+      mismatches.push(
+        `payload.${booleanField} expected=${spec[booleanField]} actual=${String(
+          payload[booleanField]
+        )}`
+      );
+    }
+  }
+
+  if (
+    typeof spec.runStagesIncludes === "string" &&
+    (!Array.isArray(payload.runStages) || !payload.runStages.includes(spec.runStagesIncludes))
+  ) {
+    mismatches.push(`payload.runStages missing=${spec.runStagesIncludes}`);
   }
 
   if (
@@ -261,6 +306,13 @@ async function main() {
         );
       }
 
+      const expectedSchedule = readEnv(spec.scheduleEnv, spec.defaultSchedule);
+      if (described.schedule !== expectedSchedule) {
+        jobMismatch.push(
+          `schedule expected=${expectedSchedule} actual=${String(described.schedule || "")}`
+        );
+      }
+
       const actualPath = sanitizePath(target.uri || "");
       if (actualPath !== spec.endpointPath) {
         jobMismatch.push(`path expected=${spec.endpointPath} actual=${actualPath || "<none>"}`);
@@ -298,6 +350,10 @@ async function main() {
               uidPresent: typeof payload.uid === "string" && payload.uid.length > 0,
               templateId: typeof payload.templateId === "string" ? payload.templateId : null,
               templateIds: Array.isArray(payload.templateIds) ? payload.templateIds : null,
+              businessKey: typeof payload.businessKey === "string" ? payload.businessKey : null,
+              dueOnly: typeof payload.dueOnly === "boolean" ? payload.dueOnly : null,
+              dryRun: typeof payload.dryRun === "boolean" ? payload.dryRun : null,
+              runStages: Array.isArray(payload.runStages) ? payload.runStages : null,
               requireApprovalGates:
                 typeof payload.requireApprovalGates === "boolean"
                   ? payload.requireApprovalGates

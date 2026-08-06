@@ -63,12 +63,17 @@ These samples are diagnostic snapshots, not a statistically complete performance
 
 ## Agent/API and Google profile status
 
+- Live cadence audit passed with zero mismatches for four consolidated revenue jobs. RT Solutions runs daily at 5:05 AM CT, Rosser Gallery at 5:20 AM CT, AI CoFoundry at 5:35 AM CT, and the cross-organization weekly brain at 6:10 AM CT each Monday.
+- All four audited jobs were enabled, used the expected route and America/Chicago timezone, and required approval gates. The daily jobs were bound to the correct `rts`, `rng`, and `aicf` business keys.
+- Additional live discovery/coordination jobs were enabled: artist-manager loops every 30 minutes, lead-generation inbox hourly, lead prospecting daily at 6:40 AM CT, Google OAuth health every four hours, and governance watchdog/tick jobs every 15/10 minutes.
+- The cadence audit script had still targeted scheduler jobs removed by consolidation. It now verifies the four real jobs, schedules, business keys, safe payload invariants, and authenticated local gcloud configuration.
 - Canonical registry/heartbeat/capability and connector-probe hardening: pending final integration evidence in this report.
 - RT Solutions/Rosser Gallery Google Workspace status and OAuth context preservation: pending final integration evidence in this report.
 
 ## Verification and deployment
 
 - Focused autonomy/polling tests: 26 passed.
+- Revenue cadence helper tests: 3 passed; live audit: 4/4 jobs, zero mismatches.
 - Responsive CRM unit tests: 4 passed.
 - Desktop Chrome and Pixel 7 responsive public-shell Playwright tests: 4 passed.
 - TypeScript and touched-file ESLint passed after integration.

@@ -7,6 +7,7 @@ const {
   getAdminDbMock,
   getTokenMock,
   storeGoogleTokensMock,
+  storeGoogleProfileTokensMock,
 } = vi.hoisted(() => {
   const deleteMock = vi.fn();
   const stateGetMock = vi.fn();
@@ -18,12 +19,14 @@ const {
   const getAdminDbMock = vi.fn(() => ({ collection: collectionMock }));
   const getTokenMock = vi.fn();
   const storeGoogleTokensMock = vi.fn();
+  const storeGoogleProfileTokensMock = vi.fn();
   return {
     deleteMock,
     stateGetMock,
     getAdminDbMock,
     getTokenMock,
     storeGoogleTokensMock,
+    storeGoogleProfileTokensMock,
   };
 });
 
@@ -41,6 +44,7 @@ vi.mock("@/lib/google/oauth", async () => {
       getToken: getTokenMock,
     }),
     storeGoogleTokens: storeGoogleTokensMock,
+    storeGoogleProfileTokens: storeGoogleProfileTokensMock,
   };
 });
 
@@ -66,12 +70,16 @@ describe("google callback route", () => {
         returnTo: "/dashboard/integrations",
         origin: "http://localhost:3000",
         correlationId: "corr-1",
+        businessId: null,
+        profileId: null,
       }),
     });
+    deleteMock.mockResolvedValue(undefined);
     storeGoogleTokensMock.mockResolvedValue(undefined);
+    storeGoogleProfileTokensMock.mockResolvedValue(undefined);
   });
 
-  it("redirects to the canonical origin even when the stored state origin is localhost", async () => {
+  it("preserves the legacy callback and canonical redirect behavior", async () => {
     const request = new NextRequest(
       "https://leadflow-review.web.app/api/google/callback?code=abc123&state=state-1",
       { method: "GET" }
@@ -85,6 +93,86 @@ describe("google callback route", () => {
     );
     expect(getTokenMock).toHaveBeenCalledWith("abc123");
     expect(storeGoogleTokensMock).toHaveBeenCalledOnce();
+    expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
     expect(deleteMock).toHaveBeenCalledOnce();
+  });
+
+  it("stores tokens in the selected schema-v2 profile and reports that context", async () => {
+    stateGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: "uid-123",
+        returnTo: "/dashboard/integrations",
+        origin: "https://leadflow-review.web.app",
+        correlationId: "corr-rts-1",
+        businessId: "rt_solutions",
+        profileId: "rt_solutions_work",
+      }),
+    });
+    const request = new NextRequest(
+      "https://leadflow-review.web.app/api/google/callback?code=abc123&state=state-1",
+      { method: "GET" }
+    );
+
+    const response = await GET(request, {} as never);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://leadflow-review.web.app/dashboard/integrations?google=connected&googleBusiness=rt_solutions&googleProfile=rt_solutions_work"
+    );
+    expect(storeGoogleProfileTokensMock).toHaveBeenCalledWith(
+      "uid-123",
+      "rt_solutions_work",
+      expect.objectContaining({ refresh_token: "refresh-token" }),
+      expect.anything()
+    );
+    expect(storeGoogleTokensMock).not.toHaveBeenCalled();
+    expect(deleteMock.mock.invocationCallOrder[0]).toBeLessThan(
+      getTokenMock.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("fails closed before token exchange when stored context is unknown", async () => {
+    stateGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: "uid-123",
+        returnTo: "/dashboard/integrations",
+        businessId: "rosser_gallery",
+        profileId: "rosser_gallery_work",
+      }),
+    });
+    const request = new NextRequest(
+      "https://leadflow-review.web.app/api/google/callback?code=abc123&state=state-1",
+      { method: "GET" }
+    );
+
+    const response = await GET(request, {} as never);
+
+    expect(response.status).toBe(400);
+    expect(getTokenMock).not.toHaveBeenCalled();
+    expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+    expect(storeGoogleTokensMock).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect to a protocol-relative stored return path", async () => {
+    stateGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        uid: "uid-123",
+        returnTo: "//example.invalid/steal",
+        businessId: null,
+        profileId: null,
+      }),
+    });
+    const request = new NextRequest(
+      "https://leadflow-review.web.app/api/google/callback?code=abc123&state=state-1",
+      { method: "GET" }
+    );
+
+    const response = await GET(request, {} as never);
+    expect(response.headers.get("location")).toBe(
+      "https://leadflow-review.web.app/dashboard/integrations"
+    );
   });
 });

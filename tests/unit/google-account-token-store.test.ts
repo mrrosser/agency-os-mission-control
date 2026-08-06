@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   registryGetMock,
+  registrySetMock,
   bindingGetMock,
+  bindingSetMock,
   accountGetMock,
   accountSetMock,
   accessUserSecretMock,
   setUserSecretMock,
 } = vi.hoisted(() => ({
   registryGetMock: vi.fn(),
+  registrySetMock: vi.fn(),
   bindingGetMock: vi.fn(),
+  bindingSetMock: vi.fn(),
   accountGetMock: vi.fn(),
   accountSetMock: vi.fn(),
   accessUserSecretMock: vi.fn(),
@@ -27,9 +31,10 @@ vi.mock("@/lib/secret-manager", () => ({
 
 vi.mock("@/lib/firebase-admin", () => {
   const accountRef = { get: accountGetMock, set: accountSetMock };
-  const bindingRef = { get: bindingGetMock };
+  const bindingRef = { get: bindingGetMock, set: bindingSetMock };
   const registryRef = {
     get: registryGetMock,
+    set: registrySetMock,
     collection: vi.fn((name: string) => ({
       doc: vi.fn(() => (name === "accounts" ? accountRef : bindingRef)),
     })),
@@ -42,6 +47,7 @@ vi.mock("@/lib/firebase-admin", () => {
 });
 
 import {
+  persistGoogleAccountProfileTokens,
   persistGoogleAccountTokenFailure,
   persistGoogleAccountTokens,
   resolveGoogleAccountTokens,
@@ -70,6 +76,8 @@ describe("Google account token store", () => {
       tokenType: "Bearer",
     }));
     accountSetMock.mockResolvedValue(undefined);
+    registrySetMock.mockResolvedValue(undefined);
+    bindingSetMock.mockResolvedValue(undefined);
     setUserSecretMock.mockResolvedValue(undefined);
   });
 
@@ -129,6 +137,80 @@ describe("Google account token store", () => {
       oauthHealthStatus: "healthy",
       lastRefreshStatus: "ok",
     });
+  });
+
+  it("stores an OAuth reconnect in the existing profile binding and preserves its refresh token", async () => {
+    const result = await persistGoogleAccountProfileTokens(
+      "uid-1",
+      "rt_solutions_work",
+      {
+        accessToken: "new-access-token",
+        refreshToken: null,
+        expiryDate: 999999,
+        scope: "gmail calendar drive",
+        tokenType: "Bearer",
+      }
+    );
+
+    expect(result).toEqual({
+      accountId: "rt-account",
+      profileId: "rt_solutions_work",
+    });
+    expect(setUserSecretMock).toHaveBeenCalledWith(
+      "uid-1",
+      "google-oauth-account-rt-account",
+      expect.any(String)
+    );
+    const stored = JSON.parse(setUserSecretMock.mock.calls[0]?.[2] as string);
+    expect(stored).toMatchObject({
+      accessToken: "new-access-token",
+      refreshToken: "refresh-token",
+    });
+    expect(bindingSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "rt-account" }),
+      { merge: true }
+    );
+    expect(accountSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingRevocation: false,
+        oauthHealthStatus: "healthy",
+      }),
+      { merge: true }
+    );
+  });
+
+  it("creates an idempotent profile-derived account when a canonical profile is not bound", async () => {
+    registryGetMock.mockResolvedValue({ exists: false, data: () => undefined });
+    bindingGetMock.mockResolvedValue({ exists: false, data: () => undefined });
+
+    const result = await persistGoogleAccountProfileTokens(
+      "uid-1",
+      "rosser_gallery_work",
+      {
+        accessToken: "rng-access-token",
+        refreshToken: "rng-refresh-token",
+        scope: "calendar drive",
+      }
+    );
+
+    expect(result.accountId).toBe("profile-rosser_gallery_work");
+    expect(accessUserSecretMock).not.toHaveBeenCalled();
+    expect(setUserSecretMock).toHaveBeenCalledWith(
+      "uid-1",
+      "google-oauth-account-profile-rosser_gallery_work",
+      expect.any(String)
+    );
+    expect(registrySetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 2,
+        defaultAccountId: "profile-rosser_gallery_work",
+      }),
+      { merge: true }
+    );
+    expect(bindingSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "profile-rosser_gallery_work" }),
+      { merge: true }
+    );
   });
 
   it("records sanitized refresh failures without touching the token secret", async () => {

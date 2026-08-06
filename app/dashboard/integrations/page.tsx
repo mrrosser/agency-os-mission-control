@@ -10,12 +10,18 @@ import { SocialOnboardingChecklist } from "@/components/onboarding/SocialOnboard
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
+import { GOOGLE_BUSINESS_PROFILES } from "@/lib/google/business-profiles";
 
 export default function IntegrationsPage() {
     const searchParams = useSearchParams();
     const googleError = searchParams?.get("google") === "error";
     const googleErrorCode = searchParams?.get("googleError");
     const googleErrorDescription = searchParams?.get("googleErrorDescription");
+    const googleBusinessId = searchParams?.get("googleBusiness");
+    const googleConnected = searchParams?.get("google") === "connected";
+    const googleBusiness = GOOGLE_BUSINESS_PROFILES.find(
+        (profile) => profile.businessId === googleBusinessId
+    );
 
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">
@@ -43,7 +49,9 @@ export default function IntegrationsPage() {
                 {googleError && (
                     <Card className="bg-red-500/5 border-red-500/20">
                         <CardContent className="p-4 text-sm text-red-200 space-y-2">
-                            <p className="font-medium">Google connection was denied.</p>
+                            <p className="font-medium">
+                                {googleBusiness ? `${googleBusiness.label} Google connection was denied.` : "Google connection was denied."}
+                            </p>
                             <p className="text-xs text-red-200/80">
                                 {googleErrorCode ? `Code: ${googleErrorCode}. ` : ""}
                                 {googleErrorDescription || "If you are using a managed Google Workspace account, your admin may block unverified apps until this OAuth consent screen is verified."}
@@ -61,6 +69,14 @@ export default function IntegrationsPage() {
                                     </Button>
                                 </Link>
                             </div>
+                        </CardContent>
+                    </Card>
+                )}
+
+                {googleConnected && googleBusiness && (
+                    <Card className="border-emerald-500/20 bg-emerald-500/5">
+                        <CardContent className="p-4 text-sm text-emerald-100">
+                            {googleBusiness.label} is connected to its Google Workspace profile.
                         </CardContent>
                     </Card>
                 )}

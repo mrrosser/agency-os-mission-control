@@ -63,7 +63,7 @@ export const POST = withApiHandler(
     }
 
     const allowedUids = parseAllowedUids(process.env.AGENT_ACTION_ALLOWED_UIDS);
-    if (allowedUids.size > 0 && !allowedUids.has(user.uid)) {
+    if (allowedUids.size === 0 || !allowedUids.has(user.uid)) {
       throw new ApiError(403, "Forbidden");
     }
 

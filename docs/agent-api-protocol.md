@@ -96,6 +96,9 @@ Then call `GET /api/agents/status` and `GET /api/agents/control-plane` with a de
 
 ## Deploy
 
+Agent lifecycle controls require `AGENT_ACTION_ALLOWED_UIDS`. The action route
+fails closed with `403` when this operator allowlist is missing or empty.
+
 1. Store endpoint credentials in the existing GitHub/Firebase/Cloud Run secret path. Do not place them in source or build arguments.
 2. Optionally set `MCP_HEALTH_PROBE_TIMEOUT_MS` between 500 and 10000 milliseconds; the runtime defaults to 2500 milliseconds.
 3. Deploy through the repository's standard `main` Firebase App Hosting workflow.

@@ -48,6 +48,7 @@ describe("agents actions route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
+    process.env.AGENT_ACTION_ALLOWED_UIDS = "user-1";
     setMock.mockReset();
     setMock.mockImplementation(async (_data: Record<string, unknown>) => undefined);
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
@@ -170,6 +171,29 @@ describe("agents actions route", () => {
 
     expect(res.status).toBe(403);
     expect(data.error).toBe("Forbidden");
+  });
+
+  it("fails closed when AGENT_ACTION_ALLOWED_UIDS is missing", async () => {
+    delete process.env.AGENT_ACTION_ALLOWED_UIDS;
+
+    const req = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: "orchestrator",
+        action: "ping",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toBe("Forbidden");
+    expect(setMock).not.toHaveBeenCalled();
   });
 
   it("forwards resume to Paperclip when proxy is configured", async () => {

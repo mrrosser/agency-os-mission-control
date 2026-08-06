@@ -3,6 +3,7 @@ import "server-only";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { accessUserSecret, setUserSecret } from "@/lib/secret-manager";
+import type { Logger } from "@/lib/logging";
 
 export interface ApiKeys {
   openaiKey?: string;
@@ -18,6 +19,11 @@ export interface ApiKeys {
 
 export type SecretKey = keyof ApiKeys;
 export type SecretStatus = Record<SecretKey, "secret" | "env" | "missing">;
+
+export interface ResolveSecretOptions {
+  allowRuntimeFallbackOnAccessError?: boolean;
+  log?: Pick<Logger, "warn">;
+}
 
 const SECRET_KEYS: SecretKey[] = [
   "openaiKey",
@@ -71,16 +77,38 @@ async function migrateLegacyKeys(uid: string): Promise<void> {
 export async function resolveSecret(
   uid: string,
   key: SecretKey,
-  envVarName: string
+  envVarName: string,
+  options?: ResolveSecretOptions,
 ): Promise<string | undefined> {
-  const direct = await accessUserSecret(uid, key);
-  if (direct) return direct;
+  const envValue = process.env[envVarName]?.trim() || undefined;
 
-  await migrateLegacyKeys(uid);
-  const migrated = await accessUserSecret(uid, key);
-  if (migrated) return migrated;
+  try {
+    const direct = await accessUserSecret(uid, key);
+    if (direct) return direct;
 
-  return process.env[envVarName];
+    await migrateLegacyKeys(uid);
+    const migrated = await accessUserSecret(uid, key);
+    if (migrated) return migrated;
+  } catch (error) {
+    // Scheduled/shared workers already receive version-pinned provider secrets
+    // through their runtime environment. A missing or temporarily unavailable
+    // user-scoped Secret Manager record must not disable that safe fallback.
+    if (envValue && options?.allowRuntimeFallbackOnAccessError) {
+      const record = error && typeof error === "object"
+        ? error as Record<string, unknown>
+        : null;
+      options.log?.warn("secret.resolve.runtime_fallback", {
+        key,
+        envVarName,
+        errorCode: record?.code ?? null,
+        errorName: error instanceof Error ? error.name : null,
+      });
+      return envValue;
+    }
+    throw error;
+  }
+
+  return envValue;
 }
 
 export async function setUserSecrets(uid: string, apiKeys: ApiKeys): Promise<void> {

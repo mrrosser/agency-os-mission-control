@@ -11,7 +11,10 @@ import type {
 import { scoreLead } from "@/lib/leads/scoring";
 import { enrichLeadsWithFirecrawl } from "@/lib/leads/providers/firecrawl";
 import { enrichLeadsWithBasicWebFetch } from "@/lib/leads/providers/basic-web-enrichment";
-import { resolveLeadProviders } from "@/lib/leads/providers/registry";
+import {
+    resolveLeadProviders,
+    type LeadProviderResult,
+} from "@/lib/leads/providers/registry";
 
 interface SourceContext {
     uid: string;
@@ -310,6 +313,8 @@ export async function sourceLeads(
 
     const leads: LeadCandidate[] = [];
     const sourcesUsed: LeadSource[] = [];
+    const failedSources: LeadSource[] = [];
+    let completedProviderCount = 0;
     for (const provider of providers) {
         const elapsedSec = Math.floor((Date.now() - startedAtMs) / 1000);
         if (elapsedSec >= budget.maxRuntimeSec) {
@@ -334,17 +339,31 @@ export async function sourceLeads(
             break;
         }
 
-        const result = await provider.run({
-            request,
-            uid,
-            googlePlacesKey,
-            apifyToken,
-            budget: {
-                remainingPages: Math.max(1, budget.maxPages - usage.pagesUsed),
-                remainingRuntimeSec: Math.max(5, budget.maxRuntimeSec - elapsedSec),
-            },
-            log,
-        });
+        let result: LeadProviderResult;
+        try {
+            result = await provider.run({
+                request,
+                uid,
+                googlePlacesKey,
+                apifyToken,
+                budget: {
+                    remainingPages: Math.max(1, budget.maxPages - usage.pagesUsed),
+                    remainingRuntimeSec: Math.max(5, budget.maxRuntimeSec - elapsedSec),
+                },
+                log,
+            });
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : "Unknown provider error";
+            failedSources.push(provider.source);
+            warnings.push(`${provider.source} source failed: ${reason}`);
+            log?.warn("lead.source.provider_failed", {
+                source: provider.source,
+                error: reason,
+            });
+            continue;
+        }
+
+        completedProviderCount += 1;
 
         if (result.leads.length > 0) {
             leads.push(...result.leads);
@@ -365,6 +384,10 @@ export async function sourceLeads(
             usage.stopReason = "cost_limit";
             usage.stopProvider = provider.source;
         }
+    }
+
+    if (failedSources.length > 0 && completedProviderCount === 0) {
+        throw new Error(`All attempted lead sources failed: ${failedSources.join(", ")}.`);
     }
 
     usage.costUsedUsd = Number(usage.costUsedUsd.toFixed(4));

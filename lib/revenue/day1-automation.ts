@@ -365,8 +365,22 @@ export async function runDay1RevenueAutomation(
     offerCode,
   };
 
-  const googlePlacesKey = await resolveSecret(args.uid, "googlePlacesKey", "GOOGLE_PLACES_API_KEY");
-  const firecrawlKey = await resolveSecret(args.uid, "firecrawlKey", "FIRECRAWL_API_KEY");
+  const scheduledWorkerSecretOptions = {
+    allowRuntimeFallbackOnAccessError: true,
+    log: args.log,
+  };
+  const googlePlacesKey = await resolveSecret(
+    args.uid,
+    "googlePlacesKey",
+    "GOOGLE_PLACES_API_KEY",
+    scheduledWorkerSecretOptions,
+  );
+  const firecrawlKey = await resolveSecret(
+    args.uid,
+    "firecrawlKey",
+    "FIRECRAWL_API_KEY",
+    scheduledWorkerSecretOptions,
+  );
   const apifyToken = process.env.APIFY_TOKEN;
 
   const { leads, sourcesUsed, warnings, diagnostics } = await sourceLeads(requestPayload, {

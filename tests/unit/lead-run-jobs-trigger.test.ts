@@ -1,5 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { triggerLeadRunWorker } from "@/lib/lead-runs/jobs";
+
+const { createTaskMock, queuePathMock } = vi.hoisted(() => ({
+  createTaskMock: vi.fn(),
+  queuePathMock: vi.fn(() => "projects/project/locations/location/queues/queue"),
+}));
+
+vi.mock("@google-cloud/tasks", () => ({
+  CloudTasksClient: class {
+    createTask = createTaskMock;
+    queuePath = queuePathMock;
+  },
+}));
+
+import {
+  resolveLeadRunGoogleProfileId,
+  triggerLeadRunWorker,
+} from "@/lib/lead-runs/jobs";
 
 describe("triggerLeadRunWorker", () => {
   const originalEnv = process.env;
@@ -8,8 +24,12 @@ describe("triggerLeadRunWorker", () => {
     process.env = { ...originalEnv };
     delete process.env.LEAD_RUNS_TASK_QUEUE;
     delete process.env.LEAD_RUNS_TASK_LOCATION;
+    delete process.env.LEAD_RUNS_WORKER_ORIGIN;
+    delete process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT;
+    delete process.env.VERCEL_URL;
     process.env.GOOGLE_CLOUD_PROJECT = "leadflow-review";
     process.env.FUNCTION_REGION = "us-central1";
+    createTaskMock.mockResolvedValue([{}]);
   });
 
   afterEach(() => {
@@ -52,5 +72,65 @@ describe("triggerLeadRunWorker", () => {
         origin: "https://us-central1-leadflow-review.cloudfunctions.net/ssrleadflowreview",
       })
     );
+  });
+
+  it("skips bind-all origins and calls only the deployable worker origin", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await triggerLeadRunWorker(
+      "https://0.0.0.0:8080",
+      "run-2",
+      "worker-token-2",
+      "cid-2"
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://us-central1-leadflow-review.cloudfunctions.net/ssrleadflowreview/api/lead-runs/run-2/jobs/worker"
+    );
+  });
+
+  it("never creates a Cloud Task targeting a bind-all origin", async () => {
+    process.env.LEAD_RUNS_TASK_QUEUE = "lead-runs";
+    process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
+    process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT = "worker@example.iam.gserviceaccount.com";
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await triggerLeadRunWorker(
+      "https://0.0.0.0:8080",
+      "run-3",
+      "worker-token-3",
+      "cid-3"
+    );
+
+    expect(createTaskMock).toHaveBeenCalledOnce();
+    expect(createTaskMock.mock.calls[0]?.[0]).toMatchObject({
+      task: {
+        httpRequest: {
+          url: "https://us-central1-leadflow-review.cloudfunctions.net/ssrleadflowreview/api/lead-runs/run-3/jobs/worker",
+          oidcToken: {
+            serviceAccountEmail: "worker@example.iam.gserviceaccount.com",
+            audience:
+              "https://us-central1-leadflow-review.cloudfunctions.net/ssrleadflowreview",
+          },
+        },
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("selects the Google work profile for each revenue lane", () => {
+    expect(resolveLeadRunGoogleProfileId("rts")).toBe("rt_solutions_work");
+    expect(resolveLeadRunGoogleProfileId("rt")).toBe("rt_solutions_work");
+    expect(resolveLeadRunGoogleProfileId("rng")).toBe("rosser_gallery_work");
+  });
+
+  it("allows a lane-specific profile override", () => {
+    process.env.LEAD_RUNS_GOOGLE_PROFILE_RTS = "rt_backup_work";
+    expect(resolveLeadRunGoogleProfileId("rts")).toBe("rt_backup_work");
   });
 });

@@ -16,6 +16,7 @@ import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 import {
   defaultLeadRunDiagnostics,
   leadRunJobRef,
+  resolveLeadRunGoogleProfileId,
   triggerLeadRunWorker,
   type LeadRunJobConfig,
   type LeadRunJobDiagnostics,
@@ -294,7 +295,10 @@ async function processLead(
     return diag;
   }
 
-  const accessToken = await getAccessTokenForUser(args.uid, log);
+  const googleProfileId = resolveLeadRunGoogleProfileId(args.config.businessKey);
+  const accessToken = await getAccessTokenForUser(args.uid, log, {
+    profileId: googleProfileId,
+  });
 
   const identitySnap = await getAdminDb().collection("identities").doc(args.uid).get();
   const identity = identitySnap.data() || {};

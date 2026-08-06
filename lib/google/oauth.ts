@@ -5,8 +5,50 @@ import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import type { Logger } from "@/lib/logging";
+import {
+  persistGoogleAccountTokenFailure,
+  persistGoogleAccountTokens,
+  resolveGoogleAccountTokens,
+  type StoredGoogleAccountTokens,
+} from "@/lib/google/account-token-store";
 
 const TOKEN_COLLECTION = "google_oauth_tokens";
+const ACCESS_TOKEN_REUSE_WINDOW_MS = 60_000;
+
+export interface GoogleAccessTokenOptions {
+  profileId?: string | null;
+}
+
+function parseGoogleRefreshFailure(error: unknown): {
+  code: string;
+  reauthRequired: boolean;
+} {
+  const meta =
+    typeof error === "object" && error !== null
+      ? (error as Record<string, unknown>)
+      : {};
+  const response =
+    typeof meta.response === "object" && meta.response !== null
+      ? (meta.response as Record<string, unknown>)
+      : {};
+  const responseData =
+    typeof response.data === "object" && response.data !== null
+      ? (response.data as Record<string, unknown>)
+      : {};
+  const rawCode = String(
+    responseData.error || meta.code || meta.status || "refresh_failed"
+  )
+    .trim()
+    .toLowerCase();
+  const code = rawCode.replace(/[^a-z0-9_-]/g, "_").slice(0, 64) || "refresh_failed";
+  const numericStatus = Number(response.status || meta.status || meta.code);
+  const reauthRequired =
+    ["invalid_grant", "invalid_client", "unauthorized_client", "access_denied"].includes(code) ||
+    numericStatus === 401 ||
+    numericStatus === 403;
+
+  return { code, reauthRequired };
+}
 
 export const GOOGLE_OAUTH_SCOPES = [
   // Default = full access preset. Prefer using a preset via getGoogleAuthUrl(..., { scopePreset }).
@@ -253,12 +295,52 @@ export async function getStoredGoogleTokens(uid: string) {
   };
 }
 
-export async function getAccessTokenForUser(uid: string, log?: Logger) {
-  log?.info("oauth.getAccessToken.start", { uid });
+export async function getAccessTokenForUser(
+  uid: string,
+  log?: Logger,
+  options?: GoogleAccessTokenOptions
+) {
+  const profileId = String(options?.profileId || "").trim().toLowerCase() || null;
+  log?.info("oauth.getAccessToken.start", { uid, profileId });
 
-  const tokens = await getStoredGoogleTokens(uid);
+  const accountResolution = profileId
+    ? await resolveGoogleAccountTokens(uid, profileId)
+    : { registryFound: false, profileMapped: false, record: null };
+  if (profileId && !accountResolution.profileMapped) {
+    throw new ApiError(409, `Google account profile '${profileId}' is not connected`);
+  }
+  if (profileId && accountResolution.profileMapped && !accountResolution.record) {
+    throw new ApiError(403, `Google account profile '${profileId}' needs to be reconnected`);
+  }
+
+  const accountRecord = accountResolution.record;
+  const tokens: StoredGoogleAccountTokens | null =
+    profileId
+      ? accountRecord?.tokens || null
+      : await getStoredGoogleTokens(uid);
   if (!tokens?.refreshToken) {
-    log?.warn("oauth.no_tokens", { uid, hasTokens: !!tokens });
+    if (accountRecord) {
+      try {
+        await persistGoogleAccountTokenFailure(uid, accountRecord.accountId, {
+          reauthRequired: true,
+          code: "missing_refresh_token",
+        });
+      } catch (healthError) {
+        log?.warn("oauth.account_health_update_failed", {
+          uid,
+          profileId,
+          accountId: accountRecord.accountId,
+          reason: "missing_refresh_token",
+          error: healthError instanceof Error ? healthError.message : String(healthError),
+        });
+      }
+    }
+    log?.warn("oauth.no_tokens", {
+      uid,
+      profileId,
+      hasTokens: !!tokens,
+      storageMode: accountRecord ? "account_secret" : "legacy",
+    });
     const error = new ApiError(403, "Google account not connected");
     log?.warn("oauth.throwing_403", {
       uid,
@@ -269,7 +351,26 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
     throw error;
   }
 
-  log?.info("oauth.tokens_found", { uid });
+  log?.info("oauth.tokens_found", {
+    uid,
+    profileId,
+    accountId: accountRecord?.accountId || null,
+    storageMode: accountRecord ? "account_secret" : "legacy",
+  });
+
+  if (
+    tokens.accessToken &&
+    typeof tokens.expiryDate === "number" &&
+    tokens.expiryDate > Date.now() + ACCESS_TOKEN_REUSE_WINDOW_MS
+  ) {
+    log?.info("oauth.using_stored_access_token", {
+      uid,
+      profileId,
+      accountId: accountRecord?.accountId || null,
+      expiryDate: tokens.expiryDate,
+    });
+    return tokens.accessToken;
+  }
 
   try {
     const client = getOAuthClient();
@@ -289,32 +390,57 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
     }
 
     const updatedTokens = client.credentials;
-    await storeGoogleTokens(
-      uid,
-      {
-        access_token: updatedTokens.access_token,
-        refresh_token: updatedTokens.refresh_token,
-        expiry_date: updatedTokens.expiry_date,
-        scope: updatedTokens.scope,
-        token_type: updatedTokens.token_type,
-      },
-      log
-    );
+    if (accountRecord) {
+      await persistGoogleAccountTokens(uid, accountRecord.accountId, {
+        accessToken: updatedTokens.access_token || accessToken,
+        refreshToken: updatedTokens.refresh_token || tokens.refreshToken,
+        expiryDate: updatedTokens.expiry_date || tokens.expiryDate || null,
+        scope: updatedTokens.scope || tokens.scope || null,
+        tokenType: updatedTokens.token_type || tokens.tokenType || null,
+      });
+    } else {
+      await storeGoogleTokens(
+        uid,
+        {
+          access_token: updatedTokens.access_token,
+          refresh_token: updatedTokens.refresh_token,
+          expiry_date: updatedTokens.expiry_date,
+          scope: updatedTokens.scope,
+          token_type: updatedTokens.token_type,
+        },
+        log
+      );
+    }
 
-    log?.info("google.oauth.access_token", { uid });
+    log?.info("google.oauth.access_token", {
+      uid,
+      profileId,
+      accountId: accountRecord?.accountId || null,
+      storageMode: accountRecord ? "account_secret" : "legacy",
+    });
     return accessToken;
   } catch (error: unknown) {
-    const meta = (typeof error === "object" && error !== null ? (error as Record<string, unknown>) : {}) as Record<
-      string,
-      unknown
-    >;
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const failure = parseGoogleRefreshFailure(error);
+    if (accountRecord) {
+      try {
+        await persistGoogleAccountTokenFailure(uid, accountRecord.accountId, failure);
+      } catch (healthError) {
+        log?.warn("oauth.account_health_update_failed", {
+          uid,
+          profileId,
+          accountId: accountRecord.accountId,
+          reason: failure.code,
+          error: healthError instanceof Error ? healthError.message : String(healthError),
+        });
+      }
+    }
 
     log?.error("oauth.refresh_failed", {
       uid,
-      errorMessage,
-      errorCode: meta.code,
-      errorStatus: meta.status,
+      profileId,
+      accountId: accountRecord?.accountId || null,
+      errorCode: failure.code,
+      reauthRequired: failure.reauthRequired,
     });
 
     // If it's already an ApiError, rethrow it
@@ -323,7 +449,12 @@ export async function getAccessTokenForUser(uid: string, log?: Logger) {
     }
 
     // Otherwise wrap it
-    throw new ApiError(500, `Failed to refresh access token: ${errorMessage}`);
+    throw new ApiError(
+      failure.reauthRequired ? 403 : 500,
+      failure.reauthRequired
+        ? "Google account needs to be reconnected."
+        : "Failed to refresh Google access token."
+    );
   }
 }
 

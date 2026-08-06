@@ -66,6 +66,23 @@ export interface LeadRunJobDoc {
 
 export const LEAD_RUN_JOB_DOC_ID = "default";
 
+const DEFAULT_GOOGLE_PROFILE_BY_BUSINESS_KEY: Record<string, string> = {
+  rt: "rt_solutions_work",
+  rts: "rt_solutions_work",
+  rng: "rosser_gallery_work",
+};
+
+export function resolveLeadRunGoogleProfileId(
+  businessKey: LeadRunJobConfig["businessKey"]
+): string | null {
+  const normalized = String(businessKey || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const envName = `LEAD_RUNS_GOOGLE_PROFILE_${normalized.toUpperCase()}`;
+  const configured = String(process.env[envName] || "").trim().toLowerCase();
+  return configured || DEFAULT_GOOGLE_PROFILE_BY_BUSINESS_KEY[normalized] || null;
+}
+
 export function defaultLeadRunDiagnostics(): LeadRunJobDiagnostics {
   return {
     sourceFetched: 0,
@@ -134,14 +151,47 @@ export async function triggerLeadRunWorker(
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const queueId = process.env.LEAD_RUNS_TASK_QUEUE;
   const queueLocation = process.env.LEAD_RUNS_TASK_LOCATION;
+  const region =
+    process.env.FUNCTION_REGION ||
+    process.env.GCLOUD_REGION ||
+    process.env.GOOGLE_CLOUD_REGION ||
+    process.env.LEAD_RUNS_TASK_LOCATION ||
+    "us-central1";
 
-  const useCloudTasks = Boolean(projectId && queueId && queueLocation);
+  const normalizeWorkerOrigin = (value: string | undefined | null): string | null => {
+    const normalized = String(value || "").trim().replace(/\/+$/, "");
+    if (!normalized) return null;
+    try {
+      const parsed = new URL(normalized);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      if (
+        parsed.hostname === "0.0.0.0" ||
+        parsed.hostname === "::" ||
+        parsed.hostname === "[::]"
+      ) {
+        return null;
+      }
+      return normalized;
+    } catch {
+      return null;
+    }
+  };
+
+  const derivedWorkerOrigin = projectId
+    ? `https://${region}-${projectId}.cloudfunctions.net/ssrleadflowreview`
+    : null;
+  const cloudTasksOrigin =
+    normalizeWorkerOrigin(process.env.LEAD_RUNS_WORKER_ORIGIN) ||
+    normalizeWorkerOrigin(origin) ||
+    normalizeWorkerOrigin(derivedWorkerOrigin);
+
+  const useCloudTasks = Boolean(projectId && queueId && queueLocation && cloudTasksOrigin);
   if (useCloudTasks) {
     try {
       const { CloudTasksClient } = await import("@google-cloud/tasks");
       const client = new CloudTasksClient();
       const parent = client.queuePath(projectId as string, queueLocation as string, queueId as string);
-      const url = `${origin}/api/lead-runs/${encodeURIComponent(runId)}/jobs/worker`;
+      const url = `${cloudTasksOrigin}/api/lead-runs/${encodeURIComponent(runId)}/jobs/worker`;
       const payload = Buffer.from(JSON.stringify({ workerToken })).toString("base64");
 
       const delaySeconds = Number.parseInt(process.env.LEAD_RUNS_TASK_DELAY_SECONDS || "0", 10);
@@ -167,7 +217,7 @@ export async function triggerLeadRunWorker(
             oidcToken: process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT
               ? {
                   serviceAccountEmail: process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT,
-                  audience: origin,
+                  audience: cloudTasksOrigin as string,
                 }
               : undefined,
           },
@@ -190,22 +240,13 @@ export async function triggerLeadRunWorker(
 
   const fallbackOrigins = new Set<string>();
   const addOrigin = (value: string | undefined | null) => {
-    const normalized = String(value || "").trim().replace(/\/+$/, "");
-    if (!normalized) return;
-    fallbackOrigins.add(normalized);
+    const normalized = normalizeWorkerOrigin(value);
+    if (normalized) fallbackOrigins.add(normalized);
   };
 
-  addOrigin(origin);
   addOrigin(process.env.LEAD_RUNS_WORKER_ORIGIN);
-  if (projectId) {
-    const region =
-      process.env.FUNCTION_REGION ||
-      process.env.GCLOUD_REGION ||
-      process.env.GOOGLE_CLOUD_REGION ||
-      process.env.LEAD_RUNS_TASK_LOCATION ||
-      "us-central1";
-    addOrigin(`https://${region}-${projectId}.cloudfunctions.net/ssrleadflowreview`);
-  }
+  addOrigin(origin);
+  addOrigin(derivedWorkerOrigin);
   if (process.env.VERCEL_URL) {
     addOrigin(`https://${process.env.VERCEL_URL}`);
   }

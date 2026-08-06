@@ -109,6 +109,12 @@ function formatTimelineDate(value: string | null | undefined): string {
   return new Date(parsed).toLocaleString();
 }
 
+function formatBusinessUnitLabel(value: BusinessUnitId): string {
+  if (value === "rosser_nft_gallery") return "Rosser Gallery";
+  if (value === "rt_solutions") return "RT Solutions";
+  return "AI CoFoundry";
+}
+
 export default function CRMPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -122,6 +128,7 @@ export default function CRMPage() {
   );
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [newLeadData, setNewLeadData] = useState({
     companyName: "",
@@ -253,24 +260,24 @@ export default function CRMPage() {
     }
   }
 
-  const onDragEnd = async (result: DropResult) => {
-    const { destination, source, draggableId } = result;
-    if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
-    if (!user) return;
+  async function updateLeadStage(leadId: string, nextStage: CrmPipelineStage) {
+    if (!user || updatingLeadId === leadId) return;
 
-    const nextStage = destination.droppableId as CrmPipelineStage;
-    const previousLeads = leads;
-    const updatedLeads = leads.map((lead) =>
-      lead.id === draggableId ? { ...lead, pipelineStage: nextStage } : lead
+    const currentLead = leads.find((lead) => lead.id === leadId);
+    if (!currentLead || currentLead.pipelineStage === nextStage) return;
+
+    const previousStage = currentLead.pipelineStage;
+    setSelectedLeadId(leadId);
+    setUpdatingLeadId(leadId);
+    setLeads((current) =>
+      current.map((lead) => (lead.id === leadId ? { ...lead, pipelineStage: nextStage } : lead))
     );
-    setLeads(updatedLeads);
 
     try {
       const headers = await buildAuthHeaders(user, {
         idempotencyKey: crypto.randomUUID(),
       });
-      const res = await fetch(`/api/crm/customers/${encodeURIComponent(draggableId)}`, {
+      const res = await fetch(`/api/crm/customers/${encodeURIComponent(leadId)}`, {
         method: "PATCH",
         headers,
         body: JSON.stringify({
@@ -283,13 +290,31 @@ export default function CRMPage() {
         throw new Error(data.error || `Failed to update stage${cid ? ` cid=${cid}` : ""}`);
       }
       toast.success("Pipeline stage updated");
-      await loadTimeline(draggableId);
+      await loadTimeline(leadId);
     } catch (error) {
-      setLeads(previousLeads);
+      setLeads((current) =>
+        current.map((lead) =>
+          lead.id === leadId && lead.pipelineStage === nextStage
+            ? { ...lead, pipelineStage: previousStage }
+            : lead
+        )
+      );
       toast.error("Failed to move lead", {
         description: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      setUpdatingLeadId((current) => (current === leadId ? null : current));
     }
+  }
+
+  const onDragEnd = async (result: DropResult) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+    const nextStage = destination.droppableId as CrmPipelineStage;
+    if (!CRM_PIPELINE_STAGE_ORDER.includes(nextStage)) return;
+    await updateLeadStage(draggableId, nextStage);
   };
 
   const handleCreateLead = async () => {
@@ -335,7 +360,7 @@ export default function CRMPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black p-6 md:p-8">
+    <div className="min-h-screen bg-black p-4 sm:p-6 md:p-8">
       <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-white">Revenue Pipeline</h1>
@@ -349,7 +374,7 @@ export default function CRMPage() {
 
         <Dialog open={newLeadOpen} onOpenChange={setNewLeadOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-white text-black hover:bg-zinc-200">
+            <Button className="w-full bg-white text-black hover:bg-zinc-200 md:w-auto">
               <Plus className="mr-2 h-4 w-4" /> Add Lead
             </Button>
           </DialogTrigger>
@@ -406,7 +431,7 @@ export default function CRMPage() {
                   </SelectTrigger>
                   <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
                     <SelectItem value="rt_solutions">RT Solutions</SelectItem>
-                    <SelectItem value="rosser_nft_gallery">Rosser NFT Gallery</SelectItem>
+                    <SelectItem value="rosser_nft_gallery">Rosser Gallery</SelectItem>
                     <SelectItem value="ai_cofoundry">AI CoFoundry</SelectItem>
                   </SelectContent>
                 </Select>
@@ -438,107 +463,206 @@ export default function CRMPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="overflow-x-auto rounded-xl border border-zinc-900 bg-zinc-950/30 p-3">
+        <div className="rounded-xl border border-zinc-900 bg-zinc-950/30 p-3 md:overflow-x-auto">
           {loadingLeads ? (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
               Loading CRM customers...
             </div>
           ) : (
-            <DragDropContext onDragEnd={onDragEnd}>
-              <div className="flex min-w-[1260px] gap-6">
-                {STAGE_COLUMNS.map((column) => {
-                  const stageId = column.id as CrmPipelineStage;
-                  const stageLeads = leadsByStage[stageId];
-                  return (
-                    <div key={column.id} className="min-w-[280px] flex-1">
-                      <div className="mb-4 flex items-center justify-between rounded-lg border border-white/5 bg-zinc-900/50 p-3">
-                        <span className="font-semibold text-zinc-200">{column.title}</span>
-                        <Badge variant="secondary" className="bg-zinc-800 text-zinc-400">
-                          {stageLeads.length}
-                        </Badge>
-                      </div>
+            <>
+              <div className="space-y-3 md:hidden" data-testid="crm-mobile-list">
+                <div className="flex items-center justify-between px-1 pb-1">
+                  <div>
+                    <h2 className="text-sm font-semibold text-white">Customers</h2>
+                    <p className="text-xs text-zinc-500">Update a stage from any phone.</p>
+                  </div>
+                  <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
+                    {leads.length}
+                  </Badge>
+                </div>
 
-                      <Droppable droppableId={column.id}>
-                        {(provided, snapshot) => (
-                          <div
-                            {...provided.droppableProps}
-                            ref={provided.innerRef}
-                            className={`min-h-[500px] space-y-3 rounded-xl p-2 transition-colors ${
-                              snapshot.isDraggingOver ? "bg-zinc-900/30" : "bg-transparent"
-                            }`}
-                          >
-                            {stageLeads.map((lead, index) => (
-                              <Draggable key={lead.id} draggableId={lead.id} index={index}>
-                                {(dragProvided, dragSnapshot) => {
-                                  const isSelected = lead.id === selectedLeadId;
-                                  return (
-                                    <Card
-                                      ref={dragProvided.innerRef}
-                                      {...dragProvided.draggableProps}
-                                      {...dragProvided.dragHandleProps}
-                                      onClick={() => setSelectedLeadId(lead.id)}
-                                      className={`cursor-pointer border-zinc-800 bg-zinc-950 transition-all ${
-                                        dragSnapshot.isDragging
-                                          ? "rotate-2 shadow-2xl ring-2 ring-blue-500/50"
-                                          : isSelected
-                                            ? "border-blue-500/50 shadow-lg ring-1 ring-blue-500/40"
-                                            : "shadow-sm hover:border-zinc-700"
-                                      }`}
-                                    >
-                                      <CardContent className="space-y-3 p-4">
-                                        <div className="flex items-start justify-between gap-2">
-                                          <div className="min-w-0">
-                                            <h3 className="truncate font-semibold text-white">
-                                              {lead.companyName}
-                                            </h3>
-                                            <p className="truncate text-sm text-zinc-400">
-                                              {lead.founderName || "No contact name"}
-                                            </p>
-                                          </div>
-                                          <Badge
-                                            variant="secondary"
-                                            className="bg-zinc-800 text-zinc-300"
-                                          >
-                                            {lead.timelineCount}
-                                          </Badge>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                          <Badge className={STAGE_COLORS[lead.pipelineStage]}>
-                                            {formatCrmPipelineStageLabel(lead.pipelineStage)}
-                                          </Badge>
-                                          <Badge
-                                            variant="outline"
-                                            className="border-zinc-700 text-zinc-300"
-                                          >
-                                            {lead.offerCode}
-                                          </Badge>
-                                        </div>
-                                        <div className="flex items-center justify-between border-t border-zinc-900 pt-2">
-                                          <div className="flex items-center gap-2 text-xs text-zinc-500">
-                                            <Calendar className="h-3 w-3" />
-                                            <span>{lead.businessUnit.replaceAll("_", " ")}</span>
-                                          </div>
-                                          {lead.email ? (
-                                            <MailIcon className="h-3 w-3 text-zinc-500" />
-                                          ) : (
-                                            <span className="text-[11px] text-zinc-600">no email</span>
-                                          )}
-                                        </div>
-                                      </CardContent>
-                                    </Card>
-                                  );
-                                }}
-                              </Draggable>
-                            ))}
-                            {provided.placeholder}
+                {leads.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-zinc-800 px-4 py-10 text-center text-sm text-zinc-500">
+                    No CRM customers yet.
+                  </p>
+                ) : (
+                  leads.map((lead) => {
+                    const isSelected = lead.id === selectedLeadId;
+                    const isUpdating = lead.id === updatingLeadId;
+                    return (
+                      <Card
+                        key={lead.id}
+                        className={`border-zinc-800 bg-zinc-950 ${
+                          isSelected ? "border-blue-500/50 ring-1 ring-blue-500/40" : ""
+                        }`}
+                      >
+                        <CardContent className="space-y-4 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h3 className="truncate font-semibold text-white">{lead.companyName}</h3>
+                              <p className="truncate text-sm text-zinc-400">
+                                {lead.founderName || "No contact name"}
+                              </p>
+                            </div>
+                            <Badge variant="secondary" className="shrink-0 bg-zinc-800 text-zinc-300">
+                              {lead.timelineCount}
+                            </Badge>
                           </div>
-                        )}
-                      </Droppable>
-                    </div>
-                  );
-                })}
+
+                          <div className="flex flex-wrap gap-2">
+                            <Badge className={STAGE_COLORS[lead.pipelineStage]}>
+                              {formatCrmPipelineStageLabel(lead.pipelineStage)}
+                            </Badge>
+                            <Badge variant="outline" className="border-zinc-700 text-zinc-300">
+                              {lead.offerCode}
+                            </Badge>
+                          </div>
+
+                          <label className="block space-y-2 text-xs font-medium text-zinc-300">
+                            <span>Pipeline stage</span>
+                            <select
+                              aria-label={`Pipeline stage for ${lead.companyName}`}
+                              value={lead.pipelineStage}
+                              disabled={isUpdating}
+                              onChange={(event) =>
+                                void updateLeadStage(lead.id, event.target.value as CrmPipelineStage)
+                              }
+                              className="h-11 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {STAGE_COLUMNS.map((stage) => (
+                                <option key={stage.id} value={stage.id}>
+                                  {stage.title}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <div className="flex items-center justify-between gap-3 border-t border-zinc-900 pt-3">
+                            <div className="flex min-w-0 items-center gap-2 text-xs text-zinc-500">
+                              <Calendar className="h-3 w-3 shrink-0" aria-hidden="true" />
+                              <span className="truncate">{formatBusinessUnitLabel(lead.businessUnit)}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-pressed={isSelected}
+                              onClick={() => setSelectedLeadId(lead.id)}
+                              className="shrink-0 border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-white"
+                            >
+                              {isSelected ? "Timeline selected" : "View timeline"}
+                            </Button>
+                          </div>
+                          {isUpdating ? (
+                            <p className="text-xs text-cyan-300" role="status">
+                              Updating pipeline stage...
+                            </p>
+                          ) : null}
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                )}
               </div>
-            </DragDropContext>
+
+              <div className="hidden md:block" data-testid="crm-desktop-board">
+                <DragDropContext onDragEnd={onDragEnd}>
+                  <div className="flex min-w-[1260px] gap-6" aria-label="CRM pipeline drag board">
+                    {STAGE_COLUMNS.map((column) => {
+                      const stageId = column.id as CrmPipelineStage;
+                      const stageLeads = leadsByStage[stageId];
+                      return (
+                        <div key={column.id} className="min-w-[280px] flex-1">
+                          <div className="mb-4 flex items-center justify-between rounded-lg border border-white/5 bg-zinc-900/50 p-3">
+                            <span className="font-semibold text-zinc-200">{column.title}</span>
+                            <Badge variant="secondary" className="bg-zinc-800 text-zinc-400">
+                              {stageLeads.length}
+                            </Badge>
+                          </div>
+
+                          <Droppable droppableId={column.id}>
+                            {(provided, snapshot) => (
+                              <div
+                                {...provided.droppableProps}
+                                ref={provided.innerRef}
+                                className={`min-h-[500px] space-y-3 rounded-xl p-2 transition-colors ${
+                                  snapshot.isDraggingOver ? "bg-zinc-900/30" : "bg-transparent"
+                                }`}
+                              >
+                                {stageLeads.map((lead, index) => (
+                                  <Draggable key={lead.id} draggableId={lead.id} index={index}>
+                                    {(dragProvided, dragSnapshot) => {
+                                      const isSelected = lead.id === selectedLeadId;
+                                      return (
+                                        <Card
+                                          ref={dragProvided.innerRef}
+                                          {...dragProvided.draggableProps}
+                                          {...dragProvided.dragHandleProps}
+                                          onClick={() => setSelectedLeadId(lead.id)}
+                                          className={`cursor-pointer border-zinc-800 bg-zinc-950 transition-all ${
+                                            dragSnapshot.isDragging
+                                              ? "rotate-2 shadow-2xl ring-2 ring-blue-500/50"
+                                              : isSelected
+                                                ? "border-blue-500/50 shadow-lg ring-1 ring-blue-500/40"
+                                                : "shadow-sm hover:border-zinc-700"
+                                          }`}
+                                        >
+                                          <CardContent className="space-y-3 p-4">
+                                            <div className="flex items-start justify-between gap-2">
+                                              <div className="min-w-0">
+                                                <h3 className="truncate font-semibold text-white">
+                                                  {lead.companyName}
+                                                </h3>
+                                                <p className="truncate text-sm text-zinc-400">
+                                                  {lead.founderName || "No contact name"}
+                                                </p>
+                                              </div>
+                                              <Badge
+                                                variant="secondary"
+                                                className="bg-zinc-800 text-zinc-300"
+                                              >
+                                                {lead.timelineCount}
+                                              </Badge>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                              <Badge className={STAGE_COLORS[lead.pipelineStage]}>
+                                                {formatCrmPipelineStageLabel(lead.pipelineStage)}
+                                              </Badge>
+                                              <Badge
+                                                variant="outline"
+                                                className="border-zinc-700 text-zinc-300"
+                                              >
+                                                {lead.offerCode}
+                                              </Badge>
+                                            </div>
+                                            <div className="flex items-center justify-between border-t border-zinc-900 pt-2">
+                                              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                                                <Calendar className="h-3 w-3" aria-hidden="true" />
+                                                <span>{formatBusinessUnitLabel(lead.businessUnit)}</span>
+                                              </div>
+                                              {lead.email ? (
+                                                <MailIcon className="h-3 w-3 text-zinc-500" />
+                                              ) : (
+                                                <span className="text-[11px] text-zinc-600">no email</span>
+                                              )}
+                                            </div>
+                                          </CardContent>
+                                        </Card>
+                                      );
+                                    }}
+                                  </Draggable>
+                                ))}
+                                {provided.placeholder}
+                              </div>
+                            )}
+                          </Droppable>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </DragDropContext>
+              </div>
+            </>
           )}
         </div>
 

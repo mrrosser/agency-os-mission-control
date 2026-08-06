@@ -102,7 +102,7 @@ export default function IdentityPage() {
     }
 
     return (
-        <div className="space-y-6 p-6 md:p-8">
+        <div className="space-y-6 p-4 sm:p-6 md:p-8">
             <div>
                 <h2 className="text-2xl font-bold tracking-tight text-white">Identity & Offer</h2>
                 <p className="text-zinc-400">
@@ -117,7 +117,7 @@ export default function IdentityPage() {
                 </CardHeader>
                 <CardContent>
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="space-y-2">
                                 <Label className="text-zinc-200">Business Name</Label>
                                 <Input
@@ -147,7 +147,7 @@ export default function IdentityPage() {
                             {form.formState.errors.coreValue && <p className="text-xs text-red-500">{form.formState.errors.coreValue.message}</p>}
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="space-y-2">
                                 <Label className="text-zinc-200">Primary Service</Label>
                                 <Input
@@ -178,7 +178,7 @@ export default function IdentityPage() {
                         <Button
                             type="submit"
                             disabled={saving}
-                            className="bg-blue-600 hover:bg-blue-500 text-white h-11"
+                            className="h-11 w-full bg-blue-600 text-white hover:bg-blue-500 sm:w-auto"
                         >
                             {saving ? (
                                 <>

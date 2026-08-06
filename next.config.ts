@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@google-cloud/tasks"],
+  serverExternalPackages: [
+    "@google-cloud/tasks",
+    "@google-cloud/secret-manager",
+  ],
   images: {
     unoptimized: true,
   },

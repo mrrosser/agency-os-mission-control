@@ -207,6 +207,42 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
     expect(getAdminDbMock).not.toHaveBeenCalled();
   });
 
+  it("returns a stable 503 and logs a sanitized vault resolution failure", async () => {
+    const secretBearingError = Object.assign(
+      new Error("refresh_token=do-not-log Bearer do-not-log"),
+      { code: 7, name: "Bearer do-not-log" }
+    );
+    resolveGoogleAccountTokensMock.mockRejectedValue(secretBearingError);
+    const errorLogMock = vi.fn();
+    const log = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: errorLogMock,
+    } as unknown as Parameters<typeof getAccessTokenForUser>[1];
+
+    await expect(
+      getAccessTokenForUser("uid-1", log, {
+        profileId: "rt_solutions_work",
+      })
+    ).rejects.toMatchObject({
+      status: 503,
+      message: "Google account credential vault is unavailable",
+    });
+    expect(log?.error).toHaveBeenCalledWith(
+      "oauth.account_token_resolution_failed",
+      expect.objectContaining({
+        uid: "uid-1",
+        profileId: "rt_solutions_work",
+        errorCategory: "credential_vault_unavailable",
+        grpcStatus: 7,
+      })
+    );
+    expect(JSON.stringify(errorLogMock.mock.calls)).not.toContain("do-not-log");
+    expect(JSON.stringify(errorLogMock.mock.calls)).not.toContain("refresh_token");
+    expect(JSON.stringify(errorLogMock.mock.calls)).not.toContain("Bearer");
+    expect(getAdminDbMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed when a mapped profile is missing its Secret Manager token", async () => {
     resolveGoogleAccountTokensMock.mockResolvedValue({
       registryFound: true,

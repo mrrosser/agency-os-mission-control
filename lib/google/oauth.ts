@@ -19,6 +19,25 @@ export interface GoogleAccessTokenOptions {
   profileId?: string | null;
 }
 
+function describeAccountTokenResolutionError(error: unknown): {
+  errorCategory: "credential_vault_unavailable";
+  grpcStatus: number | null;
+} {
+  const meta =
+    typeof error === "object" && error !== null
+      ? (error as Record<string, unknown>)
+      : {};
+  const rawCode = meta.code;
+
+  return {
+    errorCategory: "credential_vault_unavailable",
+    grpcStatus:
+      typeof rawCode === "number" && Number.isInteger(rawCode)
+        ? rawCode
+        : null,
+  };
+}
+
 function parseGoogleRefreshFailure(error: unknown): {
   code: string;
   reauthRequired: boolean;
@@ -303,9 +322,27 @@ export async function getAccessTokenForUser(
   const profileId = String(options?.profileId || "").trim().toLowerCase() || null;
   log?.info("oauth.getAccessToken.start", { uid, profileId });
 
-  const accountResolution = profileId
-    ? await resolveGoogleAccountTokens(uid, profileId)
-    : { registryFound: false, profileMapped: false, record: null };
+  let accountResolution: Awaited<
+    ReturnType<typeof resolveGoogleAccountTokens>
+  >;
+  if (profileId) {
+    try {
+      accountResolution = await resolveGoogleAccountTokens(uid, profileId);
+    } catch (error) {
+      log?.error("oauth.account_token_resolution_failed", {
+        uid,
+        profileId,
+        ...describeAccountTokenResolutionError(error),
+      });
+      throw new ApiError(503, "Google account credential vault is unavailable");
+    }
+  } else {
+    accountResolution = {
+      registryFound: false,
+      profileMapped: false,
+      record: null,
+    };
+  }
   if (profileId && !accountResolution.profileMapped) {
     throw new ApiError(409, `Google account profile '${profileId}' is not connected`);
   }

@@ -16,6 +16,7 @@ import {
   resolveLeadRunGoogleProfileId,
   triggerLeadRunWorker,
 } from "@/lib/lead-runs/jobs";
+import { triggerFollowupsWorker } from "@/lib/outreach/followups-jobs";
 
 describe("triggerLeadRunWorker", () => {
   const originalEnv = process.env;
@@ -26,6 +27,13 @@ describe("triggerLeadRunWorker", () => {
     delete process.env.LEAD_RUNS_TASK_LOCATION;
     delete process.env.LEAD_RUNS_WORKER_ORIGIN;
     delete process.env.LEAD_RUNS_TASK_SERVICE_ACCOUNT;
+    delete process.env.LEAD_RUNS_GOOGLE_PROFILE_RT;
+    delete process.env.LEAD_RUNS_GOOGLE_PROFILE_RTS;
+    delete process.env.LEAD_RUNS_GOOGLE_PROFILE_RNG;
+    delete process.env.LEAD_RUNS_GOOGLE_PROFILE_AICF;
+    delete process.env.FOLLOWUPS_TASK_QUEUE;
+    delete process.env.FOLLOWUPS_TASK_LOCATION;
+    delete process.env.FOLLOWUPS_TASK_SERVICE_ACCOUNT;
     delete process.env.VERCEL_URL;
     process.env.GOOGLE_CLOUD_PROJECT = "leadflow-review";
     process.env.FUNCTION_REGION = "us-central1";
@@ -132,5 +140,25 @@ describe("triggerLeadRunWorker", () => {
   it("allows a lane-specific profile override", () => {
     process.env.LEAD_RUNS_GOOGLE_PROFILE_RTS = "rt_backup_work";
     expect(resolveLeadRunGoogleProfileId("rts")).toBe("rt_backup_work");
+  });
+
+  it("marks a non-2xx follow-up HTTP fallback as skipped", async () => {
+    delete process.env.LEAD_RUNS_TASK_QUEUE;
+    delete process.env.LEAD_RUNS_TASK_LOCATION;
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({ ok: false }), { status: 503 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await triggerFollowupsWorker({
+      origin: "https://leadflow-review.web.app",
+      runId: "run-followups-1",
+      workerToken: "worker-token-1",
+      correlationId: "cid-followups-1",
+      scheduleAtMs: Date.now(),
+    });
+
+    expect(result).toBe("skipped");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

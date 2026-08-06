@@ -171,7 +171,7 @@ export async function triggerFollowupsWorker(args: {
 
   try {
     const url = `${args.origin}/api/outreach/followups/worker-task`;
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -180,8 +180,15 @@ export async function triggerFollowupsWorker(args: {
       body: JSON.stringify({ runId: args.runId, workerToken: args.workerToken }),
       cache: "no-store",
     });
+    if (!response.ok) {
+      throw new Error(`Follow-ups worker returned HTTP ${response.status}`);
+    }
 
-    args.log?.info("outreach.followups.worker_triggered", { runId: args.runId, dispatch: "http" });
+    args.log?.info("outreach.followups.worker_triggered", {
+      runId: args.runId,
+      dispatch: "http",
+      status: response.status,
+    });
     return "http";
   } catch (error) {
     args.log?.warn("outreach.followups.worker_trigger_failed", {

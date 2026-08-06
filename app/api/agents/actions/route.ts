@@ -4,7 +4,6 @@ import { z } from "zod";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
-import { getAdminDb } from "@/lib/firebase-admin";
 import {
   PaperclipClient,
   PaperclipClientError,
@@ -51,7 +50,7 @@ function readBooleanEnv(name: string, fallback: boolean = false): boolean {
 }
 
 function isPaperclipLifecycleAction(action: z.infer<typeof actionSchema>["action"]): action is PaperclipLifecycleAction {
-  return action === "resume" || action === "terminate" || action === "wakeup";
+  return action === "pause" || action === "resume" || action === "terminate" || action === "wakeup";
 }
 
 function startsAgentExecution(action: z.infer<typeof actionSchema>["action"]): boolean {
@@ -102,7 +101,6 @@ export const POST = withApiHandler(
         log,
       },
       async () => {
-        const nowIso = new Date().toISOString();
         const requestId = randomUUID();
 
         if (isPaperclipLifecycleAction(payload.action)) {
@@ -149,38 +147,14 @@ export const POST = withApiHandler(
           }
         }
 
-        await getAdminDb()
-          .collection("agentActionRequests")
-          .doc(requestId)
-          .set({
-            requestId,
-            uid: user.uid,
-            agentId: payload.agentId,
-            action: payload.action,
-            target: payload.target || null,
-            note: payload.note || null,
-            status: "queued",
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            correlationId,
-          });
-
-        log.info("agents.action.queued", {
+        log.error("agents.action.executor_unavailable", {
           uid: user.uid,
           agentId: payload.agentId,
           action: payload.action,
           hasTarget: Boolean(payload.target),
           requestId,
         });
-
-        return {
-          ok: true,
-          requestId,
-          status: "queued" as const,
-          agentId: payload.agentId,
-          action: payload.action,
-          target: payload.target || null,
-        };
+        throw new ApiError(503, `No executor configured for agent action '${payload.action}'`);
       }
     );
 

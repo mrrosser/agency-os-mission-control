@@ -77,8 +77,14 @@ function Upsert-SchedulerJob {
     $bodyFile = [System.IO.Path]::GetTempFileName()
     try {
         Set-Content -Path $bodyFile -Value $BodyJson -NoNewline -Encoding Ascii
+        $retryArgs = @(
+            "--max-retry-attempts", "3",
+            "--min-backoff", "60s",
+            "--max-backoff", "300s",
+            "--max-doublings", "2"
+        )
         if ($exists) {
-            Invoke-Gcloud -Args @(
+            $commandArgs = @(
                 "scheduler", "jobs", "update", "http", $JobName,
                 "--location", $Location,
                 "--project", $ProjectId,
@@ -87,10 +93,12 @@ function Upsert-SchedulerJob {
                 "--uri", $Uri,
                 "--http-method", "POST",
                 "--update-headers", "Content-Type=application/json,Authorization=Bearer $WorkerToken",
-                "--message-body-from-file", $bodyFile
+                "--message-body-from-file", $bodyFile,
+                "--clear-max-retry-duration"
             )
+            Invoke-Gcloud -Args ($commandArgs + $retryArgs)
         } else {
-            Invoke-Gcloud -Args @(
+            $commandArgs = @(
                 "scheduler", "jobs", "create", "http", $JobName,
                 "--location", $Location,
                 "--project", $ProjectId,
@@ -101,6 +109,7 @@ function Upsert-SchedulerJob {
                 "--headers", "Content-Type=application/json,Authorization=Bearer $WorkerToken",
                 "--message-body-from-file", $bodyFile
             )
+            Invoke-Gcloud -Args ($commandArgs + $retryArgs)
         }
     } finally {
         Remove-Item -Path $bodyFile -ErrorAction SilentlyContinue -Force

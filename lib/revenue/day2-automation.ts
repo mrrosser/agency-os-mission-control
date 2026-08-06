@@ -39,6 +39,8 @@ export interface Day2RevenueAutomationRequest {
   processDueResponses?: boolean;
   responseLoopMaxTasks?: number;
   requireApprovalGates?: boolean;
+  /** Day30 owns the outer failure boundary so its independent work can finish. */
+  deferResponseLoopFailureUntilParentCompletes?: boolean;
 }
 
 export interface Day2ResponseLoopResult {
@@ -80,6 +82,32 @@ export interface Day2RevenueAutomationResult {
     responseFailed: number;
   };
   warnings: string[];
+}
+
+export function isDay2ResponseLoopIncomplete(
+  responseLoop: Day2ResponseLoopResult | null | undefined
+): boolean {
+  if (!responseLoop) return false;
+  return Boolean(
+    responseLoop.error ||
+      responseLoop.failed > 0 ||
+      (responseLoop.scheduledNextAtMs !== null && responseLoop.dispatch === "skipped")
+  );
+}
+
+export function assertDay2ResponseLoopsComplete(
+  result: Day2RevenueAutomationResult
+): void {
+  const incompleteTemplateIds = result.templates
+    .filter((template) => isDay2ResponseLoopIncomplete(template.responseLoop))
+    .map((template) => template.templateId);
+
+  if (!incompleteTemplateIds.length) return;
+
+  throw new ApiError(
+    502,
+    `Day2 response loop incomplete for template(s): ${incompleteTemplateIds.join(", ")}`
+  );
 }
 
 export function describeRevenueAutomationError(error: unknown): string {
@@ -350,7 +378,7 @@ export async function runDay2RevenueAutomation(
     throw new ApiError(500, "Day2 automation failed for all templateIds");
   }
 
-  return {
+  const result: Day2RevenueAutomationResult = {
     uid: args.uid,
     dateKey: args.dateKey || null,
     dryRun,
@@ -360,4 +388,27 @@ export async function runDay2RevenueAutomation(
     totals,
     warnings,
   };
+
+  const incompleteResponseLoops = result.templates.filter((template) =>
+    isDay2ResponseLoopIncomplete(template.responseLoop)
+  );
+  if (incompleteResponseLoops.length) {
+    args.log.error("revenue.day2.response_loops_incomplete", {
+      uid: args.uid,
+      incompleteTemplateIds: incompleteResponseLoops.map((template) => template.templateId),
+      incompleteCount: incompleteResponseLoops.length,
+      failedTasks: incompleteResponseLoops.reduce(
+        (total, template) => total + Number(template.responseLoop?.failed || 0),
+        0
+      ),
+      skippedDispatches: incompleteResponseLoops.filter(
+        (template) => template.responseLoop?.dispatch === "skipped"
+      ).length,
+    });
+  }
+  if (!args.deferResponseLoopFailureUntilParentCompletes) {
+    assertDay2ResponseLoopsComplete(result);
+  }
+
+  return result;
 }

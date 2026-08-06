@@ -19,6 +19,32 @@
 [2026-08-06T17:34:00Z] gate=dependency-audit result=PASS_WITH_EXCEPTION full=12 moderate=8 high=4 critical=0 production=13 moderate=9 high=4 critical=0 breaking_major_fixes_only=true
 [2026-08-06T17:34:00Z] gate=gitleaks-staged result=PASS leaks=0
 [2026-08-06T17:29:00Z] gate=rollback-snapshot result=PASS cloud_run_revision=ssrleadflowreview-00297-dnx hosting_channel=rollback-crm-audit-20260806 expires=2026-08-13T17:29:00Z
+[2026-08-06T20:00:00Z] gate=scheduled-run-log-audit result=FAIL_OLD_REVISION http_status=200 hidden_failure=oauth.no_tokens,revenue.day2.response_loop_failed fix_required=true
+[2026-08-06T20:00:00Z] gate=openclaw-runtime-remediation result=PASS heartbeat=disabled cpu_settled_pct=0-1 tailscale_gmail_health=200 model_capacity=BLOCKED_NO_CREDITS
+[2026-08-06T19:59:00Z] gate=followup-profile-response-health cmd=npx-vitest-run result=PASS files=4 tests=21
+[2026-08-06T20:13:00Z] gate=unit-concurrent cmd=npm-run-test-unit result=FAIL_RESOURCE_TIMEOUT passed=347 failed=1 file=api-secrets-fallback
+[2026-08-06T20:14:00Z] gate=unit-timeout-isolation cmd=npx-vitest-run-api-secrets-fallback result=PASS tests=3
+[2026-08-06T20:17:00Z] gate=unit-serial cmd=npx-vitest-run-tests-unit-maxWorkers-1 result=PASS files=92 tests=348
+[2026-08-06T20:17:00Z] gate=lint cmd=npm-run-lint result=PASS
+[2026-08-06T20:17:00Z] gate=typescript cmd=npx-tsc-noEmit result=PASS
+[2026-08-06T20:19:00Z] gate=smoke cmd=npm-run-test-smoke result=PASS
+[2026-08-06T20:22:00Z] gate=build cmd=npm-run-build result=PASS routes=96
+[2026-08-06T20:24:00Z] gate=gitleaks-staged cmd=gitleaks-git-staged-redact result=PASS leaks=0
+[2026-08-06T20:38:00Z] gate=revenue-cadence-retry-live-audit result=FAIL_EXPECTED_PREDEPLOY jobs=4 retry_mismatches=4 current_retry_count=0 target_retry_count=3 target_max_retry_duration=unset
+[2026-08-06T20:40:00Z] gate=response-boundary-profile-retry-actions cmd=npx-vitest-run result=PASS files=5 tests=34
+[2026-08-06T20:41:00Z] gate=touched-eslint cmd=npx-eslint result=PASS
+[2026-08-06T20:41:00Z] gate=typescript cmd=npx-tsc-noEmit-incremental-false result=PASS
+[2026-08-06T20:45:00Z] gate=unit-serial-final cmd=npx-vitest-run-tests-unit-maxWorkers-1 result=PASS files=93 tests=361
+[2026-08-06T20:46:00Z] gate=smoke-final cmd=npm-run-test-smoke result=PASS
+[2026-08-06T20:46:00Z] gate=lint-final cmd=npm-run-lint result=PASS
+[2026-08-06T20:48:00Z] gate=build-final cmd=npm-run-build result=PASS routes=96
+[2026-08-06T20:49:00Z] gate=gitleaks-staged-final cmd=gitleaks-git-staged-redact result=PASS leaks=0
+[2026-08-06T20:59:00Z] gate=late-review-regressions cmd=npx-vitest-run result=PASS files=7 tests=43
+[2026-08-06T21:00:00Z] gate=late-review-lint-typescript-powershell result=PASS
+[2026-08-06T21:05:00Z] gate=unit-serial-late-review cmd=npx-vitest-run-tests-unit-maxWorkers-1 result=PASS files=94 tests=365
+[2026-08-06T21:07:00Z] gate=smoke-lint-typescript-late-review result=PASS
+[2026-08-06T21:10:00Z] gate=build-late-review cmd=npm-run-build result=PASS routes=96
+[2026-08-06T21:10:00Z] gate=staged-integrity-late-review result=PASS diff_check=PASS powershell_scripts=2 gitleaks=PASS leaks=0
 
 ## 2026-08-06 agent API protocol hardening
 

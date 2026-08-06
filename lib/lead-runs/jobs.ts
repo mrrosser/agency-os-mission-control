@@ -45,6 +45,8 @@ export interface LeadRunJobConfig {
   offerCode?: string;
 }
 
+export type LeadRunBusinessKey = NonNullable<LeadRunJobConfig["businessKey"]>;
+
 export interface LeadRunJobDoc {
   runId: string;
   userId: string;
@@ -99,6 +101,69 @@ const DEFAULT_GOOGLE_PROFILE_BY_BUSINESS_KEY: Record<string, string> = {
   rts: "rt_solutions_work",
   rng: "rosser_gallery_work",
 };
+
+const BUSINESS_KEY_BY_BUSINESS_UNIT: Record<string, LeadRunBusinessKey> = {
+  ai_cofoundry: "aicf",
+  rosser_gallery: "rng",
+  rosser_nft_gallery: "rng",
+  rt_solutions: "rts",
+};
+
+const VALID_BUSINESS_KEYS = new Set<LeadRunBusinessKey>([
+  "aicf",
+  "rng",
+  "rt",
+  "rts",
+]);
+
+function canonicalBusinessKey(
+  businessKey: LeadRunBusinessKey
+): Exclude<LeadRunBusinessKey, "rt"> {
+  return businessKey === "rt" ? "rts" : businessKey;
+}
+
+/**
+ * Resolve the runtime business lane from a persisted job document.
+ *
+ * Non-empty unsupported or contradictory organization values must fail
+ * closed instead of borrowing another Google profile. A completely absent
+ * organization context returns null so callers can derive it from queued
+ * tasks or preserve the historical legacy-token fallback.
+ */
+export function resolveLeadRunBusinessKey(
+  config: Partial<LeadRunJobConfig> | null | undefined
+): LeadRunBusinessKey | null {
+  const rawBusinessKey = String(config?.businessKey || "").trim().toLowerCase();
+  const rawBusinessUnit = String(config?.businessUnit || "").trim().toLowerCase();
+
+  if (rawBusinessKey && !VALID_BUSINESS_KEYS.has(rawBusinessKey as LeadRunBusinessKey)) {
+    throw new Error(`Unsupported lead-run businessKey '${rawBusinessKey}'`);
+  }
+
+  const businessKey = rawBusinessKey
+    ? (rawBusinessKey as LeadRunBusinessKey)
+    : null;
+  const unitBusinessKey = rawBusinessUnit
+    ? BUSINESS_KEY_BY_BUSINESS_UNIT[rawBusinessUnit] || null
+    : null;
+
+  if (rawBusinessUnit && !unitBusinessKey) {
+    throw new Error(`Unsupported lead-run businessUnit '${rawBusinessUnit}'`);
+  }
+
+  if (
+    businessKey &&
+    unitBusinessKey &&
+    canonicalBusinessKey(businessKey) !== canonicalBusinessKey(unitBusinessKey)
+  ) {
+    throw new Error(
+      `Lead-run businessKey '${rawBusinessKey}' conflicts with businessUnit '${rawBusinessUnit}'`
+    );
+  }
+
+  const resolved = businessKey || unitBusinessKey;
+  return resolved || null;
+}
 
 export function resolveLeadRunGoogleProfileId(
   businessKey: LeadRunJobConfig["businessKey"]

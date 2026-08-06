@@ -1,9 +1,17 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 function runAuditHelper(expression: string) {
   const script = `
-    import { JOB_SPECS, buildGcloudInvocation, createWritableGcloudEnv } from "./scripts/revenue-cadence-audit.mjs";
+    import {
+      EXPECTED_RETRY_CONFIG,
+      JOB_SPECS,
+      buildGcloudInvocation,
+      createWritableGcloudEnv,
+      validateRetryConfig
+    } from "./scripts/revenue-cadence-audit.mjs";
     const result = ${expression};
     console.log(JSON.stringify(result));
   `;
@@ -58,5 +66,73 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
     ]);
     expect(specs.every((spec) => Boolean(spec.endpointPath && spec.defaultSchedule))).toBe(true);
     expect(specs.some((spec) => spec.name.startsWith("revenue-day"))).toBe(false);
+  });
+
+  it("requires the bounded revenue retry policy", () => {
+    const expectedRetryConfig = runAuditHelper("EXPECTED_RETRY_CONFIG");
+    const mismatches = runAuditHelper(
+      `validateRetryConfig({
+      retryCount: 3,
+      maxRetryDuration: "0.000s",
+        minBackoffDuration: "60s",
+        maxBackoffDuration: "300s",
+        maxDoublings: 2
+      })`
+    ) as unknown as string[];
+
+    expect(expectedRetryConfig).toEqual({
+      retryCount: 3,
+      maxRetryDuration: "0s",
+      minBackoffDuration: "60s",
+      maxBackoffDuration: "300s",
+      maxDoublings: 2,
+    });
+    expect(mismatches).toEqual([]);
+  });
+
+  it("reports the current zero-retry scheduler defaults as mismatches", () => {
+    const mismatches = runAuditHelper(
+      `validateRetryConfig({
+        maxRetryDuration: "0s",
+        minBackoffDuration: "5s",
+        maxBackoffDuration: "3600s",
+        maxDoublings: 5
+      })`
+    ) as unknown as string[];
+
+    expect(mismatches).toEqual([
+      "retryConfig.retryCount expected=3 actual=<unset>",
+      "retryConfig.maxDoublings expected=2 actual=5",
+      "retryConfig.minBackoffDuration expected=60s actual=5s",
+      "retryConfig.maxBackoffDuration expected=300s actual=3600s",
+    ]);
+  });
+
+  it("applies retry flags only to consolidated revenue migration calls", () => {
+    const setupScript = readFileSync(
+      join(process.cwd(), "scripts", "revenue-automation-scheduler-setup.ps1"),
+      "utf8"
+    );
+    const migrationScript = readFileSync(
+      join(process.cwd(), "scripts", "scheduler-consolidation-migrate.ps1"),
+      "utf8"
+    );
+
+    for (const [flag, value] of [
+      ["--max-retry-attempts", "3"],
+      ["--min-backoff", "60s"],
+      ["--max-backoff", "300s"],
+      ["--max-doublings", "2"],
+    ]) {
+      expect(setupScript).toContain(`"${flag}", "${value}"`);
+      expect(migrationScript).toContain(`"${flag}", "${value}"`);
+    }
+
+    expect(setupScript).toContain('"--clear-max-retry-duration"');
+    expect(migrationScript).toContain('$args.Add("--clear-max-retry-duration")');
+
+    expect(migrationScript.match(/-UseRevenueRetryPolicy/g)).toHaveLength(2);
+    expect(migrationScript).not.toMatch(/social-[^\r\n]+-UseRevenueRetryPolicy/);
+    expect(migrationScript).not.toMatch(/google-oauth[^\r\n]+-UseRevenueRetryPolicy/);
   });
 });

@@ -117,7 +117,8 @@ function Upsert-Job {
     [Parameter(Mandatory = $true)][string]$Schedule,
     [Parameter(Mandatory = $true)][string]$Uri,
     [Parameter(Mandatory = $true)]$Template,
-    [Parameter(Mandatory = $true)][string]$BodyText
+    [Parameter(Mandatory = $true)][string]$BodyText,
+    [switch]$UseRevenueRetryPolicy
   )
 
   $exists = $null -ne (Get-Job -Name $Name)
@@ -138,6 +139,20 @@ function Upsert-Job {
         "--message-body-from-file", $bodyFile
       )) {
       $args.Add($item)
+    }
+
+    if ($UseRevenueRetryPolicy) {
+      foreach ($item in @(
+          "--max-retry-attempts", "3",
+          "--min-backoff", "60s",
+          "--max-backoff", "300s",
+          "--max-doublings", "2"
+        )) {
+        $args.Add($item)
+      }
+      if ($exists) {
+        $args.Add("--clear-max-retry-duration")
+      }
     }
 
     Add-AuthArgs -Args $args -Template $Template -Exists $exists
@@ -194,7 +209,7 @@ foreach ($pair in $dailySchedules.GetEnumerator()) {
     runServiceLab = $false
   } | ConvertTo-Json -Depth 6 -Compress
 
-  Upsert-Job -Name "revenue-automation-$($pair.Key)" -Schedule $pair.Value -Uri "$revenueBaseUrl/api/revenue/automation/daily/worker-task" -Template $revenueSource -BodyText $dailyBody
+  Upsert-Job -Name "revenue-automation-$($pair.Key)" -Schedule $pair.Value -Uri "$revenueBaseUrl/api/revenue/automation/daily/worker-task" -Template $revenueSource -BodyText $dailyBody -UseRevenueRetryPolicy
 }
 
 $weeklyBody = @{
@@ -211,7 +226,7 @@ $weeklyBody = @{
   runServiceLab = $true
 } | ConvertTo-Json -Depth 6 -Compress
 
-Upsert-Job -Name "revenue-weekly-brain" -Schedule "10 6 * * 1" -Uri "$revenueBaseUrl/api/revenue/day30/worker-task" -Template $revenueSource -BodyText $weeklyBody
+Upsert-Job -Name "revenue-weekly-brain" -Schedule "10 6 * * 1" -Uri "$revenueBaseUrl/api/revenue/day30/worker-task" -Template $revenueSource -BodyText $weeklyBody -UseRevenueRetryPolicy
 
 $socialWeeklySource = Get-Job -Name "social-drafts-rng-weekly"
 if (-not $socialWeeklySource) {

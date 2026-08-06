@@ -11,6 +11,14 @@ const DEFAULT_TIME_ZONE = "America/Chicago";
 const GCLOUD_BIN = "gcloud";
 const GCLOUD_USE_SHELL = false;
 
+export const EXPECTED_RETRY_CONFIG = Object.freeze({
+  retryCount: 3,
+  maxRetryDuration: "0s",
+  minBackoffDuration: "60s",
+  maxBackoffDuration: "300s",
+  maxDoublings: 2,
+});
+
 // repo-improvement: gcloud-runtime-hardening
 export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   const { preferFresh = false } = options;
@@ -166,6 +174,55 @@ function sanitizePath(value) {
   } catch {
     return "";
   }
+}
+
+function durationSeconds(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(\d+)(?:\.(\d+))?s$/.exec(value.trim());
+  if (!match) return null;
+  const wholeSeconds = Number(match[1]);
+  const fractionalSeconds = match[2] ? Number(`0.${match[2]}`) : 0;
+  return wholeSeconds + fractionalSeconds;
+}
+
+function formatActual(value) {
+  return value === undefined || value === null ? "<unset>" : String(value);
+}
+
+export function validateRetryConfig(
+  retryConfig,
+  expectedRetryConfig = EXPECTED_RETRY_CONFIG
+) {
+  const actual = retryConfig && typeof retryConfig === "object" ? retryConfig : {};
+  const mismatches = [];
+
+  for (const field of ["retryCount", "maxDoublings"]) {
+    if (actual[field] !== expectedRetryConfig[field]) {
+      mismatches.push(
+        `retryConfig.${field} expected=${expectedRetryConfig[field]} actual=${formatActual(
+          actual[field]
+        )}`
+      );
+    }
+  }
+
+  for (const field of [
+    "maxRetryDuration",
+    "minBackoffDuration",
+    "maxBackoffDuration",
+  ]) {
+    const actualSeconds = durationSeconds(actual[field]);
+    const expectedSeconds = durationSeconds(expectedRetryConfig[field]);
+    if (actualSeconds === null || actualSeconds !== expectedSeconds) {
+      mismatches.push(
+        `retryConfig.${field} expected=${expectedRetryConfig[field]} actual=${formatActual(
+          actual[field]
+        )}`
+      );
+    }
+  }
+
+  return mismatches;
 }
 
 function validatePayload(payload, spec) {
@@ -338,6 +395,7 @@ async function main() {
       }
 
       jobMismatch.push(...validatePayload(payload, spec.payload));
+      jobMismatch.push(...validateRetryConfig(described.retryConfig));
 
       if (jobMismatch.length > 0) {
         mismatches.push({ job: spec.name, issues: jobMismatch });
@@ -351,6 +409,7 @@ async function main() {
         timeZone: described.timeZone || null,
         uri: target.uri || null,
         hasOidc,
+        retryConfig: described.retryConfig || null,
         payloadSummary: payload
           ? {
               uidPresent: typeof payload.uid === "string" && payload.uid.length > 0,
@@ -380,6 +439,7 @@ async function main() {
         timeZone: null,
         uri: null,
         hasOidc: false,
+        retryConfig: null,
         payloadSummary: null,
         mismatches: [message],
       });
@@ -392,6 +452,7 @@ async function main() {
     projectId,
     location,
     expectedTimeZone,
+    expectedRetryConfig: EXPECTED_RETRY_CONFIG,
     requireOidc,
     jobCount: JOB_SPECS.length,
     mismatchCount: mismatches.length,

@@ -5,7 +5,12 @@ import { FieldValue } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import type { Logger } from "@/lib/logging";
-import { runDay2RevenueAutomation, normalizeDay2TemplateIds, type Day2RevenueAutomationResult } from "@/lib/revenue/day2-automation";
+import {
+  assertDay2ResponseLoopsComplete,
+  runDay2RevenueAutomation,
+  normalizeDay2TemplateIds,
+  type Day2RevenueAutomationResult,
+} from "@/lib/revenue/day2-automation";
 import {
   runWeeklyKpiRollup,
   type WeeklyKpiDecision,
@@ -962,6 +967,7 @@ export async function runDay30RevenueAutomation(
     processDueResponses: args.processDueResponses,
     responseLoopMaxTasks: args.responseLoopMaxTasks,
     requireApprovalGates: args.requireApprovalGates,
+    deferResponseLoopFailureUntilParentCompletes: true,
   });
 
   let weeklyKpi: WeeklyKpiReport | null = null;
@@ -1082,6 +1088,18 @@ export async function runDay30RevenueAutomation(
     dailyDigest,
     warnings,
   };
+
+  args.log.info("revenue.day30.independent_work_completed", {
+    uid: args.uid,
+    dateKey,
+    templatesSucceeded: day2.totals.templatesSucceeded,
+    leadsScored: day2.totals.leadsScored,
+    closerQueueSize: closerQueue?.queueSize || 0,
+    serviceCandidates: serviceLabCandidates.length,
+    warnings: warnings.length,
+  });
+
+  assertDay2ResponseLoopsComplete(day2);
 
   args.log.info("revenue.day30.completed", {
     uid: args.uid,

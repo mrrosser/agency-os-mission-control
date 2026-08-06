@@ -129,6 +129,27 @@ describe("agents actions route", () => {
     expect(String(data.error || "")).toContain("Invalid payload");
   });
 
+  it("rejects an unknown agent target", async () => {
+    const req = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: "arbitrary-agent",
+        action: "ping",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe("Unknown agentId");
+    expect(setMock).not.toHaveBeenCalled();
+  });
+
   it("enforces allowlist when AGENT_ACTION_ALLOWED_UIDS is set", async () => {
     process.env.AGENT_ACTION_ALLOWED_UIDS = "admin-1,admin-2";
 

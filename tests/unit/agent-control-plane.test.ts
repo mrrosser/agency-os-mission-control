@@ -166,10 +166,34 @@ describe("buildControlPlaneSnapshot", () => {
       spaces: {
         "spaces/AAQA62xqRGQ": {
           agentId: "orchestrator",
+          orgId: "org-1",
+          businessId: "rt_solutions",
+          scope: ["orchestration"],
+          trustLevel: "bounded_internal",
+          evidenceRef: "mission-control:test",
+          runId: "run-orchestrator",
+          correlationId: "correlation-orchestrator",
+          idempotencyKey: "heartbeat-orchestrator",
+          policyVersion: "mission-control-agent/v1",
+          timestamp: "2026-02-16T17:58:00.000Z",
+          capabilities: ["context.read", "orchestration.route"],
+          state: "active",
           updatedAt: "2026-02-16T17:58:00.000Z",
         },
         "spaces/AAQALocqO7Q": {
           agentId: "fn-actions",
+          orgId: "org-1",
+          businessId: "rt_solutions",
+          scope: ["actions"],
+          trustLevel: "consequential_executor",
+          evidenceRef: "mission-control:test",
+          runId: "run-actions",
+          correlationId: "correlation-actions",
+          idempotencyKey: "heartbeat-actions",
+          policyVersion: "mission-control-agent/v1",
+          timestamp: "2026-02-16T17:56:00.000Z",
+          capabilities: ["context.read", "external.email.send"],
+          state: "active",
           updatedAt: "2026-02-16T17:56:00.000Z",
         },
       },
@@ -237,6 +261,22 @@ describe("buildControlPlaneSnapshot", () => {
         smAutoEndpoint: "https://smauto.example/mcp",
         leadOpsEndpoint: "https://leadops.example/mcp",
         paperclipEndpoint: "https://paperclip.example/system",
+        smAutoProbe: {
+          state: "operational",
+          checkedAt: "2026-02-16T17:59:30.000Z",
+          latencyMs: 42,
+          protocolVersion: "2025-03-26",
+          toolCount: 3,
+          detail: "Live MCP initialize + tools/list probe passed.",
+        },
+        leadOpsProbe: {
+          state: "operational",
+          checkedAt: "2026-02-16T17:59:31.000Z",
+          latencyMs: 48,
+          protocolVersion: "2025-03-26",
+          toolCount: 5,
+          detail: "Live MCP initialize + tools/list probe passed.",
+        },
         openClawSyncGeneratedAt: "2026-02-16T16:30:00.000Z",
         openClawSyncTargetRoot: "C:\\CTO Projects\\AI_HELL_MARY",
         openClawSyncManifestPath: "C:\\CTO Projects\\AI_HELL_MARY\\docs\\generated\\mission-control\\sync-manifest.json",
@@ -389,6 +429,13 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.summary.projectedMonthlyCostUsd).toBeGreaterThan(0);
     expect(snapshot.agents.find((agent) => agent.id === "orchestrator")?.state).toBe("active");
     expect(snapshot.agents.find((agent) => agent.id === "fn-actions")?.state).toBe("active");
+    expect(snapshot.agents.find((agent) => agent.id === "opportunity-scout")?.capabilities).toContain(
+      "opportunity.discover"
+    );
+    expect(snapshot.agents.find((agent) => agent.id === "fn-actions")?.consequentialExternalWrites).toBe(true);
+    expect(
+      snapshot.agents.filter((agent) => agent.consequentialExternalWrites).map((agent) => agent.id)
+    ).toEqual(["fn-actions"]);
     expect(snapshot.diagnostics.bugs[0]?.message).toContain("Calendar 500");
     expect(snapshot.diagnostics.alerts[0]?.status).toBe("open");
     expect(snapshot.costModel.method).toBe("hybrid-v1");
@@ -413,7 +460,7 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.business.mobileOps.supportsLifecycleActions).toBe(true);
   });
 
-  it("marks connector services degraded when endpoint format is invalid", () => {
+  it("keeps configured-only and invalid connector services degraded", () => {
     const snapshot = buildControlPlaneSnapshot({
       nowIso: "2026-02-16T18:00:00.000Z",
       spaces: {},
@@ -445,7 +492,7 @@ describe("buildControlPlaneSnapshot", () => {
         hasVoiceOpsPolicy: true,
       },
       externalTools: {
-        smAutoEndpoint: "smauto-local",
+        smAutoEndpoint: "https://smauto.example/mcp",
         leadOpsEndpoint: "ftp://leadops.local",
         paperclipEndpoint: "paperclip-local",
         openClawSyncGeneratedAt: "2026-02-10T18:00:00.000Z",
@@ -472,7 +519,7 @@ describe("buildControlPlaneSnapshot", () => {
     expect(leadOps?.state).toBe("degraded");
     expect(paperclip?.state).toBe("degraded");
     expect(openClawSync?.state).toBe("degraded");
-    expect(String(smAuto?.detail || "")).toContain("invalid");
+    expect(String(smAuto?.detail || "")).toContain("live initialize + tools/list probe has not passed");
     expect(String(leadOps?.detail || "")).toContain("invalid");
     expect(String(paperclip?.detail || "")).toContain("invalid");
     expect(String(openClawSync?.detail || "")).toContain("last sync");

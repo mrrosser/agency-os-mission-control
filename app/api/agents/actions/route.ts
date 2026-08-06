@@ -11,6 +11,7 @@ import {
   readPaperclipClientConfig,
   type PaperclipLifecycleAction,
 } from "@/lib/paperclip/client";
+import { resolveAgentDefinition } from "@/lib/agents/registry";
 
 const actionSchema = z
   .object({
@@ -66,7 +67,11 @@ export const POST = withApiHandler(
       throw new ApiError(403, "Forbidden");
     }
 
-    const payload = parsed.data;
+    const targetAgent = resolveAgentDefinition(parsed.data.agentId);
+    if (!targetAgent) {
+      throw new ApiError(400, "Unknown agentId");
+    }
+    const payload = { ...parsed.data, agentId: targetAgent.id };
     const idempotencyKey = getIdempotencyKey(request, payload);
     const result = await withIdempotency(
       {

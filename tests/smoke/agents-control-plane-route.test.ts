@@ -121,6 +121,18 @@ describe("agents control-plane route", () => {
     getAgentSpaceStatusMock.mockResolvedValue({
       "spaces/AAQA62xqRGQ": {
         agentId: "orchestrator",
+        orgId: "org-1",
+        businessId: "rt_solutions",
+        scope: ["orchestration"],
+        trustLevel: "bounded_internal",
+        evidenceRef: "mission-control:test",
+        runId: "run-orchestrator",
+        correlationId: "correlation-orchestrator",
+        idempotencyKey: "heartbeat-orchestrator",
+        policyVersion: "mission-control-agent/v1",
+        timestamp: "2026-02-16T18:00:00.000Z",
+        capabilities: ["context.read", "orchestration.route"],
+        state: "active",
         updatedAt: "2026-02-16T18:00:00.000Z",
       },
     });
@@ -202,8 +214,34 @@ describe("agents control-plane route", () => {
     process.env.SMAUTO_MCP_SERVER_URL = "https://smauto.example/mcp";
     process.env.LEADOPS_MCP_SERVER_URL = "https://leadops.example/mcp";
     process.env.PAPERCLIP_SYSTEM_URL = "https://paperclip.example/system";
-    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url.includes("smauto.example") || url.includes("leadops.example")) {
+        const request = JSON.parse(String(init?.body || "{}")) as { method?: string; id?: string };
+        if (request.method === "initialize") {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: request.id,
+              result: { protocolVersion: "2025-03-26", capabilities: { tools: {} } },
+            }),
+            { status: 200, headers: { "mcp-session-id": "session-control-plane" } }
+          );
+        }
+        if (request.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        if (request.method === "tools/list") {
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: request.id,
+              result: { tools: [{ name: "health.test" }] },
+            }),
+            { status: 200 }
+          );
+        }
+      }
       if (url.includes("paperclip.example")) {
         if (url.endsWith("/api/health")) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -355,6 +393,11 @@ describe("agents control-plane route", () => {
     expect(payload.costModel.method).toBe("live-v1");
     expect(Array.isArray(payload.costModel.providerBilling)).toBe(true);
     expect(Array.isArray(payload.topology)).toBe(true);
+    expect(payload.agents.some((agent: { id: string }) => agent.id === "opportunity-scout")).toBe(true);
+    expect(
+      payload.agents.filter((agent: { consequentialExternalWrites: boolean }) => agent.consequentialExternalWrites)
+        .map((agent: { id: string }) => agent.id)
+    ).toEqual(["fn-actions"]);
     expect(payload.services.some((service: { id: string }) => service.id === "square_pos")).toBe(true);
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");

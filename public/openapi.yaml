@@ -1,42 +1,462 @@
 openapi: 3.1.0
 info:
-  title: Agency OS Mission Control
-  description: The Operating System for autonomous agencies. Manage leads, secrets, and outreach campaigns.
-  version: 1.0.0
+  title: Agency OS Mission Control API
+  description: Authenticated Mission Control APIs for registered agent heartbeats, capability policy, lifecycle actions, and control-plane health.
+  version: 1.1.0
 servers:
   - url: https://leadflow-review.web.app
-    description: Production Server (Firebase)
+    description: Production
   - url: http://localhost:3000
-    description: Local Development
+    description: Local development
+security:
+  - firebaseBearer: []
 paths:
-  /api/run-leadops:
+  /api/agents/status:
+    get:
+      operationId: getAgentStatus
+      summary: Read caller-scoped agent heartbeat state and capability policy
+      responses:
+        "200":
+          description: Registered agents and validated heartbeat state for the authenticated org context.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [org_id, business_ids, policy, spaces]
+                properties:
+                  org_id:
+                    type: string
+                  business_ids:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BusinessId"
+                  policy:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentCapabilityDescriptor"
+                  spaces:
+                    type: object
+                    additionalProperties:
+                      $ref: "#/components/schemas/AgentSpaceStatus"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
-      operationId: runLeadOps
-      summary: Trigger a LeadOps Campaign
-      description: Launches the autonomous agent to find, qualify, and contact leads.
+      operationId: postAgentHeartbeat
+      summary: Record an idempotent, registry-authorized agent heartbeat
+      description: Unknown agents/spaces, mismatched org or business context, stale timestamps, and undeclared scopes/capabilities fail closed. Only `fn-actions` may declare consequential external-write capabilities.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentHeartbeatEnvelope"
+      responses:
+        "200":
+          description: Heartbeat stored or replayed from the same idempotency key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, agent_id, org_id, business_id, space_id, policy_version, replayed, correlation_id]
+                properties:
+                  ok:
+                    const: true
+                  agent_id:
+                    type: string
+                  org_id:
+                    type: string
+                  business_id:
+                    $ref: "#/components/schemas/BusinessId"
+                  space_id:
+                    type: string
+                  policy_version:
+                    const: mission-control-agent/v1
+                  envelope_correlation_id:
+                    type: string
+                  replayed:
+                    type: boolean
+                  correlation_id:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/control-plane:
+    get:
+      operationId: getAgentControlPlane
+      summary: Read the live Mission Control agent and connector snapshot
+      description: MCP connectors are operational only after a bounded live `initialize` plus `tools/list` probe succeeds. Configured-only or unreachable connectors are degraded.
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+      responses:
+        "200":
+          description: Control-plane snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ControlPlaneSnapshot"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/agents/actions:
+    post:
+      operationId: postAgentAction
+      summary: Queue or proxy a lifecycle action for a registered agent
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
+              required: [agentId, action]
               properties:
-                limit:
-                  type: integer
-                  description: Number of leads to find (default 10)
-                niche:
+                agentId:
                   type: string
-                  description: Target industry (e.g. Healthcare)
+                  description: Canonical agent ID or declared registry alias.
+                action:
+                  type: string
+                  enum: [pause, ping, route, resume, terminate, wakeup]
+                target:
+                  type: string
+                  maxLength: 200
+                note:
+                  type: string
+                  maxLength: 400
+                idempotencyKey:
+                  type: string
+                  maxLength: 200
       responses:
         "200":
-          description: Campaign Started
+          description: Action queued or forwarded.
           content:
             application/json:
               schema:
                 type: object
+                required: [ok, requestId, status, agentId, action, replayed, correlationId]
                 properties:
+                  ok:
+                    const: true
+                  requestId:
+                    type: string
                   status:
                     type: string
-                    example: "started"
-                  jobId:
+                    enum: [queued, forwarded]
+                  agentId:
                     type: string
+                  action:
+                    type: string
+                  target:
+                    type: [string, "null"]
+                  proxied:
+                    type: boolean
+                  replayed:
+                    type: boolean
+                  correlationId:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  securitySchemes:
+    firebaseBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID token
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Caller-provided trace ID; generated when omitted.
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Stable retry key. Agent heartbeat bodies also require `idempotency_key`.
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid Firebase bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Authenticated caller is outside the requested registry/org/business context.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    BusinessId:
+      type: string
+      enum: [ai_cofoundry, rosser_nft_gallery, rt_solutions]
+    AgentTrustLevel:
+      type: string
+      enum: [read_only, bounded_internal, consequential_executor]
+    AgentScope:
+      type: string
+      enum:
+        - orchestration
+        - business:ai_cofoundry
+        - business:rosser_nft_gallery
+        - business:rt_solutions
+        - marketing
+        - research
+        - actions
+        - opportunities
+        - qualification
+        - applications
+        - meeting_outreach
+        - crm_reconciliation
+    AgentCapability:
+      type: string
+      enum:
+        - context.read
+        - orchestration.route
+        - marketing.plan
+        - research.search
+        - opportunity.discover
+        - opportunity.classify
+        - qualification.score
+        - qualification.verify
+        - application.draft
+        - outreach.draft
+        - meeting.prepare
+        - crm.read
+        - crm.reconcile.internal
+        - external.email.send
+        - external.calendar.create
+        - external.sms.send
+        - external.voice.call
+        - external.content.publish
+        - external.payment.create
+    AgentHeartbeatEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - agent_id
+        - org_id
+        - business_id
+        - space_id
+        - scope
+        - trust_level
+        - evidence_ref
+        - run_id
+        - correlation_id
+        - idempotency_key
+        - policy_version
+        - timestamp
+        - capabilities
+      properties:
+        agent_id:
+          type: string
+        org_id:
+          type: string
+          pattern: "^[A-Za-z0-9_-]+$"
+        business_id:
+          $ref: "#/components/schemas/BusinessId"
+        space_id:
+          type: string
+        scope:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentScope"
+        trust_level:
+          $ref: "#/components/schemas/AgentTrustLevel"
+        evidence_ref:
+          type: string
+        run_id:
+          type: string
+        correlation_id:
+          type: string
+        idempotency_key:
+          type: string
+        policy_version:
+          const: mission-control-agent/v1
+        timestamp:
+          type: string
+          format: date-time
+        capabilities:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/AgentCapability"
+        state:
+          type: string
+          enum: [active, idle, degraded]
+          default: active
+        source:
+          type: string
+        message_id:
+          type: string
+    AgentSpaceStatus:
+      type: object
+      required: [agentId, orgId, businessId, scope, trustLevel, evidenceRef, runId, correlationId, idempotencyKey, policyVersion, timestamp, capabilities, state]
+      properties:
+        agentId:
+          type: string
+        orgId:
+          type: string
+        businessId:
+          $ref: "#/components/schemas/BusinessId"
+        scope:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentScope"
+        trustLevel:
+          $ref: "#/components/schemas/AgentTrustLevel"
+        evidenceRef:
+          type: string
+        runId:
+          type: string
+        correlationId:
+          type: string
+        idempotencyKey:
+          type: string
+        policyVersion:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentCapability"
+        state:
+          type: string
+          enum: [active, idle, degraded]
+        updatedAt:
+          type: [string, "null"]
+          format: date-time
+        source:
+          type: [string, "null"]
+        messageId:
+          type: [string, "null"]
+    AgentCapabilityDescriptor:
+      type: object
+      required: [agent_id, label, role, business_ids, space_ids, scope, trust_level, capabilities, consequential_external_writes, policy_version]
+      properties:
+        agent_id:
+          type: string
+        label:
+          type: string
+        role:
+          type: string
+        business_ids:
+          type: array
+          items:
+            $ref: "#/components/schemas/BusinessId"
+        space_ids:
+          type: array
+          items:
+            type: string
+        scope:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentScope"
+        trust_level:
+          $ref: "#/components/schemas/AgentTrustLevel"
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentCapability"
+        consequential_external_writes:
+          type: boolean
+        policy_version:
+          type: string
+    ConnectorService:
+      type: object
+      required: [id, label, state, detail, required, monthlyCostUsd]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        state:
+          type: string
+          enum: [operational, degraded, offline]
+        detail:
+          type: string
+        required:
+          type: boolean
+        monthlyCostUsd:
+          type: number
+    ControlPlaneSnapshot:
+      type: object
+      required: [generatedAt, summary, quota, agents, services, topology, skills, diagnostics, operations, business, costModel]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        summary:
+          type: object
+          additionalProperties: true
+        quota:
+          type: object
+          additionalProperties: true
+        agents:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectorService"
+        topology:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        skills:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        diagnostics:
+          type: object
+          additionalProperties: true
+        operations:
+          type: object
+          additionalProperties: true
+        business:
+          type: object
+          additionalProperties: true
+        costModel:
+          type: object
+          additionalProperties: true
+    Error:
+      type: object
+      required: [error, correlationId]
+      properties:
+        error:
+          type: string
+        correlationId:
+          type: string
+        details:
+          type: object
+          additionalProperties: true

@@ -1,4 +1,19 @@
-# RT Loop Report
+# Latest Verification Run
+
+- RUN_ID: 20260806-agent-api-protocol-hardening
+- Scope: Canonical agent registry, authenticated heartbeat envelope, MCP connector probes, real OpenAPI contract
+
+[2026-08-06T16:21:00Z] gate=focused-protocol cmd=npx vitest run agent-registry agent-status mcp-connector-health result=PASS files=4 tests=24
+[2026-08-06T16:23:00Z] gate=control-plane-regression cmd=npx vitest run agent-control-plane autonomous-business agents-control-plane-route agents-actions-route result=PASS files=4 tests=14
+[2026-08-06T16:29:00Z] gate=unit cmd=npm run test:unit result=PASS_WITH_RERUN full=286/287 timeout=api-secrets-fallback isolated=3/3
+[2026-08-06T16:30:00Z] gate=smoke cmd=npm run test:smoke result=PASS
+[2026-08-06T16:35:00Z] gate=build cmd=npm run build result=PASS routes=95
+[2026-08-06T16:35:00Z] gate=lint cmd=npm run lint result=PASS
+[2026-08-06T16:35:00Z] gate=typescript cmd=npx tsc --noEmit result=PASS
+[2026-08-06T16:35:00Z] gate=openapi-yaml cmd=node+js-yaml result=PASS
+[2026-08-06T16:37:00Z] gate=dependency-audit cmd=npm audit --audit-level=high result=FAIL baseline=26 moderate=11 high=13 critical=2 dependency_changes=none
+
+## Prior RT Loop Report
 
 - RUN_ID: 20260226-social-onboarding-runtime-m5
 - Scope: Social dispatch smoke + authenticated runtime preflight + M5 acceptance start

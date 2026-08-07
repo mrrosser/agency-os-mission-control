@@ -40,6 +40,7 @@ describe("Firebase deployment environment propagation", () => {
       "hosting:channel:deploy",
       firstChannelDeploy + 1
     );
+    const hostingRebindEnd = source.indexOf("REBIND_COMPLETE=1", hostingRebind);
     const rewriteAssertion = source.indexOf('METADATA_VERIFIED" != "1"');
     const reboundSmoke = source.indexOf(
       'SMOKE_BASE_URL="$FIREBASE_PREVIEW_URL"'
@@ -54,6 +55,9 @@ describe("Firebase deployment environment propagation", () => {
     expect(smoke).toBeGreaterThan(candidateTag);
     expect(trafficPromotion).toBeGreaterThan(smoke);
     expect(hostingRebind).toBeGreaterThan(trafficPromotion);
+    expect(source.slice(hostingRebind, hostingRebindEnd)).not.toContain(
+      '--site "$FIREBASE_HOSTING_SITE"'
+    );
     expect(rewriteAssertion).toBeGreaterThan(hostingRebind);
     expect(reboundSmoke).toBeGreaterThan(rewriteAssertion);
     expect(hostingPromotion).toBeGreaterThan(reboundSmoke);

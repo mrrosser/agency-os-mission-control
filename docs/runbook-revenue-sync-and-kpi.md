@@ -12,7 +12,10 @@ Owner: Mission Control
 - `SQUARE_WEBHOOK_SIGNATURE_KEY`
 - `SQUARE_WEBHOOK_DEFAULT_UID` (fallback when payload does not include uid metadata)
 - Optional: `SQUARE_WEBHOOK_NOTIFICATION_URL` (recommended in production so signature validation uses the exact public URL)
-- `REVENUE_POS_WORKER_TOKEN` (service auth for POS worker task endpoint)
+- Shared unattended-worker identity:
+  - `REVENUE_AUTOMATION_UID` (server-side Firebase identity; callers cannot substitute it)
+  - `REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL` (exact dedicated service account)
+  - `REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE` (exact HTTPS Cloud Run service origin)
 - Optional POS policy flags:
   - `POS_WORKER_ALLOW_SIDE_EFFECTS` (default `false`)
   - `POS_WORKER_AUTO_APPROVE_LOW_RISK` (default `true`)
@@ -32,15 +35,17 @@ Owner: Mission Control
 
 ### POS worker routes
 - Status (auth): `GET /api/revenue/pos/status`
-- Worker task (service token): `POST /api/revenue/pos/worker-task`
+- Worker task (Google OIDC): `POST /api/revenue/pos/worker-task`
 - High-risk approval gate (auth): `POST /api/revenue/pos/approvals`
 
-### Cloud Run deploy update (example)
+### Cloud Run OIDC configuration (example)
 ```powershell
 gcloud run services update mission-control `
   --region us-central1 `
-  --set-env-vars "SQUARE_WEBHOOK_SIGNATURE_KEY=REDACTED,SQUARE_WEBHOOK_NOTIFICATION_URL=https://your-domain/api/webhooks/square,SQUARE_WEBHOOK_DEFAULT_UID=YOUR_UID"
+  --set-env-vars "REVENUE_AUTOMATION_UID=YOUR_FIREBASE_UID,REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL=revenue-automation-scheduler@YOUR_PROJECT.iam.gserviceaccount.com,REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE=https://YOUR_SERVICE.run.app"
 ```
+
+Keep `SQUARE_WEBHOOK_SIGNATURE_KEY` in Secret Manager. Do not place the Square secret or any worker token in `--set-env-vars`, Scheduler headers, repository variables, or workflow files.
 
 ### Square console setup
 - Event destination URL must be the same public URL used in `SQUARE_WEBHOOK_NOTIFICATION_URL`.
@@ -49,11 +54,21 @@ gcloud run services update mission-control `
 
 ### POS worker invocation (example)
 ```powershell
-curl -X POST https://your-domain/api/revenue/pos/worker-task `
-  -H "Authorization: Bearer ${env:REVENUE_POS_WORKER_TOKEN}" `
-  -H "Content-Type: application/json" `
-  -d "{\"uid\":\"YOUR_FIREBASE_UID\",\"limit\":25,\"executeOutbox\":true,\"outboxLimit\":25}"
+$identityToken = gcloud auth print-identity-token `
+  --impersonate-service-account "revenue-automation-scheduler@$env:GCP_PROJECT_ID.iam.gserviceaccount.com" `
+  --audiences "$env:REVENUE_AUTOMATION_SERVICE_URL"
+try {
+  curl -X POST "$env:REVENUE_AUTOMATION_SERVICE_URL/api/revenue/pos/worker-task" `
+    -H "Authorization: Bearer $identityToken" `
+    -H "Content-Type: application/json" `
+    -H "x-correlation-id: revenue-pos-manual-$([Guid]::NewGuid().ToString('N'))" `
+    -d "{\"limit\":25,\"executeOutbox\":true,\"outboxLimit\":25}"
+} finally {
+  Remove-Variable identityToken -ErrorAction SilentlyContinue
+}
 ```
+
+The production `revenue-pos-worker-loop` job uses the same exact service account and Cloud Run origin through Cloud Scheduler OIDC. Its request body omits `uid`; `REVENUE_AUTOMATION_UID` is the sole worker identity source.
 
 ## 2) Mission Control -> AI_HELL_MARY Nightly Sync
 
@@ -83,12 +98,13 @@ schtasks /Create /TN "MissionControl-AIHellMary-Sync" /SC DAILY /ST 02:10 /TR "p
 - Scheduler/worker: `POST /api/revenue/kpi/weekly/worker-task`
 
 ### Worker auth env
-- `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
+- `REVENUE_AUTOMATION_UID`
+- `REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL`
+- `REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE`
 
 ### Worker request body
 ```json
 {
-  "uid": "<firebase uid>",
   "timeZone": "America/Chicago",
   "weekStartDate": "2026-02-23"
 }
@@ -129,19 +145,21 @@ schtasks /Create /TN "MissionControl-AIHellMary-Sync" /SC DAILY /ST 02:10 /TR "p
 
 ### GitHub scheduler
 - Workflow: `.github/workflows/revenue-weekly-kpi.yml`
-- Secrets required:
-  - `REVENUE_WEEKLY_KPI_BASE_URL`
-  - `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
-  - `REVENUE_WEEKLY_KPI_UID`
-- Optional repo variable:
+- Repository variables (no secrets):
+  - `GCP_PROJECT_ID`
+  - `GCP_WIF_PROVIDER` (the existing provider must be repository-scoped to `mrrosser/agency-os-mission-control`)
+  - `REVENUE_AUTOMATION_SERVICE_URL` (exact HTTPS Cloud Run service origin)
   - `REVENUE_KPI_TIMEZONE` (defaults to `America/Chicago`)
+- The workflow derives the exact `revenue-automation-scheduler@${GCP_PROJECT_ID}.iam.gserviceaccount.com` principal, exchanges GitHub OIDC through Workload Identity Federation, and mints a Google ID token with the Cloud Run origin as its audience and verified service-account email claims.
+- Grant only the existing repository principal `roles/iam.workloadIdentityUser` on that dedicated service account, and keep `roles/run.invoker` scoped to the named Cloud Run service. No service-account key or long-lived worker token is permitted.
+- The generated Google ID token lasts at most ten minutes and is never written to an artifact or log.
 
-### Cloud Run deploy update (example)
-```powershell
-gcloud run services update mission-control `
-  --region us-central1 `
-  --set-env-vars "REVENUE_WEEKLY_KPI_WORKER_TOKEN=REDACTED"
-```
+### Two-phase migration and rollback
+1. Deploy the reviewed OIDC route changes with the bounded legacy flag enabled so the old POS/KPI invokers remain available during the canary. Never print their token values.
+2. Prove an OIDC request against each route, then update `revenue-pos-worker-loop` and the weekly workflow. Re-describe Scheduler and verify the exact service-account email, exact audience, body without `uid`, and absence of `Authorization`/`x-revenue-pos-token` static headers.
+3. Disable the legacy flag and remove the POS/KPI token secret references only after both OIDC paths have current success receipts. The production workflow must leave only the current sanitized release tag; tagged historical revisions are public endpoints even at zero percent traffic.
+4. Confirm Cloud Run, Cloud Scheduler, and GitHub Actions no longer reference the six legacy revenue token names, then disable (do not destroy) their Secret Manager versions and retain the version IDs as the rollback receipt.
+5. Before step 3, rollback by restoring the previous application revision and exported Scheduler definition. After step 3, prefer rolling back the application while retaining OIDC; restore a legacy secret only as a time-bounded incident action followed by a new canary/finalize cycle.
 
 ## 4) UI Safety Flag (No External UX Change by Default)
 
@@ -161,8 +179,8 @@ npm run build
 
 ### Post-deploy (manual spot checks)
 1. `GET /api/health` returns `200`.
-2. `POST /api/revenue/kpi/weekly/worker-task` with valid bearer token returns `200`.
-3. `POST /api/revenue/pos/worker-task` with valid bearer token returns `200`.
+2. `POST /api/revenue/kpi/weekly/worker-task` with a valid short-lived Google OIDC bearer token returns `200` and `authMode=oidc`.
+3. `POST /api/revenue/pos/worker-task` with a valid short-lived Google OIDC bearer token returns `200` and `authMode=oidc`.
 4. `GET /api/revenue/pos/status` returns healthy/degraded snapshot with queue metrics.
 5. Square test webhook call returns `200` or `202` (never `401` with correct signature).
 6. Confirm `identities/{uid}/revenue_kpi_reports/latest` updates after worker run.

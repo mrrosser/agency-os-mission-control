@@ -1,15 +1,25 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/revenue/pos/worker-task/route";
 import { runPosOutboxCycle, runPosWorkerCycle } from "@/lib/revenue/pos-worker";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 vi.mock("@/lib/revenue/pos-worker", () => ({
   runPosWorkerCycle: vi.fn(),
   runPosOutboxCycle: vi.fn(),
 }));
 
+vi.mock("@/lib/revenue/worker-auth", () => ({
+  authorizeRevenueAutomationWorker: vi.fn(),
+  resolveRevenueAutomationWorkerUid: vi.fn(),
+}));
+
 const runPosWorkerCycleMock = vi.mocked(runPosWorkerCycle);
 const runPosOutboxCycleMock = vi.mocked(runPosOutboxCycle);
-const ORIGINAL_TOKEN = process.env.REVENUE_POS_WORKER_TOKEN;
+const authorizeWorkerMock = vi.mocked(authorizeRevenueAutomationWorker);
+const resolveWorkerUidMock = vi.mocked(resolveRevenueAutomationWorkerUid);
 const ORIGINAL_OUTBOX_EXECUTE = process.env.POS_WORKER_EXECUTE_OUTBOX;
 
 function createContext() {
@@ -19,7 +29,8 @@ function createContext() {
 describe("revenue pos worker-task route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    process.env.REVENUE_POS_WORKER_TOKEN = "pos-worker-token";
+    authorizeWorkerMock.mockResolvedValue({ mode: "oidc", principalHash: "abc123def456" });
+    resolveWorkerUidMock.mockReturnValue("user-1");
     runPosWorkerCycleMock.mockResolvedValue({
       uid: "user-1",
       workerId: "worker-1",
@@ -46,14 +57,14 @@ describe("revenue pos worker-task route", () => {
     delete process.env.POS_WORKER_EXECUTE_OUTBOX;
   });
 
-  it("runs the worker cycle when authorized", async () => {
+  it("runs the worker cycle under the server-configured identity when OIDC-authorized", async () => {
     const request = new Request("http://localhost/api/revenue/pos/worker-task", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-revenue-pos-token": "pos-worker-token",
+        Authorization: "Bearer signed-oidc-token",
       },
-      body: JSON.stringify({ uid: "user-1", limit: 10 }),
+      body: JSON.stringify({ limit: 10 }),
     });
 
     const response = await POST(
@@ -64,7 +75,13 @@ describe("revenue pos worker-task route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
+    expect(payload.authMode).toBe("oidc");
     expect(payload.cycle.uid).toBe("user-1");
+    expect(authorizeWorkerMock).toHaveBeenCalledOnce();
+    expect(resolveWorkerUidMock).toHaveBeenCalledWith(undefined);
+    expect(runPosWorkerCycleMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "user-1", limit: 10 })
+    );
     expect(runPosWorkerCycleMock).toHaveBeenCalledTimes(1);
     expect(runPosOutboxCycleMock).not.toHaveBeenCalled();
   });
@@ -76,9 +93,9 @@ describe("revenue pos worker-task route", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-revenue-pos-token": "pos-worker-token",
+        Authorization: "Bearer signed-oidc-token",
       },
-      body: JSON.stringify({ uid: "user-1", limit: 10 }),
+      body: JSON.stringify({ limit: 10 }),
     });
 
     const response = await POST(
@@ -93,14 +110,16 @@ describe("revenue pos worker-task route", () => {
     expect(runPosOutboxCycleMock).toHaveBeenCalledTimes(1);
   });
 
-  it("fails closed when token is invalid", async () => {
+  it("fails closed before queue work when OIDC authorization is rejected", async () => {
+    authorizeWorkerMock.mockRejectedValueOnce(
+      Object.assign(new Error("Forbidden"), { status: 403 })
+    );
     const request = new Request("http://localhost/api/revenue/pos/worker-task", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-revenue-pos-token": "wrong-token",
       },
-      body: JSON.stringify({ uid: "user-1" }),
+      body: JSON.stringify({}),
     });
 
     const response = await POST(
@@ -115,12 +134,33 @@ describe("revenue pos worker-task route", () => {
     expect(runPosOutboxCycleMock).not.toHaveBeenCalled();
   });
 
+  it("rejects caller identity substitution before queue work", async () => {
+    resolveWorkerUidMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error("Worker uid must match the configured revenue automation identity."), {
+        status: 400,
+      });
+    });
+    const request = new Request("http://localhost/api/revenue/pos/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer signed-oidc-token",
+      },
+      body: JSON.stringify({ uid: "other-user" }),
+    });
+
+    const response = await POST(
+      request as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+
+    expect(response.status).toBe(400);
+    expect(resolveWorkerUidMock).toHaveBeenCalledWith("other-user");
+    expect(runPosWorkerCycleMock).not.toHaveBeenCalled();
+    expect(runPosOutboxCycleMock).not.toHaveBeenCalled();
+  });
+
   afterAll(() => {
-    if (typeof ORIGINAL_TOKEN === "string") {
-      process.env.REVENUE_POS_WORKER_TOKEN = ORIGINAL_TOKEN;
-    } else {
-      delete process.env.REVENUE_POS_WORKER_TOKEN;
-    }
     if (typeof ORIGINAL_OUTBOX_EXECUTE === "string") {
       process.env.POS_WORKER_EXECUTE_OUTBOX = ORIGINAL_OUTBOX_EXECUTE;
     } else {

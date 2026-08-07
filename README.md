@@ -35,7 +35,7 @@ copy .env.local.example .env.local
 - Optional (mobile + reliability posture): `NEXT_PUBLIC_APP_URL`, `MISSION_CONTROL_SLO_TARGET_PCT`, `MISSION_CONTROL_PRIMARY_REGION`, `MISSION_CONTROL_FAILOVER_REGION`
 - Optional (ad-ops readiness): `META_ADS_CONTROL_URL`, `META_ADS_CONTROL_TOKEN`, `META_ADS_ACCOUNT_ID`, `META_ADS_ACCESS_TOKEN`, `META_ADS_API_VERSION`, `META_ADS_WRITE_ENABLED`, `META_ADS_CAMPAIGNS_PATH`, `META_ADS_ACTION_PATH_TEMPLATE`, `GOOGLE_ADS_CONTROL_URL`, `GOOGLE_ADS_CONTROL_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`, `GOOGLE_ADS_API_VERSION`, `GOOGLE_ADS_WRITE_ENABLED`, `GOOGLE_ADS_CAMPAIGNS_PATH`, `GOOGLE_ADS_ACTION_PATH_TEMPLATE`
 - Optional (Square deposit stage webhook): `SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_NOTIFICATION_URL`, `SQUARE_WEBHOOK_DEFAULT_UID`
-- Optional (POS worker service auth): `REVENUE_POS_WORKER_TOKEN`
+- Required for unattended revenue/POS/KPI workers: `REVENUE_AUTOMATION_UID`, `REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL`, and `REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE` (exact dedicated service-account email and Cloud Run origin; Google OIDC only after cutover)
 - Optional (POS side-effect policy): `POS_WORKER_ALLOW_SIDE_EFFECTS`, `POS_WORKER_AUTO_APPROVE_LOW_RISK`, `POS_WORKER_REQUIRE_APPROVAL_FOR_HIGH_RISK`, `POS_WORKER_MAX_ATTEMPTS`
 - Optional (recommended for background worker queueing): `LEAD_RUNS_TASK_QUEUE`, `LEAD_RUNS_TASK_LOCATION`, `LEAD_RUNS_TASK_SERVICE_ACCOUNT`
 - Optional (recommended for follow-up scheduler): `FOLLOWUPS_TASK_QUEUE`, `FOLLOWUPS_TASK_LOCATION`, `FOLLOWUPS_TASK_SERVICE_ACCOUNT`
@@ -47,7 +47,7 @@ copy .env.local.example .env.local
 - Optional (social draft approvals + dispatch): `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist via `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`), `SMAUTO_MCP_SERVER_URL`
 - Optional (dispatch status updates in Google Chat): `SOCIAL_DISPATCH_STATUS_NOTIFY`, `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`)
 - Optional (social onboarding UX): `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (external SocialOps connections page URL shown in onboarding checklist)
-- Optional (service-to-service weekly KPI worker): `REVENUE_WEEKLY_KPI_WORKER_TOKEN`
+- Optional (bounded revenue-auth cutover only): start with `REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN=true`; after the OIDC canary succeeds, set it explicitly to `false` and then remove all legacy worker-token secret references (removing the flag alone safely defaults back to `true`)
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
 
 4) Start dev server:
@@ -242,7 +242,7 @@ npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_c
 - Manual/authenticated route: `POST /api/revenue/kpi/weekly`
 - Scheduler/service route: `POST /api/revenue/kpi/weekly/worker-task`
 - Latest snapshot route: `GET /api/revenue/kpi/latest`
-- Worker auth: send `Authorization: Bearer <REVENUE_WEEKLY_KPI_WORKER_TOKEN>` (or `x-revenue-weekly-kpi-token`).
+- Worker auth: send a short-lived Google OIDC bearer token for the exact configured revenue scheduler service account and Cloud Run origin; the route resolves `REVENUE_AUTOMATION_UID` server-side.
 - Writes weekly and latest KPI docs under `identities/{uid}/revenue_kpi_reports/*`.
 - KPI docs include canonical outcome gate payload:
   - `outcomeGates.gates[]` (`throughput`, `qualification`, `meeting`, `revenue`, `pipeline`)
@@ -270,7 +270,7 @@ npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_c
 - Verifies `x-square-hmacsha256-signature` with `SQUARE_WEBHOOK_SIGNATURE_KEY`.
 - Accepts allowlisted Square event families (`PAYMENT.*`, `INVOICE.*`, `REFUND.*`, `ORDER.*`) and queues deterministic POS worker events under `identities/{uid}/pos_worker_events/*`.
 - Processes completed payment events inline and updates matching leads to `pipelineStage=deposit_received` (idempotent by `event_id` in `square_webhook_events`).
-- POS worker service route: `POST /api/revenue/pos/worker-task` (Bearer or `x-revenue-pos-token` = `REVENUE_POS_WORKER_TOKEN`).
+- POS worker service route: `POST /api/revenue/pos/worker-task` (short-lived Google OIDC bearer token for the exact configured revenue scheduler service account and Cloud Run audience; the worker identity is server-configured).
 - POS worker status route: `GET /api/revenue/pos/status` (authenticated).
 - High-risk POS actions can be approved via `POST /api/revenue/pos/approvals` and side-effect outbox items are written to `identities/{uid}/pos_worker_outbox/*`.
 

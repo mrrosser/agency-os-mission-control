@@ -40,6 +40,11 @@ const KEYS = [
   "VOICE_ACTIONS_DEFAULT_UID",
   "SQUARE_WEBHOOK_DEFAULT_UID",
   "REVENUE_WEEKLY_KPI_WORKER_TOKEN",
+  "REVENUE_POS_WORKER_TOKEN",
+  "REVENUE_AUTOMATION_LEGACY_WORKER_TOKEN",
+  "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN",
+  "REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL",
+  "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE",
   "REVENUE_DAY30_WORKER_TOKEN",
   "REVENUE_DAY2_WORKER_TOKEN",
   "REVENUE_DAY1_WORKER_TOKEN",
@@ -92,11 +97,8 @@ describe("buildRuntimePreflightReport", () => {
     expect(report.checks.find((check) => check.id === "smauto-mcp-connector")?.state).toBe("warning");
     expect(report.checks.find((check) => check.id === "smauto-mcp-auth")?.state).toBe("warning");
     expect(report.checks.find((check) => check.id === "leadops-mcp-connector")?.state).toBe("warning");
-    expect(report.checks.find((check) => check.id === "revenue-worker-token")?.state).toBe("warning");
+    expect(report.checks.find((check) => check.id === "revenue-worker-auth")?.state).toBe("warning");
     expect(report.checks.find((check) => check.id === "revenue-automation-uid")?.state).toBe("warning");
-    expect(report.checks.find((check) => check.id === "revenue-weekly-kpi-worker-token")?.state).toBe(
-      "warning"
-    );
   });
 
   it("marks MCP connector checks ok when endpoint and key are provided", () => {
@@ -179,17 +181,28 @@ describe("buildRuntimePreflightReport", () => {
     process.env.LEAD_SOURCE_BUDGET_MAX_RUNTIME_SEC = "50";
     process.env.LEAD_RUNS_TASK_QUEUE = "lead-run-worker";
     process.env.LEAD_RUNS_TASK_LOCATION = "us-central1";
-    process.env.REVENUE_DAY30_WORKER_TOKEN = "token";
     process.env.REVENUE_AUTOMATION_UID = "uid-1";
-    process.env.REVENUE_WEEKLY_KPI_WORKER_TOKEN = "token-kpi";
+    process.env.REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL =
+      "revenue-automation-scheduler@leadflow-review.iam.gserviceaccount.com";
+    process.env.REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE =
+      "https://ssrleadflowreview-example-uc.a.run.app";
 
     const report = buildRuntimePreflightReport();
 
-    expect(report.checks.find((check) => check.id === "revenue-worker-token")?.state).toBe("ok");
+    expect(report.checks.find((check) => check.id === "revenue-worker-auth")?.state).toBe("ok");
     expect(report.checks.find((check) => check.id === "revenue-automation-uid")?.state).toBe("ok");
-    expect(report.checks.find((check) => check.id === "revenue-weekly-kpi-worker-token")?.state).toBe(
-      "ok"
-    );
+    expect(report.checks.some((check) => check.id === "revenue-weekly-kpi-worker-token")).toBe(false);
+  });
+
+  it("warns while revenue workers remain in the explicit legacy canary phase", () => {
+    process.env.REVENUE_AUTOMATION_UID = "uid-1";
+    process.env.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN = "true";
+    process.env.REVENUE_POS_WORKER_TOKEN = "legacy-token";
+
+    const report = buildRuntimePreflightReport();
+    const check = report.checks.find((item) => item.id === "revenue-worker-auth");
+    expect(check?.state).toBe("warning");
+    expect(check?.detail).toContain("temporary static-token canary phase");
   });
 
   it("warns when dispatch notifications are enabled but no webhook exists", () => {

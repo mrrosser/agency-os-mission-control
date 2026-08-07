@@ -84,10 +84,20 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
     hasEnv("REVENUE_DAY30_WORKER_TOKEN") ||
     hasEnv("REVENUE_DAY2_WORKER_TOKEN") ||
     hasEnv("REVENUE_DAY1_WORKER_TOKEN");
-  const hasRevenueWorkerToken =
+  const hasRevenueLegacyWorkerToken =
+    hasEnv("REVENUE_AUTOMATION_LEGACY_WORKER_TOKEN") ||
     hasEnv("REVENUE_DAY30_WORKER_TOKEN") ||
     hasEnv("REVENUE_DAY2_WORKER_TOKEN") ||
-    hasEnv("REVENUE_DAY1_WORKER_TOKEN");
+    hasEnv("REVENUE_DAY1_WORKER_TOKEN") ||
+    hasEnv("REVENUE_POS_WORKER_TOKEN") ||
+    hasEnv("REVENUE_WEEKLY_KPI_WORKER_TOKEN");
+  const hasRevenueOidcAuth =
+    hasEnv("REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL") &&
+    hasEnv("REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE");
+  const revenueLegacyCanaryEnabled = parseBoolean(
+    process.env.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN,
+    false
+  );
   const hasRevenueAutomationUid =
     hasEnv("REVENUE_AUTOMATION_UID") ||
     hasEnv("REVENUE_DAY30_UID") ||
@@ -95,7 +105,6 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
     hasEnv("REVENUE_DAY1_UID") ||
     hasEnv("VOICE_ACTIONS_DEFAULT_UID") ||
     hasEnv("SQUARE_WEBHOOK_DEFAULT_UID");
-  const hasRevenueWeeklyKpiToken = hasEnv("REVENUE_WEEKLY_KPI_WORKER_TOKEN");
   const hasSocialDraftWebhook =
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL") ||
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS") ||
@@ -238,13 +247,23 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
         : "Set LEADOPS_MCP_SERVER_URL to wire mission-control/LeadOps tools.",
     },
     {
-      id: "revenue-worker-token",
-      label: "Revenue cadence worker token",
+      id: "revenue-worker-auth",
+      label: "Revenue cadence worker authentication",
       level: "recommended",
-      state: hasRevenueWorkerToken ? "ok" : "warning",
-      detail: hasRevenueWorkerToken
-        ? "Revenue worker token configured (day30/day2/day1)."
-        : "Set REVENUE_DAY30_WORKER_TOKEN (or fallback REVENUE_DAY2_WORKER_TOKEN / REVENUE_DAY1_WORKER_TOKEN).",
+      state:
+        hasRevenueOidcAuth && hasRevenueAutomationUid
+          ? "ok"
+          : revenueLegacyCanaryEnabled && hasRevenueLegacyWorkerToken && hasRevenueAutomationUid
+            ? "warning"
+            : "warning",
+      detail:
+        hasRevenueOidcAuth && hasRevenueAutomationUid
+          ? revenueLegacyCanaryEnabled
+            ? "Revenue workers use signed OIDC; the temporary legacy canary flag still requires finalization."
+            : "Revenue workers use signed OIDC with the configured scheduler identity and audience."
+          : revenueLegacyCanaryEnabled && hasRevenueLegacyWorkerToken && hasRevenueAutomationUid
+            ? "Revenue workers are still in the temporary static-token canary phase; complete the OIDC cutover."
+            : "Set the revenue Scheduler service account, exact OIDC audience, and REVENUE_AUTOMATION_UID.",
     },
     {
       id: "revenue-automation-uid",
@@ -254,15 +273,6 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
       detail: hasRevenueAutomationUid
         ? "Revenue automation uid is configured."
         : "Set REVENUE_AUTOMATION_UID (or REVENUE_DAY30_UID / REVENUE_DAY2_UID / REVENUE_DAY1_UID fallback).",
-    },
-    {
-      id: "revenue-weekly-kpi-worker-token",
-      label: "Revenue weekly KPI worker token",
-      level: "recommended",
-      state: hasRevenueWeeklyKpiToken ? "ok" : "warning",
-      detail: hasRevenueWeeklyKpiToken
-        ? "REVENUE_WEEKLY_KPI_WORKER_TOKEN is configured."
-        : "Set REVENUE_WEEKLY_KPI_WORKER_TOKEN for /api/revenue/kpi/weekly/worker-task scheduler jobs.",
     },
     {
       id: "social-draft-worker-token",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
-import { Calendar, Plus } from "lucide-react";
+import { AlertTriangle, Calendar, CircleCheck, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -74,6 +74,49 @@ interface TimelineResponse {
   events: TimelineEvent[];
 }
 
+type DailyOutcomeStatus = "met" | "at_risk" | "missed" | "not_observed";
+
+interface DailyOutcomeResponse {
+  asOf: string;
+  timeZone: string;
+  outcomes: Array<{
+    outcomeId: string;
+    businessUnit: "rosser_nft_gallery" | "rt_solutions";
+    organizationName: string;
+    localDate: string;
+    timeZone: string;
+    asOf: string;
+    status: DailyOutcomeStatus;
+    winningKind: "meeting_booked" | "application_ready" | null;
+    evidence: Array<{
+      receiptId: string;
+      kind: "meeting_booked" | "application_ready";
+      title: string;
+      sourceUrl: string | null;
+      deadline: string | null;
+      score: number | null;
+      nextAction: string;
+      approvalRequired: boolean;
+    }>;
+    counts: {
+      verifiedMeetings: number;
+      applicationReady: number;
+      rejectedCandidates: number;
+      observedRecords: number;
+    };
+    sourceHealth: {
+      status: "observed" | "stale" | "unavailable";
+      lastObservedAt: string | null;
+      reasonCodes: string[];
+    };
+    alert: {
+      active: boolean;
+      severity: "none" | "warning" | "urgent";
+      reason: string | null;
+    };
+  }>;
+}
+
 const STAGE_COLORS: Record<CrmPipelineStage, string> = {
   lead_capture: "bg-blue-500/10 text-blue-400",
   qualification: "bg-cyan-500/10 text-cyan-300",
@@ -115,6 +158,20 @@ function formatBusinessUnitLabel(value: BusinessUnitId): string {
   return "AI CoFoundry";
 }
 
+function formatDailyOutcomeStatus(value: DailyOutcomeStatus): string {
+  if (value === "met") return "Met";
+  if (value === "at_risk") return "At risk";
+  if (value === "missed") return "Missed";
+  return "Not observed";
+}
+
+const DAILY_OUTCOME_STATUS_COLORS: Record<DailyOutcomeStatus, string> = {
+  met: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  at_risk: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  missed: "border-red-500/40 bg-red-500/10 text-red-300",
+  not_observed: "border-zinc-600 bg-zinc-800 text-zinc-300",
+};
+
 export default function CRMPage() {
   const { user } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -131,6 +188,9 @@ export default function CRMPage() {
   const timelineAbortRef = useRef<AbortController | null>(null);
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
+  const [dailyOutcomes, setDailyOutcomes] = useState<DailyOutcomeResponse | null>(null);
+  const [loadingDailyOutcomes, setLoadingDailyOutcomes] = useState(false);
+  const [dailyOutcomeError, setDailyOutcomeError] = useState<string | null>(null);
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [newLeadData, setNewLeadData] = useState({
     companyName: "",
@@ -176,8 +236,34 @@ export default function CRMPage() {
   useEffect(() => {
     if (!user) return;
     void loadCustomers();
+    void loadDailyOutcomes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  async function loadDailyOutcomes() {
+    if (!user) return;
+    setLoadingDailyOutcomes(true);
+    setDailyOutcomeError(null);
+    try {
+      const headers = await buildAuthHeaders(user);
+      const res = await fetch("/api/revenue/daily-outcomes", {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      });
+      const data = await readApiJson<DailyOutcomeResponse & { error?: string }>(res);
+      if (!res.ok) {
+        const cid = getResponseCorrelationId(res);
+        throw new Error(data.error || `Daily proof is unavailable${cid ? ` cid=${cid}` : ""}`);
+      }
+      setDailyOutcomes(data);
+    } catch (error) {
+      setDailyOutcomes(null);
+      setDailyOutcomeError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingDailyOutcomes(false);
+    }
+  }
 
   useEffect(() => {
     selectedLeadIdRef.current = selectedLeadId;
@@ -479,6 +565,114 @@ export default function CRMPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <section
+        aria-labelledby="daily-outcome-heading"
+        className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 sm:p-4"
+        data-testid="crm-daily-outcome-proof"
+      >
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 id="daily-outcome-heading" className="text-base font-semibold text-white">
+              Today&apos;s outcome proof
+            </h2>
+            <p className="text-xs text-zinc-400">
+              A discovery does not count. Success requires a confirmed meeting receipt or a complete,
+              open, application-ready opportunity.
+            </p>
+          </div>
+          <p className="text-[11px] text-zinc-500">
+            As of {dailyOutcomes ? formatTimelineDate(dailyOutcomes.asOf) : "pending"}
+            {dailyOutcomes ? ` · ${dailyOutcomes.timeZone}` : ""}
+          </p>
+        </div>
+
+        {loadingDailyOutcomes ? (
+          <p className="rounded-lg border border-zinc-800 p-4 text-sm text-zinc-500">
+            Verifying today&apos;s receipts…
+          </p>
+        ) : dailyOutcomeError ? (
+          <div className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-red-200">Proof unavailable — not counted</p>
+              <p className="break-words text-xs text-red-200/70">{dailyOutcomeError}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {(dailyOutcomes?.outcomes || []).map((outcome) => {
+              const winner =
+                outcome.evidence.find((item) => item.kind === outcome.winningKind) ||
+                outcome.evidence[0] ||
+                null;
+              return (
+                <article
+                  key={outcome.outcomeId}
+                  className="min-w-0 rounded-lg border border-zinc-800 bg-black/40 p-3"
+                  data-business-unit={outcome.businessUnit}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-sm font-semibold text-white">
+                        {outcome.organizationName}
+                      </h3>
+                      <p className="text-[11px] text-zinc-500">{outcome.localDate}</p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={DAILY_OUTCOME_STATUS_COLORS[outcome.status]}
+                    >
+                      {outcome.status === "met" ? (
+                        <CircleCheck className="mr-1 h-3 w-3" aria-hidden="true" />
+                      ) : null}
+                      {formatDailyOutcomeStatus(outcome.status)}
+                    </Badge>
+                  </div>
+
+                  {winner ? (
+                    <div className="mt-3 space-y-2">
+                      <p className="break-words text-sm text-zinc-100">{winner.title}</p>
+                      <div className="flex flex-wrap gap-1.5 text-[11px] text-zinc-400">
+                        <span>
+                          {winner.kind === "meeting_booked" ? "Confirmed meeting" : "Application ready"}
+                        </span>
+                        {winner.score !== null ? <span>· Fit {winner.score}</span> : null}
+                        {winner.deadline ? (
+                          <span>· {winner.kind === "meeting_booked" ? "Starts" : "Deadline"} {formatTimelineDate(winner.deadline)}</span>
+                        ) : null}
+                      </div>
+                      <p className="break-words text-xs text-zinc-400">{winner.nextAction}</p>
+                      {winner.sourceUrl ? (
+                        <a
+                          href={winner.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-block text-xs text-blue-300 underline underline-offset-2"
+                        >
+                          Open public source
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-3 space-y-2">
+                      <p className="text-sm text-zinc-300">
+                        {outcome.status === "not_observed"
+                          ? "No current source receipt is available for this organization."
+                          : "No qualifying receipt yet today."}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        {outcome.counts.rejectedCandidates} candidate
+                        {outcome.counts.rejectedCandidates === 1 ? "" : "s"} failed closed.
+                      </p>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-xl border border-zinc-900 bg-zinc-950/30 p-3 md:overflow-x-auto">

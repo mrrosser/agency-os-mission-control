@@ -1,24 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/revenue/kpi/weekly/worker-task/route";
 import { runWeeklyKpiRollup } from "@/lib/revenue/weekly-kpi";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 vi.mock("@/lib/revenue/weekly-kpi", () => ({
   runWeeklyKpiRollup: vi.fn(),
 }));
 
+vi.mock("@/lib/revenue/worker-auth", () => ({
+  authorizeRevenueAutomationWorker: vi.fn(),
+  resolveRevenueAutomationWorkerUid: vi.fn(),
+}));
+
 const runWeeklyKpiRollupMock = vi.mocked(runWeeklyKpiRollup);
+const authorizeWorkerMock = vi.mocked(authorizeRevenueAutomationWorker);
+const resolveWorkerUidMock = vi.mocked(resolveRevenueAutomationWorkerUid);
 
 function createContext() {
   return { params: Promise.resolve({}) };
 }
 
 describe("revenue weekly kpi worker-task route", () => {
-  const originalEnv = process.env;
-
   beforeEach(() => {
     vi.restoreAllMocks();
-    process.env = { ...originalEnv };
-    process.env.REVENUE_WEEKLY_KPI_WORKER_TOKEN = "worker-token";
+    authorizeWorkerMock.mockResolvedValue({ mode: "oidc", principalHash: "abc123def456" });
+    resolveWorkerUidMock.mockReturnValue("user-1");
     runWeeklyKpiRollupMock.mockResolvedValue({
       uid: "user-1",
       timeZone: "America/Chicago",
@@ -72,11 +81,14 @@ describe("revenue weekly kpi worker-task route", () => {
     });
   });
 
-  it("rejects missing token", async () => {
+  it("rejects requests before rollup when OIDC authorization fails", async () => {
+    authorizeWorkerMock.mockRejectedValueOnce(
+      Object.assign(new Error("Forbidden"), { status: 403 })
+    );
     const req = new Request("http://localhost/api/revenue/kpi/weekly/worker-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid: "user-1" }),
+      body: JSON.stringify({}),
     });
 
     const res = await POST(
@@ -87,17 +99,17 @@ describe("revenue weekly kpi worker-task route", () => {
 
     expect(res.status).toBe(403);
     expect(data.error).toBe("Forbidden");
+    expect(runWeeklyKpiRollupMock).not.toHaveBeenCalled();
   });
 
-  it("runs with worker token", async () => {
+  it("runs with a short-lived OIDC token and server-configured identity", async () => {
     const req = new Request("http://localhost/api/revenue/kpi/weekly/worker-task", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer worker-token",
+        Authorization: "Bearer signed-oidc-token",
       },
       body: JSON.stringify({
-        uid: "user-1",
         timeZone: "America/Chicago",
       }),
     });
@@ -110,6 +122,7 @@ describe("revenue weekly kpi worker-task route", () => {
 
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
+    expect(data.authMode).toBe("oidc");
     expect(data.report?.outcomeGates?.gates).toHaveLength(5);
     expect(data.report?.outcomeGates?.summary?.passOrWarnCount).toBe(5);
     expect(Array.isArray(data.report?.outcomeGates?.criticalGateFailures)).toBe(true);
@@ -119,5 +132,31 @@ describe("revenue weekly kpi worker-task route", () => {
       uid: "user-1",
       timeZone: "America/Chicago",
     });
+    expect(resolveWorkerUidMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it("rejects caller identity substitution before rollup", async () => {
+    resolveWorkerUidMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error("Worker uid must match the configured revenue automation identity."), {
+        status: 400,
+      });
+    });
+    const req = new Request("http://localhost/api/revenue/kpi/weekly/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer signed-oidc-token",
+      },
+      body: JSON.stringify({ uid: "other-user" }),
+    });
+
+    const res = await POST(
+      req as Parameters<typeof POST>[0],
+      createContext() as Parameters<typeof POST>[1]
+    );
+
+    expect(res.status).toBe(400);
+    expect(resolveWorkerUidMock).toHaveBeenCalledWith("other-user");
+    expect(runWeeklyKpiRollupMock).not.toHaveBeenCalled();
   });
 });

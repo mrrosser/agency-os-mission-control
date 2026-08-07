@@ -4,6 +4,11 @@ import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
 import { runDay2RevenueAutomation } from "@/lib/revenue/day2-automation";
 import { runDay30RevenueAutomation } from "@/lib/revenue/day30-automation";
 import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
+import { evaluateDailyOutcomesForRevenueWorker } from "@/lib/revenue/daily-outcome-worker";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 vi.mock("@/lib/revenue/day1-automation", () => ({
   runDay1RevenueAutomation: vi.fn(),
@@ -21,10 +26,22 @@ vi.mock("@/lib/agents/autonomy-runtime", () => ({
   resolveRuntimePause: vi.fn(),
 }));
 
+vi.mock("@/lib/revenue/daily-outcome-worker", () => ({
+  evaluateDailyOutcomesForRevenueWorker: vi.fn(),
+}));
+
+vi.mock("@/lib/revenue/worker-auth", () => ({
+  authorizeRevenueAutomationWorker: vi.fn(),
+  resolveRevenueAutomationWorkerUid: vi.fn(),
+}));
+
 const runDay1Mock = vi.mocked(runDay1RevenueAutomation);
 const runDay2Mock = vi.mocked(runDay2RevenueAutomation);
 const runDay30Mock = vi.mocked(runDay30RevenueAutomation);
 const resolveRuntimePauseMock = vi.mocked(resolveRuntimePause);
+const evaluateDailyOutcomesMock = vi.mocked(evaluateDailyOutcomesForRevenueWorker);
+const authorizeWorkerMock = vi.mocked(authorizeRevenueAutomationWorker);
+const resolveWorkerUidMock = vi.mocked(resolveRevenueAutomationWorkerUid);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -36,8 +53,13 @@ describe("revenue automation daily worker-task route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
-    process.env.REVENUE_DAY30_WORKER_TOKEN = "token-day30";
-    process.env.REVENUE_AUTOMATION_UID = "uid-revenue";
+    authorizeWorkerMock.mockResolvedValue({ mode: "oidc", principalHash: "abc123def456" });
+    resolveWorkerUidMock.mockReturnValue("uid-revenue");
+    evaluateDailyOutcomesMock.mockResolvedValue({
+      asOf: "2026-03-09T11:00:00.000Z",
+      timeZone: "America/Chicago",
+      outcomes: [],
+    });
     resolveRuntimePauseMock.mockResolvedValue({
       paused: false,
       reason: "not_paused",
@@ -157,7 +179,10 @@ describe("revenue automation daily worker-task route", () => {
     });
   });
 
-  it("rejects requests without worker token", async () => {
+  it("rejects requests when worker authentication fails", async () => {
+    authorizeWorkerMock.mockRejectedValueOnce(
+      Object.assign(new Error("Forbidden"), { status: 403 })
+    );
     const req = new Request("http://localhost/api/revenue/automation/daily/worker-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,12 +219,17 @@ describe("revenue automation daily worker-task route", () => {
     expect(data.ok).toBe(true);
     expect(data.effectiveStage).toBe("day30");
     expect(data.metadata.job_name).toBe("revenue-automation-rng");
+    expect(data.dailyOutcomeDashboard.timeZone).toBe("America/Chicago");
     expect(runDay30Mock).toHaveBeenCalledOnce();
     expect(runDay30Mock).toHaveBeenCalledWith(
       expect.objectContaining({ requireApprovalGates: true })
     );
     expect(runDay2Mock).not.toHaveBeenCalled();
     expect(runDay1Mock).not.toHaveBeenCalled();
+    expect(evaluateDailyOutcomesMock).toHaveBeenCalledOnce();
+    expect(evaluateDailyOutcomesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "uid-revenue" })
+    );
   });
 
   it("keeps approval gates enabled for an explicitly requested day2 stage", async () => {
@@ -227,6 +257,7 @@ describe("revenue automation daily worker-task route", () => {
     );
     expect(runDay30Mock).not.toHaveBeenCalled();
     expect(runDay1Mock).not.toHaveBeenCalled();
+    expect(evaluateDailyOutcomesMock).toHaveBeenCalledOnce();
   });
 
   it("runs the explicitly requested lower stage", async () => {
@@ -252,6 +283,7 @@ describe("revenue automation daily worker-task route", () => {
     expect(runDay1Mock).toHaveBeenCalledOnce();
     expect(runDay30Mock).not.toHaveBeenCalled();
     expect(runDay2Mock).not.toHaveBeenCalled();
+    expect(evaluateDailyOutcomesMock).toHaveBeenCalledOnce();
   });
 
   it("returns a successful skip receipt while globally paused", async () => {
@@ -285,5 +317,6 @@ describe("revenue automation daily worker-task route", () => {
     expect(runDay1Mock).not.toHaveBeenCalled();
     expect(runDay2Mock).not.toHaveBeenCalled();
     expect(runDay30Mock).not.toHaveBeenCalled();
+    expect(evaluateDailyOutcomesMock).not.toHaveBeenCalled();
   });
 });

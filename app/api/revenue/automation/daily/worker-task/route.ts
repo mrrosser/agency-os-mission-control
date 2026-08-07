@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ApiError, withApiHandler } from "@/lib/api/handler";
+import { withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import {
   normalizeRevenueAutomationStages,
@@ -15,6 +15,11 @@ import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
 import { runDay2RevenueAutomation } from "@/lib/revenue/day2-automation";
 import { runDay30RevenueAutomation } from "@/lib/revenue/day30-automation";
 import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
+import { evaluateDailyOutcomesForRevenueWorker } from "@/lib/revenue/daily-outcome-worker";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 const stageSchema = z.enum(["day1", "day2", "day30"]);
 
@@ -43,55 +48,6 @@ const bodySchema = z.object({
   memoryLookbackDays: z.coerce.number().int().min(1).max(180).optional(),
 });
 
-function asString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function readBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return "";
-  return auth.slice(7).trim();
-}
-
-function readConfiguredWorkerToken(): string {
-  const day30 = asString(process.env.REVENUE_DAY30_WORKER_TOKEN);
-  if (day30) return day30;
-  const day2 = asString(process.env.REVENUE_DAY2_WORKER_TOKEN);
-  if (day2) return day2;
-  return asString(process.env.REVENUE_DAY1_WORKER_TOKEN);
-}
-
-function authorizeWorker(request: Request): void {
-  const configured = readConfiguredWorkerToken();
-  if (!configured) {
-    throw new ApiError(
-      503,
-      "REVENUE_DAY30_WORKER_TOKEN is not configured (or fallback REVENUE_DAY2_WORKER_TOKEN/REVENUE_DAY1_WORKER_TOKEN)"
-    );
-  }
-  const candidate =
-    asString(request.headers.get("x-revenue-automation-token")) || readBearerToken(request);
-  if (!candidate || candidate !== configured) {
-    throw new ApiError(403, "Forbidden");
-  }
-}
-
-function resolveDefaultUid(): string {
-  const candidates = [
-    process.env.REVENUE_AUTOMATION_UID,
-    process.env.REVENUE_DAY30_UID,
-    process.env.REVENUE_DAY2_UID,
-    process.env.REVENUE_DAY1_UID,
-    process.env.VOICE_ACTIONS_DEFAULT_UID,
-    process.env.SQUARE_WEBHOOK_DEFAULT_UID,
-  ];
-  for (const candidate of candidates) {
-    const normalized = asString(candidate);
-    if (normalized) return normalized;
-  }
-  return "";
-}
-
 function metadataForRun(args: {
   businessKey: RevenueAutomationBusinessKey;
   dryRun: boolean;
@@ -118,15 +74,9 @@ function normalizedRequestedStages(
 
 export const POST = withApiHandler(
   async ({ request, correlationId, log }) => {
-    authorizeWorker(request);
+    const auth = await authorizeRevenueAutomationWorker({ request, correlationId, log });
     const body = await parseJson(request, bodySchema);
-    const uid = asString(body.uid) || resolveDefaultUid();
-    if (!uid) {
-      throw new ApiError(
-        400,
-        "Missing uid. Provide uid in request body or configure REVENUE_AUTOMATION_UID (or fallback revenue uid)."
-      );
-    }
+    const uid = resolveRevenueAutomationWorkerUid(body.uid);
 
     const pause = await resolveRuntimePause({
       uid,
@@ -159,8 +109,9 @@ export const POST = withApiHandler(
       correlationId,
     });
 
+    let result: unknown;
     if (effectiveStage === "day1") {
-      const result = await runDay1RevenueAutomation({
+      result = await runDay1RevenueAutomation({
         uid,
         templateId,
         origin,
@@ -174,20 +125,8 @@ export const POST = withApiHandler(
         followupMaxLeads: body.followupMaxLeads,
         followupSequence: body.followupSequence,
       });
-
-      return NextResponse.json({
-        ok: true,
-        businessKey: body.businessKey,
-        requestedStages,
-        effectiveStage,
-        metadata,
-        result,
-        correlationId,
-      });
-    }
-
-    if (effectiveStage === "day2") {
-      const result = await runDay2RevenueAutomation({
+    } else if (effectiveStage === "day2") {
+      result = await runDay2RevenueAutomation({
         uid,
         templateIds: [templateId],
         origin,
@@ -204,42 +143,44 @@ export const POST = withApiHandler(
         responseLoopMaxTasks: body.responseLoopMaxTasks,
         requireApprovalGates: true,
       });
-
-      return NextResponse.json({
-        ok: true,
-        businessKey: body.businessKey,
-        requestedStages,
-        effectiveStage,
-        metadata,
-        result,
+    } else {
+      result = await runDay30RevenueAutomation({
+        uid,
+        templateIds: [templateId],
+        origin,
         correlationId,
+        log,
+        dryRun: body.dryRun,
+        forceRun: body.forceRun,
+        timeZone: body.timeZone,
+        autoQueueFollowups: body.autoQueueFollowups,
+        followupDelayHours: body.followupDelayHours,
+        followupMaxLeads: body.followupMaxLeads,
+        followupSequence: body.followupSequence,
+        processDueResponses: body.processDueResponses,
+        responseLoopMaxTasks: body.responseLoopMaxTasks,
+        requireApprovalGates: true,
+        runCloserQueue: body.runCloserQueue,
+        runRevenueMemory: body.runRevenueMemory,
+        runWeeklyKpi: body.runWeeklyKpi ?? !body.dueOnly,
+        runServiceLab: body.runServiceLab ?? !body.dueOnly,
+        serviceCandidateLimit: body.serviceCandidateLimit,
+        closerQueueLookbackHours: body.closerQueueLookbackHours,
+        closerQueueLimit: body.closerQueueLimit,
+        memoryLookbackDays: body.memoryLookbackDays,
       });
     }
 
-    const result = await runDay30RevenueAutomation({
+    log.info("revenue.automation.daily.completed", {
+      correlationId,
+      businessKey: body.businessKey,
+      effectiveStage,
+      authMode: auth.mode,
+    });
+    const dailyOutcomeDashboard = await evaluateDailyOutcomesForRevenueWorker({
       uid,
-      templateIds: [templateId],
-      origin,
       correlationId,
       log,
-      dryRun: body.dryRun,
-      forceRun: body.forceRun,
-      timeZone: body.timeZone,
-      autoQueueFollowups: body.autoQueueFollowups,
-      followupDelayHours: body.followupDelayHours,
-      followupMaxLeads: body.followupMaxLeads,
-      followupSequence: body.followupSequence,
-      processDueResponses: body.processDueResponses,
-      responseLoopMaxTasks: body.responseLoopMaxTasks,
-      requireApprovalGates: true,
-      runCloserQueue: body.runCloserQueue,
-      runRevenueMemory: body.runRevenueMemory,
-      runWeeklyKpi: body.runWeeklyKpi ?? !body.dueOnly,
-      runServiceLab: body.runServiceLab ?? !body.dueOnly,
-      serviceCandidateLimit: body.serviceCandidateLimit,
-      closerQueueLookbackHours: body.closerQueueLookbackHours,
-      closerQueueLimit: body.closerQueueLimit,
-      memoryLookbackDays: body.memoryLookbackDays,
     });
 
     return NextResponse.json({
@@ -249,6 +190,7 @@ export const POST = withApiHandler(
       effectiveStage,
       metadata,
       result,
+      dailyOutcomeDashboard,
       correlationId,
     });
   },

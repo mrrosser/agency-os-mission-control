@@ -27,6 +27,7 @@ Replace the impossible Cloud Run filesystem-manifest check with a non-model, Goo
 - [x] Replace filesystem-manifest reads in the control-plane route.
 - [x] Report operational, degraded, or offline from receipt age and critical service state.
 - [x] Add focused unit and route smoke coverage.
+- [x] Persist the three non-secret heartbeat settings across Firebase/Cloud Run release revisions.
 - [x] Complete lint, typecheck, full unit/smoke, and production build.
 - [ ] Merge and deploy Agency OS with its OIDC environment allowlist.
 - [ ] Install the merged AI_HELL_MARY publisher and timer on the VM.

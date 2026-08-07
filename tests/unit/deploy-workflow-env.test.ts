@@ -102,6 +102,41 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain('LIVE_CHANNEL_NAME" = "$EXPECTED_LIVE_CHANNEL"');
   });
 
+  it("persists the OpenClaw OIDC heartbeat configuration on every production revision", () => {
+    const source = readFileSync(
+      join(process.cwd(), ".github/workflows/firebase-hosting-merge.yml"),
+      "utf8"
+    );
+
+    const audienceFallback = source.indexOf(
+      'HEARTBEAT_OIDC_AUDIENCES="$SERVICE_URL"'
+    );
+    const audienceUpdate = source.indexOf(
+      'append_env_update "OPENCLAW_HEARTBEAT_OIDC_AUDIENCES" "$HEARTBEAT_OIDC_AUDIENCES"'
+    );
+    const publisherUpdate = source.indexOf(
+      'append_env_update "OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS" "$OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS"'
+    );
+    const runtimeUpdate = source.indexOf(
+      'append_env_update "OPENCLAW_HEARTBEAT_RUNTIME_ID" "$OPENCLAW_HEARTBEAT_RUNTIME_ID"'
+    );
+    const revisionUpdate = source.indexOf(
+      'gcloud run services update "$FIREBASE_SSR_SERVICE"'
+    );
+
+    expect(source).toContain(
+      "openclaw-gateway@vibecheck-ik969.iam.gserviceaccount.com"
+    );
+    expect(source).toContain(
+      "OPENCLAW_HEARTBEAT_RUNTIME_ID: ${{ vars.OPENCLAW_HEARTBEAT_RUNTIME_ID || 'openclaw-gateway' }}"
+    );
+    expect(audienceFallback).toBeGreaterThan(-1);
+    expect(audienceUpdate).toBeGreaterThan(audienceFallback);
+    expect(publisherUpdate).toBeGreaterThan(audienceUpdate);
+    expect(runtimeUpdate).toBeGreaterThan(publisherUpdate);
+    expect(revisionUpdate).toBeGreaterThan(runtimeUpdate);
+  });
+
   it("checks the deployed control-plane knowledge pack and removes its synthetic user", () => {
     const source = readFileSync(
       join(process.cwd(), "scripts/post-deploy-smoke.mjs"),

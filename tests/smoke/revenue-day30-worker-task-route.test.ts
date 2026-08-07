@@ -18,6 +18,10 @@ describe("revenue day30 worker-task route", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
+    delete process.env.REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL;
+    delete process.env.REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE;
+    process.env.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN = "true";
+    process.env.REVENUE_AUTOMATION_UID = "user-1";
     process.env.REVENUE_DAY30_WORKER_TOKEN = "token-day30";
 
     runDay30Mock.mockResolvedValue({

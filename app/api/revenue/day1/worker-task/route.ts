@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ApiError, withApiHandler } from "@/lib/api/handler";
+import { withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 const bodySchema = z.object({
-  uid: z.string().trim().min(1).max(128),
+  uid: z.string().trim().min(1).max(128).optional(),
   templateId: z.string().trim().min(1).max(120),
   dryRun: z.boolean().optional(),
   forceRun: z.boolean().optional(),
@@ -17,32 +21,15 @@ const bodySchema = z.object({
   followupSequence: z.coerce.number().int().min(1).max(10).optional(),
 });
 
-function readBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return "";
-  return auth.slice(7).trim();
-}
-
-function authorizeWorker(request: Request): void {
-  const configured = String(process.env.REVENUE_DAY1_WORKER_TOKEN || "").trim();
-  if (!configured) {
-    throw new ApiError(503, "REVENUE_DAY1_WORKER_TOKEN is not configured");
-  }
-  const candidate =
-    String(request.headers.get("x-revenue-day1-token") || "").trim() || readBearerToken(request);
-  if (!candidate || candidate !== configured) {
-    throw new ApiError(403, "Forbidden");
-  }
-}
-
 export const POST = withApiHandler(
   async ({ request, correlationId, log }) => {
-    authorizeWorker(request);
+    const auth = await authorizeRevenueAutomationWorker({ request, correlationId, log });
     const body = await parseJson(request, bodySchema);
+    const uid = resolveRevenueAutomationWorkerUid(body.uid);
     const origin = request.nextUrl?.origin || new URL(request.url).origin;
 
     const result = await runDay1RevenueAutomation({
-      uid: body.uid,
+      uid,
       templateId: body.templateId,
       origin,
       correlationId,
@@ -60,6 +47,7 @@ export const POST = withApiHandler(
     return NextResponse.json({
       ok: true,
       ...result,
+      authMode: auth.mode,
       correlationId,
     });
   },

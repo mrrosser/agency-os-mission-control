@@ -4,6 +4,7 @@ import {
   buildDailyOutcomeId,
   evaluateDailyOutcome,
   localDateKey,
+  mergeDailyOutcomeForPersistence,
   toPublicDailyOutcome,
 } from "@/lib/revenue/daily-outcome";
 
@@ -35,6 +36,9 @@ function readyOpportunity(overrides: Record<string, unknown> = {}) {
     businessIdentityId: rosser.businessIdentityId,
     recordType: "opportunity",
     workflowStatus: "ready",
+    applicationReady: true,
+    executionPolicy: "auto_run",
+    profileEvidenceHash: `sha256:${"b".repeat(64)}`,
     title: "Public art commission",
     officialUrl: "https://example.org/open-call",
     deadline: "2026-08-21",
@@ -129,6 +133,9 @@ describe("daily revenue outcome proof", () => {
     ["unknown deadline", { deadline: null }, "deadline_unknown"],
     ["missing requirement", { missingRequirementKeys: ["portfolio"] }, "missing_requirements"],
     ["unverified requirements", { requirementsVerified: false }, "requirements_unverified"],
+    ["legacy workflow-only readiness", { applicationReady: false }, "workflow_not_ready"],
+    ["review-required policy", { executionPolicy: "review_required" }, "workflow_not_ready"],
+    ["missing profile evidence", { profileEvidenceHash: null }, "profile_evidence_missing_or_stale"],
     ["exclusion", { exclusions: ["student_only"] }, "has_exclusions"],
     ["low fit", { fitScore: 79 }, "fit_below_threshold"],
     ["missing URL", { officialUrl: null }, "missing_public_url"],
@@ -220,6 +227,62 @@ describe("daily revenue outcome proof", () => {
     expect(beforeCutoff.status).toBe("at_risk");
     expect(afterCutoff.status).toBe("missed");
     expect(noObservation.status).toBe("not_observed");
+  });
+
+  it("preserves a verified daily win while exposing a later source outage", () => {
+    const met = evaluateDailyOutcome({
+      organization: rosser,
+      asOf,
+      canonicalRecords: [readyOpportunity()],
+    });
+    const degraded = evaluateDailyOutcome({
+      organization: rosser,
+      asOf: new Date("2026-08-07T18:00:00.000Z"),
+      unavailableSourceCodes: ["mission_control_records_unavailable"],
+    });
+
+    const merged = mergeDailyOutcomeForPersistence(met, degraded);
+
+    expect(merged.status).toBe("met");
+    expect(merged.winningKind).toBe("application_ready");
+    expect(merged.evidence).toEqual(met.evidence);
+    expect(merged.sourceHealth.status).toBe("unavailable");
+    expect(merged.alert).toMatchObject({ active: true, severity: "warning" });
+    expect(merged.rejectionReasonCodes).toContain("latest_evaluation_not_observed");
+  });
+
+  it("reports any critical source read failure even when another source has current proof", () => {
+    const partial = evaluateDailyOutcome({
+      organization: rosser,
+      asOf,
+      canonicalRecords: [readyOpportunity()],
+      unavailableSourceCodes: ["mission_control_execution_receipts_unavailable"],
+    });
+
+    expect(partial.status).toBe("met");
+    expect(partial.sourceHealth).toMatchObject({
+      status: "unavailable",
+      reasonCodes: ["mission_control_execution_receipts_unavailable"],
+    });
+    expect(partial.alert).toMatchObject({ active: true, severity: "urgent" });
+  });
+
+  it("does not preserve an unvalidated or cross-outcome stored met marker", () => {
+    const incoming = evaluateDailyOutcome({ organization: rosser, asOf });
+    const forged = {
+      ...incoming,
+      status: "met",
+      winningKind: "application_ready",
+      evidence: [{ receiptId: "forged" }],
+    };
+
+    expect(mergeDailyOutcomeForPersistence(forged, incoming)).toEqual(incoming);
+    expect(
+      mergeDailyOutcomeForPersistence(
+        { ...forged, outcomeId: "another-outcome" },
+        incoming
+      )
+    ).toEqual(incoming);
   });
 
   it("removes internal workspace/entity/provider identifiers from the public projection", () => {

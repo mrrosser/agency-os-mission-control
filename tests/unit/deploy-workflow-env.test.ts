@@ -81,9 +81,18 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain(
       '--to-revisions="$PREVIOUS_LIVE_REVISION=100"'
     );
+    expect(source).toContain(
+      'ROLLBACK_TAGS="$PREVIOUS_LIVE_REWRITE_TAG=$PREVIOUS_LIVE_REVISION"'
+    );
+    expect(source).toContain(
+      'ROLLBACK_VERIFIED_TAG_REVISION" != "$PREVIOUS_LIVE_REVISION"'
+    );
     expect(source).toContain("trap rollback_runtime EXIT");
     expect(source).toContain("TRAFFIC_SWITCHED=0");
-    expect(source).toContain('TRAFFIC_SWITCHED" != "1"');
+    expect(source).toContain('TRAFFIC_SWITCHED" = "1"');
+    expect(source.indexOf('ROLLBACK_TAGS="$PREVIOUS_LIVE_REWRITE_TAG=$PREVIOUS_LIVE_REVISION"')).toBeLessThan(
+      source.indexOf('ENCODED_ROLLBACK_VERSION=')
+    );
     expect(source).toContain("SMOKE_BASE_URL: ${{ env.SMOKE_BASE_URL }}");
     expect(source).toContain("firebasehosting.googleapis.com/v1beta1/sites/");
     expect(source).toContain('x-goog-user-project: $FIREBASE_PROJECT_ID');
@@ -135,6 +144,147 @@ describe("Firebase deployment environment propagation", () => {
     expect(publisherUpdate).toBeGreaterThan(audienceUpdate);
     expect(runtimeUpdate).toBeGreaterThan(publisherUpdate);
     expect(revisionUpdate).toBeGreaterThan(runtimeUpdate);
+  });
+
+  it("pins the exact revenue OIDC contract and timeout on every production candidate", () => {
+    const source = readFileSync(
+      join(process.cwd(), ".github/workflows/firebase-hosting-merge.yml"),
+      "utf8"
+    );
+
+    const serviceUrlLookup = source.indexOf(
+      'SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE"'
+    );
+    const canonicalServiceAccount = source.indexOf(
+      'EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT="revenue-automation-scheduler@${FIREBASE_PROJECT_ID}.iam.gserviceaccount.com"'
+    );
+    const audienceDerivation = source.indexOf(
+      'REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE="$SERVICE_URL"'
+    );
+    const schedulerUpdate = source.indexOf(
+      'append_env_update "REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL"'
+    );
+    const audienceUpdate = source.indexOf(
+      'append_env_update "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE"'
+    );
+    const uidUpdate = source.indexOf(
+      'append_env_update "REVENUE_AUTOMATION_UID"'
+    );
+    const legacyFlagUpdate = source.indexOf(
+      'append_env_update "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN"'
+    );
+    const revisionUpdate = source.indexOf(
+      'gcloud run services update "$FIREBASE_SSR_SERVICE"'
+    );
+    const revisionState = source.indexOf(
+      'RUNTIME_REVISION_STATE="$(gcloud run revisions describe'
+    );
+    const exactVerification = source.indexOf(
+      'Runtime revision failed the exact revenue OIDC configuration contract.'
+    );
+    const candidateTag = source.indexOf(
+      '--update-tags="$RELEASE_TAG=$RUNTIME_REVISION"'
+    );
+
+    expect(source).toContain(
+      "REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL: ${{ vars.REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL || '' }}"
+    );
+    expect(source).toContain(
+      "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE: ${{ vars.REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE || '' }}"
+    );
+    expect(source).toContain(
+      "REVENUE_AUTOMATION_UID: ${{ secrets.REVENUE_AUTOMATION_UID || '' }}"
+    );
+    expect(source).toContain(
+      "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN: ${{ vars.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN || 'true' }}"
+    );
+    expect(source).toContain(
+      '[[ ! "$SERVICE_URL" =~ ^https://[a-z0-9.-]+\\.run\\.app$ ]]'
+    );
+    expect(source).toContain(
+      '[ "$REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE" != "$SERVICE_URL" ]'
+    );
+    expect(source).toContain(
+      '[ "$REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL" != "$EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT" ]'
+    );
+    expect(source).toContain(
+      'if [ -z "$REVENUE_AUTOMATION_UID" ]; then'
+    );
+    expect(source).toContain("--timeout 900s");
+    expect(source).toContain(
+      'RUNTIME_TIMEOUT_SECONDS="$(jq -r \'.spec.timeoutSeconds // empty | tostring\''
+    );
+    expect(source).toContain('[ "$RUNTIME_TIMEOUT_SECONDS" != "900" ]');
+    expect(source).not.toContain("echo \"$REVENUE_AUTOMATION_UID\"");
+
+    expect(serviceUrlLookup).toBeGreaterThan(-1);
+    expect(canonicalServiceAccount).toBeGreaterThan(serviceUrlLookup);
+    expect(audienceDerivation).toBeGreaterThan(canonicalServiceAccount);
+    expect(schedulerUpdate).toBeGreaterThan(audienceDerivation);
+    expect(audienceUpdate).toBeGreaterThan(schedulerUpdate);
+    expect(uidUpdate).toBeGreaterThan(audienceUpdate);
+    expect(legacyFlagUpdate).toBeGreaterThan(uidUpdate);
+    expect(revisionUpdate).toBeGreaterThan(legacyFlagUpdate);
+    expect(revisionState).toBeGreaterThan(revisionUpdate);
+    expect(exactVerification).toBeGreaterThan(revisionState);
+    expect(candidateTag).toBeGreaterThan(exactVerification);
+  });
+
+  it("removes and verifies every legacy revenue token mapping only after final cutover", () => {
+    const source = readFileSync(
+      join(process.cwd(), ".github/workflows/firebase-hosting-merge.yml"),
+      "utf8"
+    );
+    const legacyNames = [
+      "REVENUE_AUTOMATION_LEGACY_WORKER_TOKEN",
+      "REVENUE_DAY1_WORKER_TOKEN",
+      "REVENUE_DAY2_WORKER_TOKEN",
+      "REVENUE_DAY30_WORKER_TOKEN",
+      "REVENUE_POS_WORKER_TOKEN",
+      "REVENUE_WEEKLY_KPI_WORKER_TOKEN",
+    ];
+
+    const finalCutover = source.indexOf(
+      'if [ "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" = "false" ]; then'
+    );
+    const valueRemoval = source.indexOf(
+      'RUNTIME_CONFIG_ARGS+=("--remove-env-vars=$REMOVE_ENV_CSV")'
+    );
+    const secretRemoval = source.indexOf(
+      'RUNTIME_CONFIG_ARGS+=("--remove-secrets=$REMOVE_SECRET_CSV")'
+    );
+    const revisionUpdate = source.indexOf(
+      'gcloud run services update "$FIREBASE_SSR_SERVICE"'
+    );
+    const absenceVerification = source.indexOf(
+      "Runtime revision still contains a legacy revenue token mapping."
+    );
+
+    for (const name of legacyNames) {
+      expect(source).toContain(`            ${name}`);
+    }
+    expect(source).toContain(
+      '.spec.template.spec.containers[0].env[]? | select(.name == $name and .valueFrom != null)'
+    );
+    expect(source).toContain(
+      '.spec.containers[0].env[]? | select(.name == $name)'
+    );
+    expect(finalCutover).toBeGreaterThan(-1);
+    expect(valueRemoval).toBeGreaterThan(finalCutover);
+    expect(secretRemoval).toBeGreaterThan(valueRemoval);
+    expect(revisionUpdate).toBeGreaterThan(secretRemoval);
+    expect(absenceVerification).toBeGreaterThan(revisionUpdate);
+    expect(source).toContain(
+      "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN: ${{ vars.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN || 'true' }}"
+    );
+    expect(source).toContain('--remove-tags="$REMOVE_TAGS_CSV"');
+    expect(source).toContain(
+      'select(.tag != null and .tag != $keep) | .tag'
+    );
+    expect(source).toContain('LEGACY_PUBLIC_TAG_COUNT" != "0"');
+    expect(source.indexOf('--remove-tags="$REMOVE_TAGS_CSV"')).toBeGreaterThan(
+      source.indexOf("hosting:clone")
+    );
   });
 
   it("checks the deployed control-plane knowledge pack and removes its synthetic user", () => {

@@ -1,4 +1,4 @@
-﻿name: Revenue Weekly KPI
+name: Revenue Weekly KPI
 
 on:
   schedule:
@@ -13,6 +13,11 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: revenue-weekly-kpi
+  cancel-in-progress: false
 
 jobs:
   weekly-kpi:
@@ -25,11 +30,53 @@ jobs:
         with:
           node-version: 22
 
+      - name: Validate exact OIDC contract
+        id: config
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          REVENUE_AUTOMATION_SERVICE_URL: ${{ vars.REVENUE_AUTOMATION_SERVICE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GCP_WIF_PROVIDER" ]; then
+            echo "Missing GCP_WIF_PROVIDER repository variable." >&2
+            exit 1
+          fi
+          node -e '
+            const projectId = process.env.GCP_PROJECT_ID || "";
+            const provider = process.env.GCP_WIF_PROVIDER || "";
+            const value = process.env.REVENUE_AUTOMATION_SERVICE_URL || "";
+            const url = new URL(value);
+            if (!/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(projectId)) {
+              throw new Error("GCP_PROJECT_ID is invalid.");
+            }
+            if (!/^projects\/[0-9]+\/locations\/global\/workloadIdentityPools\/[a-z0-9-]+\/providers\/[a-z0-9-]+$/.test(provider)) {
+              throw new Error("GCP_WIF_PROVIDER must be a full Workload Identity Provider resource name.");
+            }
+            if (url.protocol !== "https:" || !url.hostname.endsWith(".run.app") || url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) {
+              throw new Error("REVENUE_AUTOMATION_SERVICE_URL must be an exact HTTPS Cloud Run service origin.");
+            }
+          '
+          SERVICE_ACCOUNT="revenue-automation-scheduler@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          printf 'service_account=%s\n' "$SERVICE_ACCOUNT" >> "$GITHUB_OUTPUT"
+          printf 'service_url=%s\n' "${REVENUE_AUTOMATION_SERVICE_URL%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint short-lived Google OIDC token
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ steps.config.outputs.service_account }}
+          token_format: id_token
+          id_token_audience: ${{ steps.config.outputs.service_url }}
+          id_token_include_email: true
+          create_credentials_file: false
+
       - name: Trigger weekly KPI rollup
         env:
-          KPI_BASE_URL: ${{ secrets.REVENUE_WEEKLY_KPI_BASE_URL }}
-          REVENUE_WEEKLY_KPI_WORKER_TOKEN: ${{ secrets.REVENUE_WEEKLY_KPI_WORKER_TOKEN }}
-          REVENUE_WEEKLY_KPI_UID: ${{ secrets.REVENUE_WEEKLY_KPI_UID }}
+          REVENUE_AUTOMATION_SERVICE_URL: ${{ steps.config.outputs.service_url }}
+          REVENUE_AUTOMATION_WORKER_OIDC_TOKEN: ${{ steps.auth.outputs.id_token }}
           REVENUE_KPI_TIMEZONE: ${{ vars.REVENUE_KPI_TIMEZONE || 'America/Chicago' }}
           REVENUE_KPI_WEEK_START_DATE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.week_start_date || '' }}
         run: node scripts/revenue-weekly-kpi-run.mjs

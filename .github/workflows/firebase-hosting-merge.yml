@@ -155,6 +155,12 @@ jobs:
           OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS: ${{ vars.OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS || 'openclaw-gateway@vibecheck-ik969.iam.gserviceaccount.com' }}
           OPENCLAW_HEARTBEAT_RUNTIME_ID: ${{ vars.OPENCLAW_HEARTBEAT_RUNTIME_ID || 'openclaw-gateway' }}
           AGENT_ACTION_ALLOWED_UIDS: ${{ secrets.AGENT_ACTION_ALLOWED_UIDS || '' }}
+          REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL: ${{ vars.REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL || '' }}
+          REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE: ${{ vars.REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE || '' }}
+          REVENUE_AUTOMATION_UID: ${{ secrets.REVENUE_AUTOMATION_UID || '' }}
+          # Phase 1 is deliberately the default. Set the repository variable to false
+          # only after every revenue scheduler has passed its OIDC canary.
+          REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN: ${{ vars.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN || 'true' }}
         run: |
           set -euo pipefail
           SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
@@ -165,6 +171,31 @@ jobs:
             echo "Unable to resolve Cloud Run service URL for $FIREBASE_SSR_SERVICE."
             exit 1
           fi
+          if [[ ! "$SERVICE_URL" =~ ^https://[a-z0-9.-]+\.run\.app$ ]]; then
+            echo "Cloud Run status.url is not an HTTPS run.app service origin."
+            exit 1
+          fi
+          EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT="revenue-automation-scheduler@${FIREBASE_PROJECT_ID}.iam.gserviceaccount.com"
+          if [ -n "$REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL" ] && \
+             [ "$REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL" != "$EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT" ]; then
+            echo "Revenue scheduler service-account configuration is not canonical for this project."
+            exit 1
+          fi
+          if [ -n "$REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE" ] && \
+             [ "$REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE" != "$SERVICE_URL" ]; then
+            echo "Revenue worker OIDC audience must exactly match Cloud Run status.url."
+            exit 1
+          fi
+          if [ -z "$REVENUE_AUTOMATION_UID" ]; then
+            echo "REVENUE_AUTOMATION_UID GitHub secret is required for production deployment."
+            exit 1
+          fi
+          case "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" in
+            true|false) ;;
+            *) echo "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN must be exactly true or false."; exit 1 ;;
+          esac
+          REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL="$EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT"
+          REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE="$SERVICE_URL"
           SERVICE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
@@ -219,8 +250,44 @@ jobs:
           append_env_update "OPENCLAW_HEARTBEAT_OIDC_AUDIENCES" "$HEARTBEAT_OIDC_AUDIENCES"
           append_env_update "OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS" "$OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS"
           append_env_update "OPENCLAW_HEARTBEAT_RUNTIME_ID" "$OPENCLAW_HEARTBEAT_RUNTIME_ID"
+          append_env_update "REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL" "$REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL"
+          append_env_update "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE" "$REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE"
+          append_env_update "REVENUE_AUTOMATION_UID" "$REVENUE_AUTOMATION_UID"
+          append_env_update "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
+          RUNTIME_CONFIG_ARGS=()
+          LEGACY_REVENUE_TOKEN_NAMES=(
+            REVENUE_AUTOMATION_LEGACY_WORKER_TOKEN
+            REVENUE_DAY1_WORKER_TOKEN
+            REVENUE_DAY2_WORKER_TOKEN
+            REVENUE_DAY30_WORKER_TOKEN
+            REVENUE_POS_WORKER_TOKEN
+            REVENUE_WEEKLY_KPI_WORKER_TOKEN
+          )
+          if [ "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" = "false" ]; then
+            LEGACY_ENV_VALUES_TO_REMOVE=()
+            LEGACY_SECRET_MAPPINGS_TO_REMOVE=()
+            for name in "${LEGACY_REVENUE_TOKEN_NAMES[@]}"; do
+              if jq -e --arg name "$name" \
+                '.spec.template.spec.containers[0].env[]? | select(.name == $name and .valueFrom != null)' \
+                <<< "$SERVICE_STATE" >/dev/null; then
+                LEGACY_SECRET_MAPPINGS_TO_REMOVE+=("$name")
+              elif jq -e --arg name "$name" \
+                '.spec.template.spec.containers[0].env[]? | select(.name == $name)' \
+                <<< "$SERVICE_STATE" >/dev/null; then
+                LEGACY_ENV_VALUES_TO_REMOVE+=("$name")
+              fi
+            done
+            if [ "${#LEGACY_ENV_VALUES_TO_REMOVE[@]}" -gt 0 ]; then
+              REMOVE_ENV_CSV="$(IFS=,; echo "${LEGACY_ENV_VALUES_TO_REMOVE[*]}")"
+              RUNTIME_CONFIG_ARGS+=("--remove-env-vars=$REMOVE_ENV_CSV")
+            fi
+            if [ "${#LEGACY_SECRET_MAPPINGS_TO_REMOVE[@]}" -gt 0 ]; then
+              REMOVE_SECRET_CSV="$(IFS=,; echo "${LEGACY_SECRET_MAPPINGS_TO_REMOVE[*]}")"
+              RUNTIME_CONFIG_ARGS+=("--remove-secrets=$REMOVE_SECRET_CSV")
+            fi
+          fi
           RUNTIME_SUFFIX="release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           RUNTIME_REVISION="${FIREBASE_SSR_SERVICE}-${RUNTIME_SUFFIX}"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
@@ -228,9 +295,11 @@ jobs:
             --region "$FIREBASE_REGION" \
             --image "$DEPLOY_IMAGE" \
             --memory 512Mi \
+            --timeout 900s \
             --no-traffic \
             --revision-suffix "$RUNTIME_SUFFIX" \
             --update-env-vars "^##^$ENV_UPDATES" \
+            "${RUNTIME_CONFIG_ARGS[@]}" \
             --quiet
           RUNTIME_REVISION_STATE="$(gcloud run revisions describe "$RUNTIME_REVISION" \
             --project "$FIREBASE_PROJECT_ID" \
@@ -246,6 +315,30 @@ jobs:
             <<< "$RUNTIME_REVISION_STATE" >/dev/null; then
             echo "Runtime revision is missing the Agent Nexus allowlist setting."
             exit 1
+          fi
+          RUNTIME_REVENUE_SCHEDULER_SERVICE_ACCOUNT="$(jq -r '[.spec.containers[0].env[]? | select(.name == "REVENUE_AUTOMATION_SCHEDULER_SERVICE_ACCOUNT_EMAIL")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_REVENUE_OIDC_AUDIENCE="$(jq -r '[.spec.containers[0].env[]? | select(.name == "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_REVENUE_UID="$(jq -r '[.spec.containers[0].env[]? | select(.name == "REVENUE_AUTOMATION_UID")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_REVENUE_LEGACY_FLAG="$(jq -r '[.spec.containers[0].env[]? | select(.name == "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_TIMEOUT_SECONDS="$(jq -r '.spec.timeoutSeconds // empty | tostring' <<< "$RUNTIME_REVISION_STATE")"
+          if [ "$RUNTIME_REVENUE_SCHEDULER_SERVICE_ACCOUNT" != "$EXPECTED_REVENUE_SCHEDULER_SERVICE_ACCOUNT" ] || \
+             [ "$RUNTIME_REVENUE_OIDC_AUDIENCE" != "$SERVICE_URL" ] || \
+             [ "$RUNTIME_REVENUE_UID" != "$REVENUE_AUTOMATION_UID" ] || \
+             [ "$RUNTIME_REVENUE_LEGACY_FLAG" != "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" ] || \
+             [ "$RUNTIME_TIMEOUT_SECONDS" != "900" ]; then
+            unset RUNTIME_REVENUE_UID
+            echo "Runtime revision failed the exact revenue OIDC configuration contract."
+            exit 1
+          fi
+          unset RUNTIME_REVENUE_UID
+          if [ "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" = "false" ]; then
+            for name in "${LEGACY_REVENUE_TOKEN_NAMES[@]}"; do
+              if jq -e --arg name "$name" '.spec.containers[0].env[]? | select(.name == $name)' \
+                <<< "$RUNTIME_REVISION_STATE" >/dev/null; then
+                echo "Runtime revision still contains a legacy revenue token mapping."
+                exit 1
+              fi
+            done
           fi
           RELEASE_TAG="$RUNTIME_SUFFIX"
           gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
@@ -289,6 +382,7 @@ jobs:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           NPM_CONFIG_PRODUCTION: "true"
           NODE_ENV: "production"
+          REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN: ${{ vars.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN || 'true' }}
         run: |
           set -euo pipefail
           PROMOTION_COMPLETE=0
@@ -297,6 +391,7 @@ jobs:
           ACCESS_TOKEN=""
           PREVIOUS_LIVE_HOSTING_RELEASE=""
           PREVIOUS_LIVE_HOSTING_VERSION=""
+          PREVIOUS_LIVE_REWRITE_TAG=""
           REFRESHED_HOSTING_RELEASE=""
           REFRESHED_HOSTING_VERSION=""
           get_hosting_channel() {
@@ -309,6 +404,49 @@ jobs:
           rollback_runtime() {
             if [ "$PROMOTION_COMPLETE" = "1" ]; then
               return
+            fi
+            if [ "$TRAFFIC_SWITCHED" = "1" ] && [ -n "$PREVIOUS_LIVE_REVISION" ]; then
+              ROLLBACK_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+                --project "$FIREBASE_PROJECT_ID" \
+                --region "$FIREBASE_REGION" \
+                --format=json 2>/dev/null || true)"
+              ROLLBACK_LIVE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' \
+                <<< "$ROLLBACK_STATE" 2>/dev/null || true)"
+              if [ "$ROLLBACK_LIVE_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
+                echo "Live traffic changed after this workflow switched it; refusing to overwrite the newer routing state."
+                return
+              fi
+              if [ -z "$PREVIOUS_LIVE_REWRITE_TAG" ]; then
+                echo "The prior Firebase Hosting rewrite tag is unavailable; refusing an incomplete rollback."
+                return
+              fi
+              ROLLBACK_TAGS="$PREVIOUS_LIVE_REWRITE_TAG=$PREVIOUS_LIVE_REVISION"
+              if [ "$PREVIOUS_LIVE_REWRITE_TAG" != "sm-candidate" ]; then
+                ROLLBACK_TAGS="$ROLLBACK_TAGS,sm-candidate=$PREVIOUS_LIVE_REVISION"
+              fi
+              echo "Promotion failed; restoring Cloud Run traffic and the prior Hosting rewrite tag."
+              if ! gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
+                --project "$FIREBASE_PROJECT_ID" \
+                --region "$FIREBASE_REGION" \
+                --to-revisions="$PREVIOUS_LIVE_REVISION=100" \
+                --update-tags="$ROLLBACK_TAGS" \
+                --quiet; then
+                echo "Cloud Run rollback failed; refusing to restore Hosting to a tag that may be unavailable."
+                return
+              fi
+              ROLLBACK_VERIFIED_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+                --project "$FIREBASE_PROJECT_ID" \
+                --region "$FIREBASE_REGION" \
+                --format=json 2>/dev/null || true)"
+              ROLLBACK_VERIFIED_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' \
+                <<< "$ROLLBACK_VERIFIED_STATE" 2>/dev/null || true)"
+              ROLLBACK_VERIFIED_TAG_REVISION="$(jq -r --arg tag "$PREVIOUS_LIVE_REWRITE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+                <<< "$ROLLBACK_VERIFIED_STATE" 2>/dev/null || true)"
+              if [ "$ROLLBACK_VERIFIED_REVISION" != "$PREVIOUS_LIVE_REVISION" ] || \
+                 [ "$ROLLBACK_VERIFIED_TAG_REVISION" != "$PREVIOUS_LIVE_REVISION" ]; then
+                echo "Cloud Run rollback postconditions failed; refusing to restore the prior Hosting version."
+                return
+              fi
             fi
             if [ "$HOSTING_CLONE_STARTED" = "1" ] && \
                [ -n "$ACCESS_TOKEN" ] && \
@@ -333,26 +471,6 @@ jobs:
                 echo "Live Hosting changed to an unrelated version; refusing to overwrite the newer Hosting state."
               fi
             fi
-            if [ "$TRAFFIC_SWITCHED" != "1" ] || [ -z "$PREVIOUS_LIVE_REVISION" ]; then
-              return
-            fi
-            ROLLBACK_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
-              --project "$FIREBASE_PROJECT_ID" \
-              --region "$FIREBASE_REGION" \
-              --format=json 2>/dev/null || true)"
-            ROLLBACK_LIVE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' \
-              <<< "$ROLLBACK_STATE" 2>/dev/null || true)"
-            if [ "$ROLLBACK_LIVE_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
-              echo "Live traffic changed after this workflow switched it; refusing to overwrite the newer routing state."
-              return
-            fi
-            echo "Promotion failed; restoring Cloud Run traffic to $PREVIOUS_LIVE_REVISION."
-            gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
-              --project "$FIREBASE_PROJECT_ID" \
-              --region "$FIREBASE_REGION" \
-              --to-revisions="$PREVIOUS_LIVE_REVISION=100" \
-              --update-tags="sm-candidate=$PREVIOUS_LIVE_REVISION" \
-              --quiet || true
           }
           trap rollback_runtime EXIT
           CANDIDATE_STATE="$(gcloud run revisions describe "$FIREBASE_RUNTIME_REVISION" \
@@ -392,6 +510,11 @@ jobs:
           PREVIOUS_LIVE_HOSTING_RELEASE="$(jq -r '.release.name // empty' <<< "$LIVE_CHANNEL_BEFORE")"
           PREVIOUS_LIVE_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$LIVE_CHANNEL_BEFORE")"
           PREVIOUS_LIVE_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PREVIOUS_LIVE_REWRITE_TAG="$(jq -r \
+            --arg service "$FIREBASE_SSR_SERVICE" \
+            --arg region "$FIREBASE_REGION" \
+            '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region) | .run.tag][0] // empty' \
+            <<< "$LIVE_CHANNEL_BEFORE")"
           PRE_REBIND_HOSTING_RELEASE="$(jq -r '.release.name // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
           PRE_REBIND_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
           PRE_REBIND_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
@@ -400,7 +523,8 @@ jobs:
           PRE_REBIND_CHANNEL_URL="$(jq -r '.url // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
           if [ "$PREVIOUS_LIVE_CHANNEL_NAME" != "$EXPECTED_LIVE_CHANNEL" ] || \
              [ "${PREVIOUS_LIVE_CHANNEL_URL%/}" != "$EXPECTED_LIVE_URL" ] || \
-             [ "$PREVIOUS_LIVE_HOSTING_STATUS" != "FINALIZED" ]; then
+             [ "$PREVIOUS_LIVE_HOSTING_STATUS" != "FINALIZED" ] || \
+             [ -z "$PREVIOUS_LIVE_REWRITE_TAG" ]; then
             echo "Unable to snapshot a finalized live Firebase Hosting version before promotion."
             exit 1
           fi
@@ -656,6 +780,41 @@ jobs:
              [ "$POST_CLONE_TAGGED_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
             echo "Cloud Run routing changed during the live Firebase Hosting clone."
             exit 1
+          fi
+
+          # A tagged zero-percent revision is still publicly reachable at its tag URL.
+          # Once phase two has removed legacy token mappings, retain only the exact
+          # Hosting rewrite tag for the sanitized live revision.
+          if [ "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" = "false" ]; then
+            mapfile -t LEGACY_PUBLIC_TAGS < <(
+              jq -r --arg keep "$FIREBASE_RELEASE_TAG" \
+                '.status.traffic[]? | select(.tag != null and .tag != $keep) | .tag' \
+                <<< "$POST_CLONE_STATE"
+            )
+            if [ "${#LEGACY_PUBLIC_TAGS[@]}" -gt 0 ]; then
+              REMOVE_TAGS_CSV="$(IFS=,; echo "${LEGACY_PUBLIC_TAGS[*]}")"
+              gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
+                --project "$FIREBASE_PROJECT_ID" \
+                --region "$FIREBASE_REGION" \
+                --remove-tags="$REMOVE_TAGS_CSV" \
+                --quiet
+            fi
+            RETIRED_TAG_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --region "$FIREBASE_REGION" \
+              --format=json)"
+            RETIRED_TAG_SERVING_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' \
+              <<< "$RETIRED_TAG_STATE")"
+            RETIRED_TAG_RELEASE_REVISION="$(jq -r --arg tag "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+              <<< "$RETIRED_TAG_STATE")"
+            LEGACY_PUBLIC_TAG_COUNT="$(jq -r --arg keep "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag != null and .tag != $keep)] | length' \
+              <<< "$RETIRED_TAG_STATE")"
+            if [ "$RETIRED_TAG_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+               [ "$RETIRED_TAG_RELEASE_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+               [ "$LEGACY_PUBLIC_TAG_COUNT" != "0" ]; then
+              echo "Legacy public Cloud Run tags were not fully retired after the revenue auth cutover."
+              exit 1
+            fi
           fi
           PROMOTION_COMPLETE=1
           unset ACCESS_TOKEN

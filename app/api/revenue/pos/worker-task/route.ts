@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { ApiError, withApiHandler } from "@/lib/api/handler";
+import { withApiHandler } from "@/lib/api/handler";
 import { parseJson } from "@/lib/api/validation";
 import { runPosOutboxCycle, runPosWorkerCycle } from "@/lib/revenue/pos-worker";
+import {
+  authorizeRevenueAutomationWorker,
+  resolveRevenueAutomationWorkerUid,
+} from "@/lib/revenue/worker-auth";
 
 const bodySchema = z.object({
-  uid: z.string().trim().min(1).max(128),
+  uid: z.string().trim().min(1).max(128).optional(),
   workerId: z.string().trim().min(1).max(128).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   leaseSeconds: z.coerce.number().int().min(15).max(300).optional(),
@@ -24,32 +28,14 @@ function readBoolEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function readBearerToken(request: Request): string {
-  const auth = request.headers.get("authorization") || "";
-  if (!auth.toLowerCase().startsWith("bearer ")) return "";
-  return auth.slice(7).trim();
-}
-
-function authorizeWorker(request: Request): void {
-  const expected = String(process.env.REVENUE_POS_WORKER_TOKEN || "").trim();
-  if (!expected) {
-    throw new ApiError(503, "REVENUE_POS_WORKER_TOKEN is not configured");
-  }
-
-  const candidate =
-    String(request.headers.get("x-revenue-pos-token") || "").trim() || readBearerToken(request);
-  if (!candidate || candidate !== expected) {
-    throw new ApiError(403, "Forbidden");
-  }
-}
-
 export const POST = withApiHandler(
   async ({ request, log, correlationId }) => {
-    authorizeWorker(request);
+    const auth = await authorizeRevenueAutomationWorker({ request, correlationId, log });
     const body = await parseJson(request, bodySchema);
+    const uid = resolveRevenueAutomationWorkerUid(body.uid);
 
     const cycle = await runPosWorkerCycle({
-      uid: body.uid,
+      uid,
       workerId: body.workerId,
       limit: body.limit,
       leaseSeconds: body.leaseSeconds,
@@ -60,7 +46,7 @@ export const POST = withApiHandler(
     const executeOutbox = body.executeOutbox ?? readBoolEnv("POS_WORKER_EXECUTE_OUTBOX", false);
     const outboxCycle = executeOutbox
       ? await runPosOutboxCycle({
-          uid: body.uid,
+          uid,
           workerId: body.workerId,
           limit: body.outboxLimit,
           leaseSeconds: body.outboxLeaseSeconds,
@@ -74,6 +60,7 @@ export const POST = withApiHandler(
       ok: true,
       cycle,
       outboxCycle,
+      authMode: auth.mode,
       correlationId,
     });
   },

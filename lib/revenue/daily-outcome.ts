@@ -134,6 +134,116 @@ interface QualificationResult {
   observedAt: string | null;
 }
 
+function storedDailyOutcomeEvidence(value: unknown): DailyOutcomeEvidence[] {
+  return asArray(value).flatMap((item) => {
+    const record = asRecord(item);
+    const receiptId = asString(record.receiptId);
+    const kind = asString(record.kind);
+    const entityId = asString(record.entityId);
+    const title = asString(record.title);
+    const occurredAt = toIso(record.occurredAt);
+    const sourceObservedAt = toIso(record.sourceObservedAt);
+    const nextAction = asString(record.nextAction);
+    if (
+      !receiptId ||
+      (kind !== "meeting_booked" && kind !== "application_ready") ||
+      !entityId ||
+      !title ||
+      !occurredAt ||
+      !sourceObservedAt ||
+      !nextAction ||
+      typeof record.approvalRequired !== "boolean"
+    ) {
+      return [];
+    }
+    return [{
+      receiptId,
+      kind,
+      entityId,
+      title,
+      occurredAt,
+      sourceObservedAt,
+      sourceUrl: safePublicUrl(record.sourceUrl),
+      deadline: asString(record.deadline),
+      score: asNumber(record.score),
+      qualificationReasons: asArray(record.qualificationReasons)
+        .map(asString)
+        .filter((reason): reason is string => Boolean(reason)),
+      nextAction,
+      approvalRequired: record.approvalRequired,
+    }];
+  });
+}
+
+/**
+ * A verified daily win is monotonic for that local day. Later source outages or
+ * transient read failures remain visible in sourceHealth, but cannot erase the
+ * receipt that proved the target was met earlier in the day.
+ */
+export function mergeDailyOutcomeForPersistence(
+  existingValue: unknown,
+  incoming: DailyOutcomeResult
+): DailyOutcomeResult {
+  const existing = asRecord(existingValue);
+  if (
+    existing.schemaVersion !== "1" ||
+    existing.status !== "met" ||
+    asString(existing.outcomeId) !== incoming.outcomeId ||
+    asString(existing.idempotencyKey) !== incoming.idempotencyKey ||
+    asString(existing.workspaceId) !== incoming.workspaceId ||
+    asString(existing.businessUnit) !== incoming.businessUnit ||
+    asString(existing.localDate) !== incoming.localDate ||
+    asString(existing.timeZone) !== incoming.timeZone
+  ) {
+    return incoming;
+  }
+
+  const previousWinningKind = asString(existing.winningKind);
+  if (previousWinningKind !== "meeting_booked" && previousWinningKind !== "application_ready") {
+    return incoming;
+  }
+  const previousEvidence = storedDailyOutcomeEvidence(existing.evidence);
+  if (!previousEvidence.some((item) => item.kind === previousWinningKind)) {
+    return incoming;
+  }
+
+  const evidenceByReceipt = new Map<string, DailyOutcomeEvidence>();
+  for (const item of [...previousEvidence, ...(incoming.status === "met" ? incoming.evidence : [])]) {
+    evidenceByReceipt.set(item.receiptId, item);
+  }
+  const evidence = [...evidenceByReceipt.values()];
+  const winningKind = evidence.some((item) => item.kind === "meeting_booked")
+    ? "meeting_booked"
+    : previousWinningKind;
+  const existingCounts = asRecord(existing.counts);
+  const preservedCounts = {
+    verifiedMeetings: Math.max(asNumber(existingCounts.verifiedMeetings) || 0, incoming.counts.verifiedMeetings),
+    applicationReady: Math.max(asNumber(existingCounts.applicationReady) || 0, incoming.counts.applicationReady),
+    rejectedCandidates: Math.max(asNumber(existingCounts.rejectedCandidates) || 0, incoming.counts.rejectedCandidates),
+    observedRecords: Math.max(asNumber(existingCounts.observedRecords) || 0, incoming.counts.observedRecords),
+  };
+  const sourceUnavailable = incoming.sourceHealth.status !== "observed";
+
+  return {
+    ...incoming,
+    status: "met",
+    winningKind,
+    evidence,
+    counts: preservedCounts,
+    alert: sourceUnavailable
+      ? {
+          active: true,
+          severity: "warning",
+          reason: "Daily target was met; the latest source refresh is unavailable or stale.",
+        }
+      : { active: false, severity: "none", reason: null },
+    rejectionReasonCodes: Array.from(new Set([
+      ...incoming.rejectionReasonCodes,
+      ...(incoming.status === "met" ? [] : [`latest_evaluation_${incoming.status}`]),
+    ])).sort(),
+  };
+}
+
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -423,30 +533,17 @@ function applicationReadiness(
     reasonCodes.push("paid_signal_missing");
   }
 
-  const requirements = asArray(value.requirements).map(asRecord);
-  const hasExplicitRequirementState = requirements.some((requirement) =>
-    Object.prototype.hasOwnProperty.call(requirement, "satisfied")
-  );
-  const qualification = asRecord(value.qualification);
-  const explicitlyUnverified =
-    value.requirementsVerified === false || qualification.requirementsVerified === false;
-  const requirementsVerified =
-    !explicitlyUnverified &&
-    (value.requirementsVerified === true ||
-      qualification.requirementsVerified === true ||
-      (hasExplicitRequirementState &&
-        requirements
-          .filter((requirement) => requirement.required !== false)
-          .every((requirement) => requirement.satisfied === true)));
+  const requirementsVerified = value.requirementsVerified === true;
   if (!requirementsVerified) reasonCodes.push("requirements_unverified");
 
-  const workflowStatus = asString(value.workflowStatus)?.toLowerCase();
-  const highSignalState = asString(value.highSignalState)?.toLowerCase();
   const explicitlyReady =
-    value.applicationReady === true ||
-    workflowStatus === "ready" ||
-    highSignalState === "needs_you";
+    value.applicationReady === true &&
+    asString(value.executionPolicy)?.toLowerCase() === "auto_run";
   if (!explicitlyReady) reasonCodes.push("workflow_not_ready");
+
+  if (!/^sha256:[a-f0-9]{64}$/.test(asString(value.profileEvidenceHash) || "")) {
+    reasonCodes.push("profile_evidence_missing_or_stale");
+  }
 
   const deadline = deadlineState(value, asOf, timeZone);
   if (!deadline.open && deadline.reasonCode) reasonCodes.push(deadline.reasonCode);
@@ -656,7 +753,7 @@ export function evaluateDailyOutcome(input: DailyOutcomeEvaluationInput): DailyO
     .sort();
   const sourceHealth: DailyOutcomeSourceHealth = {
     status:
-      unavailableSourceCodes.length > 0 && !hasObservation
+      unavailableSourceCodes.length > 0
         ? "unavailable"
         : hasObservation
           ? "observed"
@@ -669,7 +766,9 @@ export function evaluateDailyOutcome(input: DailyOutcomeEvaluationInput): DailyO
         : ["no_current_source_observation"],
   };
   const alert =
-    status === "missed"
+    sourceHealth.status === "unavailable"
+      ? { active: true, severity: "urgent" as const, reason: "One or more critical outcome sources could not be read." }
+      : status === "missed"
       ? { active: true, severity: "urgent" as const, reason: "Daily outcome cutoff passed without qualifying evidence." }
       : status === "not_observed"
         ? { active: true, severity: "urgent" as const, reason: "Current source evidence is unavailable or stale." }
@@ -742,7 +841,7 @@ async function authorizedOrganizations(uid: string): Promise<DailyOutcomeOrganiz
         .get();
       const data = snapshot.exists ? asRecord(snapshot.data()) : {};
       const status = asString(data.status)?.toLowerCase();
-      return status === "active" || status === "invited" ? organization : null;
+      return status === "active" ? organization : null;
     })
   );
   return memberships.filter((item): item is DailyOutcomeOrganization => Boolean(item));
@@ -751,6 +850,7 @@ async function authorizedOrganizations(uid: string): Promise<DailyOutcomeOrganiz
 async function readWorkspaceCollection(args: {
   collectionName: string;
   workspaceId: string;
+  correlationId: string;
   log: Logger;
 }): Promise<{ documents: SourceDocument[]; unavailableCode: string | null }> {
   try {
@@ -768,6 +868,7 @@ async function readWorkspaceCollection(args: {
     };
   } catch (error) {
     args.log.warn("revenue.daily_outcome.source_unavailable", {
+      correlationId: args.correlationId,
       workspaceIdHash: sha256(args.workspaceId).slice(0, 12),
       collection: args.collectionName,
       errorType: error instanceof Error ? error.name : "unknown",
@@ -779,22 +880,35 @@ async function readWorkspaceCollection(args: {
   }
 }
 
-async function persistDailyOutcome(outcome: DailyOutcomeResult): Promise<void> {
+async function persistDailyOutcome(outcome: DailyOutcomeResult): Promise<DailyOutcomeResult> {
   const db = getAdminDb();
   const ref = db.collection("mission_control_daily_outcomes").doc(outcome.outcomeId);
-  await db.runTransaction(async (transaction) => {
+  return db.runTransaction(async (transaction) => {
     const existing = await transaction.get(ref);
+    const existingData = existing.exists ? asRecord(existing.data()) : {};
+    const persisted = mergeDailyOutcomeForPersistence(existingData, outcome);
+    const previousMetFirstObservedAt = toIso(existingData.metFirstObservedAt);
+    const previousMetLastObservedAt = toIso(existingData.metLastObservedAt);
     transaction.set(
       ref,
       {
-        ...outcome,
+        ...persisted,
+        latestEvaluationStatus: outcome.status,
+        latestEvaluationAt: outcome.asOf,
+        metFirstObservedAt:
+          previousMetFirstObservedAt || (persisted.status === "met" ? outcome.asOf : null),
+        metLastObservedAt:
+          outcome.status === "met"
+            ? outcome.asOf
+            : previousMetLastObservedAt || (persisted.status === "met" ? outcome.asOf : null),
         createdAt: existing.exists
-          ? existing.data()?.createdAt || FieldValue.serverTimestamp()
+          ? existingData.createdAt || FieldValue.serverTimestamp()
           : FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
+    return persisted;
   });
 }
 
@@ -804,6 +918,7 @@ export async function getDailyOutcomeDashboard(args: {
   timeZone?: string;
   correlationId: string;
   log: Logger;
+  failOnUnavailableSources?: boolean;
 }): Promise<{ asOf: string; timeZone: string; outcomes: PublicDailyOutcome[] }> {
   const asOf = args.asOf || new Date();
   if (Number.isNaN(asOf.valueOf())) throw new ApiError(400, "Invalid as-of timestamp");
@@ -813,25 +928,33 @@ export async function getDailyOutcomeDashboard(args: {
     throw new ApiError(403, "No authorized daily-outcome organization mapping");
   }
 
-  const outcomes = await Promise.all(
+  const evaluations = await Promise.all(
     organizations.map(async (organization) => {
       const [canonical, receipts, artist] = await Promise.all([
         readWorkspaceCollection({
           collectionName: "mission_control_records",
           workspaceId: organization.workspaceId,
+          correlationId: args.correlationId,
           log: args.log,
         }),
         readWorkspaceCollection({
           collectionName: "mission_control_execution_receipts",
           workspaceId: organization.workspaceId,
+          correlationId: args.correlationId,
           log: args.log,
         }),
         readWorkspaceCollection({
           collectionName: "artist_manager_opportunities",
           workspaceId: organization.workspaceId,
+          correlationId: args.correlationId,
           log: args.log,
         }),
       ]);
+      const unavailableSourceCodes = [
+        canonical.unavailableCode,
+        receipts.unavailableCode,
+        artist.unavailableCode,
+      ].filter((item): item is string => Boolean(item));
       const outcome = evaluateDailyOutcome({
         organization,
         asOf,
@@ -839,13 +962,9 @@ export async function getDailyOutcomeDashboard(args: {
         canonicalRecords: canonical.documents,
         executionReceipts: receipts.documents,
         artistOpportunities: artist.documents,
-        unavailableSourceCodes: [
-          canonical.unavailableCode,
-          receipts.unavailableCode,
-          artist.unavailableCode,
-        ].filter((item): item is string => Boolean(item)),
+        unavailableSourceCodes,
       });
-      await persistDailyOutcome(outcome);
+      const persisted = await persistDailyOutcome(outcome);
       args.log.info("revenue.daily_outcome.evaluated", {
         correlationId: args.correlationId,
         businessUnit: organization.businessUnit,
@@ -857,14 +976,34 @@ export async function getDailyOutcomeDashboard(args: {
         applicationReady: outcome.counts.applicationReady,
         rejectedCandidates: outcome.counts.rejectedCandidates,
         sourceStatus: outcome.sourceHealth.status,
+        persistedStatus: persisted.status,
       });
-      return toPublicDailyOutcome(outcome);
+      return {
+        outcome: toPublicDailyOutcome(persisted),
+        unavailableSourceCodes,
+      };
     })
   );
+
+  const unavailableSourceCodes = Array.from(
+    new Set(evaluations.flatMap((evaluation) => evaluation.unavailableSourceCodes))
+  ).sort();
+  if (args.failOnUnavailableSources && unavailableSourceCodes.length > 0) {
+    args.log.error("revenue.daily_outcome.retryable_source_failure", {
+      correlationId: args.correlationId,
+      unavailableSourceCodes,
+      persistedDiagnostics: true,
+    });
+    throw new ApiError(
+      503,
+      "Daily outcome source reads were unavailable; degraded diagnostics were persisted and the worker should retry.",
+      { unavailableSourceCodes }
+    );
+  }
 
   return {
     asOf: asOf.toISOString(),
     timeZone,
-    outcomes,
+    outcomes: evaluations.map((evaluation) => evaluation.outcome),
   };
 }

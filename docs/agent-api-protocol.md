@@ -79,9 +79,11 @@ Set development credentials only through `.env.local` or the approved local secr
 ```text
 MCP_HEALTH_PROBE_TIMEOUT_MS=2500
 SMAUTO_MCP_AUTH_MODE=none
+LEADOPS_MCP_AUTH_MODE=id_token
+LEADOPS_MCP_ID_TOKEN_AUDIENCE=https://SERVICE_NAME-HASH-REGION.a.run.app
 ```
 
-Use the existing SMAuto and LeadOps environment variables for endpoints and authentication. Never commit their values.
+Use the existing SMAuto and LeadOps environment variables for endpoints and authentication. `LEADOPS_MCP_AUTH_MODE` accepts `none`, `api_key`, or `id_token`; ID-token mode requires the Cloud Run service base URL (without `/mcp`) in `LEADOPS_MCP_ID_TOKEN_AUDIENCE`. Authentication failures fail closed before any network probe. Never commit credential values.
 
 Verify:
 

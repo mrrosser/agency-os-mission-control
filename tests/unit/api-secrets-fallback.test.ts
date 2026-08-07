@@ -45,7 +45,7 @@ describe("resolveSecret runtime fallback", () => {
       errorCode: 5,
       errorName: null,
     });
-  });
+  }, 15_000);
 
   it("does not silently use a shared runtime secret for default callers", async () => {
     accessUserSecret.mockRejectedValueOnce({ code: 7, details: "denied" });

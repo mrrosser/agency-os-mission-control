@@ -241,22 +241,34 @@ function readProbeTimeoutMs(): number {
   return clampTimeout(parsed);
 }
 
-async function buildSmAutoProbeAuthHeaders(endpoint: string): Promise<Record<string, string>> {
-  const mode = (readEnv("SMAUTO_MCP_AUTH_MODE") || "none").toLowerCase();
+async function buildMcpProbeAuthHeaders(input: {
+  envPrefix: "SMAUTO_MCP" | "LEADOPS_MCP";
+  connectorLabel: "SMAuto" | "LeadOps";
+  endpoint: string;
+  defaultMode: "none" | "api_key";
+}): Promise<Record<string, string>> {
+  const mode = (readEnv(`${input.envPrefix}_AUTH_MODE`) || input.defaultMode).toLowerCase();
   if (mode === "none") return {};
   if (mode === "api_key") {
-    const apiKey = readEnv("SMAUTO_MCP_API_KEY");
-    if (!apiKey) throw new Error("SMAuto API-key auth is configured without a credential");
+    const apiKey = readEnv(`${input.envPrefix}_API_KEY`);
+    if (!apiKey) {
+      throw new Error(`${input.connectorLabel} API-key auth is configured without a credential`);
+    }
     return { Authorization: `Bearer ${apiKey}`, "x-api-key": apiKey };
   }
-  if (mode !== "id_token") throw new Error("Unsupported SMAuto MCP auth mode");
+  if (mode !== "id_token") throw new Error(`Unsupported ${input.connectorLabel} MCP auth mode`);
 
-  const audience = readEnv("SMAUTO_MCP_ID_TOKEN_AUDIENCE");
-  if (!audience) throw new Error("SMAuto ID-token auth is configured without an audience");
+  const audience = readEnv(`${input.envPrefix}_ID_TOKEN_AUDIENCE`);
+  if (!audience) {
+    throw new Error(`${input.connectorLabel} ID-token auth is configured without an audience`);
+  }
   const client = await new GoogleAuth().getIdTokenClient(audience);
-  const headers = (await client.getRequestHeaders(endpoint)) as Record<string, string | undefined>;
+  const headers = (await client.getRequestHeaders(input.endpoint)) as Record<
+    string,
+    string | undefined
+  >;
   const authorization = headers.Authorization || headers.authorization;
-  if (!authorization) throw new Error("Unable to mint SMAuto ID token");
+  if (!authorization) throw new Error(`Unable to mint ${input.connectorLabel} ID token`);
   return { Authorization: authorization };
 }
 
@@ -285,7 +297,12 @@ export async function probeConfiguredMcpConnectors(args: {
   const timeoutMs = readProbeTimeoutMs();
 
   const smAutoProbePromise = args.smAutoEndpoint
-    ? buildSmAutoProbeAuthHeaders(args.smAutoEndpoint)
+    ? buildMcpProbeAuthHeaders({
+        envPrefix: "SMAUTO_MCP",
+        connectorLabel: "SMAuto",
+        endpoint: args.smAutoEndpoint,
+        defaultMode: "none",
+      })
         .then((authHeaders) =>
           probeMcpConnector({
             connectorId: "smauto_mcp",
@@ -310,19 +327,35 @@ export async function probeConfiguredMcpConnectors(args: {
         })
     : Promise.resolve(null);
 
-  const leadOpsApiKey = readEnv("LEADOPS_MCP_API_KEY");
   const leadOpsProbePromise = args.leadOpsEndpoint
-    ? probeMcpConnector({
-        connectorId: "leadops_mcp",
+    ? buildMcpProbeAuthHeaders({
+        envPrefix: "LEADOPS_MCP",
+        connectorLabel: "LeadOps",
         endpoint: args.leadOpsEndpoint,
-        protocolVersion: leadOpsProtocolVersion,
-        timeoutMs,
-        correlationId: args.correlationId,
-        authHeaders: leadOpsApiKey
-          ? { Authorization: `Bearer ${leadOpsApiKey}`, "x-api-key": leadOpsApiKey }
-          : {},
-        log: args.log,
+        defaultMode: readEnv("LEADOPS_MCP_API_KEY") ? "api_key" : "none",
       })
+        .then((authHeaders) =>
+          probeMcpConnector({
+            connectorId: "leadops_mcp",
+            endpoint: args.leadOpsEndpoint as string,
+            protocolVersion: leadOpsProtocolVersion,
+            timeoutMs,
+            correlationId: args.correlationId,
+            authHeaders,
+            log: args.log,
+          })
+        )
+        .catch(() => {
+          args.log?.warn("connector.mcp.probe_skipped", {
+            connectorId: "leadops_mcp",
+            reason: "auth_unavailable",
+            correlationId: args.correlationId,
+          });
+          return degradedWithoutNetwork(
+            leadOpsProtocolVersion,
+            "LeadOps endpoint is configured, but probe authentication could not be established."
+          );
+        })
     : Promise.resolve(null);
 
   const [smAutoProbe, leadOpsProbe] = await Promise.all([

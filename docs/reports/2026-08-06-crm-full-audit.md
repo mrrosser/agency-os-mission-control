@@ -4,14 +4,14 @@
 
 Mission Control was reviewed as the shared operator surface for RT Solutions and Rosser Gallery. The audit covered desktop and phone UI, CRM ownership and stage transitions, opportunity-run safety, autonomy policy, agent/API communication, Google Workspace profiles, performance, dependency exposure, Figma evidence, Tailscale/Gmail durability, test coverage, deployment, and rollback.
 
-## Observed production baseline
+## Pre-release baseline and final production measurements
 
 - Canonical public entry point: `https://leadflow-review.web.app`.
 - Desktop cold sample: HTTP 200; 6478 ms wall; 3087 ms TTFB; 3570 ms DOM content loaded; 5034 ms load; 24 resources; about 343 KB transferred.
 - Pixel-class phone warm sample: HTTP 200; 2406 ms wall; 158 ms TTFB; 230 ms DOM content loaded; 437 ms load; 27 resources; about 350 KB transferred.
 - The public login shell had no horizontal overflow or console error in the recorded desktop/phone samples. The fixed Beta Feedback control occupied too much phone space before the responsive patch.
 
-These samples are diagnostic snapshots, not a statistically complete performance study. The cold desktop TTFB is the primary follow-up metric after deployment.
+These samples are diagnostic snapshots, not a statistically complete performance study. After deployment, 32 authenticated desktop and Pixel-class samples across CRM, Agent Nexus, Integrations, and Operations showed zero horizontal overflow, zero page errors, and zero actionable console errors. Desktop p75 LCP ranged from 428-1640 ms; Pixel-class p75 LCP ranged from 476-2024 ms.
 
 ## Figma/design evidence
 
@@ -60,9 +60,10 @@ These samples are diagnostic snapshots, not a statistically complete performance
 
 ## Tailscale and Gmail durability
 
-- The Funnel-only reconciler and complete route inventory were reviewed, CI-verified, and admin-merged in AI-Hell-Mary PR 6 at commit `10f51d13305972696b8ead7d36be25be54b8dd57`.
-- Live gateway: `https://ai-hell-mary-gateway.tail592a2d.ts.net`.
-- Public Gmail triage health returned HTTP 200 and local port 8792 returned `ok` during the audit.
+- The Funnel-only reconciler and complete route inventory were reviewed and CI-verified through AI-Hell-Mary PR 6. PR 8 then corrected the dead root mapping and merged at `bf25f91611537bc480c5f34a5e5e4de9109700f3`.
+- Live gateway: `https://ai-hell-mary-gateway.tail592a2d.ts.net/`; the root now returns HTTP 200 and serves the credential-gated OpenClaw Control UI.
+- Public Gmail triage health at `https://ai-hell-mary-gateway.tail592a2d.ts.net/gmail-triage/healthz` returned HTTP 200 after the final CRM release.
+- Voice MCP Funnel routes remain degraded/HTTP 502 because the local services on ports 3351-3353 are inactive. Not every published Funnel route is currently healthy.
 - A Google Cloud alert showed sustained gateway CPU around 89%. The live process inventory contained the expected systemd-owned gateway, Mission Control, Gmail workers, voice router, and triage trigger; no orphan Next.js worker was found.
 - The load was traced to 24 hourly OpenClaw model heartbeats repeatedly retrying Gemini and OpenAI after both providers rejected usage for exhausted credits. The runtime config was backed up, the heartbeat interval was set from `60m` to `0m`, and an unavailable stale plugin declaration was removed. After a clean gateway restart, logs reported heartbeats disabled, CPU settled near 0-1%, and the public Tailscale Gmail health endpoint remained HTTP 200.
 - Model-driven OpenClaw autonomy cannot be described as operational until Google AI Studio or OpenAI API capacity is funded and a live model health check passes. Non-model CRM/revenue schedulers remain independent and enabled.
@@ -70,32 +71,31 @@ These samples are diagnostic snapshots, not a statistically complete performance
 ## Agent/API and Google profile status
 
 - Schedule/payload cadence checks passed for four consolidated revenue jobs. RT Solutions runs daily at 5:05 AM CT, Rosser Gallery at 5:20 AM CT, AI CoFoundry at 5:35 AM CT, and the cross-organization weekly brain at 6:10 AM CT each Monday.
-- All four live jobs were enabled, used the expected route and America/Chicago timezone, and required approval gates. The daily jobs were bound to the correct `rts`, `rng`, and `aicf` business keys. The enhanced audit now correctly flags all four old zero-retry configurations; the exact three-retry policy must be applied after deployment before final cadence verification.
+- All four live jobs were enabled, used the expected route and America/Chicago timezone, and required approval gates. The daily jobs were bound to the correct `rts`, `rng`, and `aicf` business keys. The final production cadence audit passed 4/4 with zero mismatches: exactly three retries, 60-300 second backoff, two doublings, and no duration override.
 - Additional live discovery/coordination jobs were enabled: artist-manager loops every 30 minutes, lead-generation inbox hourly, lead prospecting daily at 6:40 AM CT, Google OAuth health every four hours, and governance watchdog/tick jobs every 15/10 minutes.
+- Artist-manager logs show repeated HTTP 200 executions. This proves the discovery automation is active, but it does not prove the requested business outcome of at least one meeting or application-ready opportunity every day.
 - The cadence audit script had still targeted scheduler jobs removed by consolidation. It now verifies the four real jobs, schedules, business keys, safe payload invariants, bounded retry policy, and authenticated local gcloud configuration.
 - The canonical 12-agent registry now uses versioned, organization-scoped heartbeat envelopes and limits external-write capability to the governed action function. MCP probes are timeout-bounded and report observed initialization/tool-list health instead of optimistic placeholders. Legacy four-field heartbeats intentionally fail validation until their producers emit the v1 envelope.
 - RT Solutions and Rosser Gallery now use separate Google Workspace profiles (`rt_solutions_work` and `rosser_gallery_work`) with schema-v2 Secret Manager bindings. Connect, callback, and status flows preserve organization/profile context and fail closed on mismatches while retaining legacy no-context compatibility.
+- Final owner-authenticated production checks returned HTTP 200 for both profiles; each is connected and profile-mapped with Gmail, Calendar, and Drive capabilities. Agent Nexus now reads those organization-scoped records and reports `google_workspace`, `gmail_tooling`, and `calendar_tooling` operational without a false reconnect recommendation.
 - All three daily scheduler requests on 2026-08-06 reached Cloud Run at the expected time and returned HTTP 200 on the old revision. The RT Solutions request nevertheless logged `oauth.no_tokens`, `oauth.throwing_403`, and `revenue.day2.response_loop_failed`, proving the old response was only partially successful and motivating the shared processor and 502 health fixes above.
 - Nexus actions fail closed unless the authenticated operator UID appears in the deployment allowlist. Paperclip-backed pause/resume/terminate/wakeup actions are forwarded; the global pause blocks execution-starting resume/wakeup. Ping and route have no current executor and return 503 instead of writing an unconsumed queue record.
 
 ## Verification and deployment
 
-- Final focused hardening tests: 24 passed; independent review reruns also passed.
-- Revenue cadence helper tests: 7 passed. The enhanced live audit found the expected pre-deploy retry-policy mismatch on 4/4 jobs while schedule/payload checks remained correct.
-- Responsive CRM unit tests: 6 passed.
-- Desktop Chrome and Pixel 7 responsive public-shell Playwright tests: 4 passed.
-- TypeScript and touched-file ESLint passed after integration.
-- Authenticated desktop/mobile Playwright coverage signs in through real Firebase Auth and mocks only CRM/autonomy business endpoints. The local candidate passed Chromium and Pixel 7 end to end with temporary-account cleanup; production execution evidence is pending the deployment gate.
-- Final local unit gate after response-boundary and retry hardening: 94 files and 365 tests passed with one worker. The earlier concurrent run hit the known resource-sensitive timeout in `api-secrets-fallback`; that file passed 3/3 alone before the deterministic final suite passed 365/365. The full smoke suite passed.
-- Focused profile/draft-recovery/response-boundary/retry/HTTP-fallback/action regression gate: 7 files and 43 tests passed.
-- Final production build generated 96 application routes and passed type validation. Post-deploy and production performance evidence remain pending the merge deployment.
-- Staged secret scan passed with no leaks. Workflow YAML and the JSON deployment manifest parsed successfully.
-- Pre-deploy rollback is preserved in Hosting channel `rollback-crm-audit-20260806` through 2026-08-13; Cloud Run rollback target is the previously serving `ssrleadflowreview-00297-dnx` revision.
-- Required GitHub Actions runs on the latest pushed head were cancelled without executing any steps during GitHub's official major Actions incident. Admin merge remains on hold until the service recovers and fresh required checks pass; the outage is not being bypassed.
-- New serving deployment revision: pending merge rollout.
+- CRM audit PRs 24-26 merged after required checks. PR 27 exercised the new binding gate and rolled back safely when Firebase rejected an unsupported flag. PR 28 corrected the flag and proved the exact-binding release path. PR 29 corrected Agent Nexus organization-profile aggregation and passed CI, preview, independent review, and production deployment.
+- Final PR 29 local gates passed: touched-file ESLint, TypeScript without incremental state, focused control-plane tests 4/4, the complete deterministic unit/smoke sweep, the 96-route production build, diff integrity, and staged `gitleaks` with zero findings.
+- Production workflow `31148399551` completed successfully. Cloud Run revision `ssrleadflowreview-release-31148399551-1` is Ready and serves 100% of traffic using image digest `sha256:e6ae63b9b6947a221d9cebe1d6fda2e3c7c1bd017b856ff0507fdd220839b53a`.
+- Firebase Hosting version `3d9736052cc7a3c9` is FINALIZED with exactly one `/**` rewrite to service `ssrleadflowreview`, region `us-central1`, and tag `release-31148399551-1`. Candidate and refreshed-preview smoke passed, live clone succeeded, and the temporary preview was deleted. The extra Firebase revision `ssrleadflowreview-00469-yih` is inactive with zero traffic.
+- Final public production Playwright passed 7/7. A separate desktop/mobile sweep of Login and Privacy found zero console errors, page errors, or horizontal overflow. Earlier authenticated desktop and Pixel CRM coverage passed 2/2, and the 32-sample performance audit remained within the ranges above.
+- Final revenue cadence audit passed 4/4 with zero mismatches. Owner-authenticated reads passed for Google profiles, agent status (12 policies), control plane, autonomy policy, and CRM projection, with correlation IDs present and matched on every request.
+- The global execution pause is false; RT Solutions and Rosser Gallery remain in `assist`; all 11 protected action classes remain approval-gated.
+- The pre-PR29 revision `ssrleadflowreview-release-31144584399-1` remains the immediate Cloud Run rollback target. The release workflow's automatic rollback path did not fire because promotion completed successfully.
 
-## Consolidation follow-up
+## Consolidation follow-up and honest limits
 
-- A separate phased plan now inventories Agency OS, AI-Hell-Mary/OpenClaw, Builderz Mission Control, Paperclip, AICFMCP, and the LeadOps prototype as a federated control plane rather than a codebase/database rewrite.
-- The plan records several pre-existing truth gaps that must not be represented as live: historical queued agent-action records have no Agency OS consumer (new unsupported actions now fail visibly), heartbeats can overwrite agents sharing one Chat space, OpenClaw status is file-manifest based, provider health can be green from key presence alone, CRM fallback writes can split Paperclip/Firestore state, organization IDs drift, and some Overview metrics are hard-coded.
-- These consolidation changes are intentionally staged after the current safety/profile deployment rather than folded into its runtime patch.
+- The audited interface, dual-organization Google profiles, autonomy controls, CRM projection, production release gate, opportunity schedules, and secure remote links are live. This is not yet the full M2-M6 consolidation of every Agency OS, OpenClaw, LeadOps, Paperclip, media, POS, and voice subsystem into one runtime.
+- Agent Nexus truthfully remains overall `offline` because legitimate dependencies are degraded: LeadOps responds HTTP 405 to the live MCP probe, Paperclip is unconfigured, the OpenClaw sync manifest is missing, and Drive knowledge is degraded even though Google Drive authorization is healthy.
+- OpenClaw model heartbeats remain disabled until provider credits are restored. The separate Codex Google Calendar connector needs reauthorization. Figma Code Connect is blocked by the Starter-plan call cap. Voice MCP routes are inactive.
+- Discovery loops are scheduled and producing successful runs, but no measured service-level objective yet guarantees one meeting or application-ready opportunity every day.
+- Protected external actions remain approval-gated in every autonomy posture; the system must not be described as universally or unsafely fully autonomous.

@@ -1,5 +1,22 @@
 # Latest Verification Run
 
+## 2026-08-07 production reconciliation and Agent Nexus profile correction
+
+- RUN_ID: 20260807-production-reconciliation-pr29
+- Scope: exact Hosting/Cloud Run binding, dual-organization owner APIs, final public desktop/mobile UI, revenue cadence, and Tailscale health
+
+[2026-08-07T05:03:45Z] gate=production-release result=PASS workflow=31148399551 revision=ssrleadflowreview-release-31148399551-1 traffic_pct=100 ready=true
+[2026-08-07T05:03:45Z] gate=exact-hosting-binding result=PASS firebase_version=3d9736052cc7a3c9 status=FINALIZED rewrite_count=1 tag=release-31148399551-1
+[2026-08-07T05:03:45Z] gate=release-image result=PASS digest=sha256:e6ae63b9b6947a221d9cebe1d6fda2e3c7c1bd017b856ff0507fdd220839b53a
+[2026-08-07T05:04:42Z] gate=public-responsive-production result=PASS tests=7/7 console_errors=0 page_errors=0 overflow_px=0
+[2026-08-07T05:04:42Z] gate=revenue-cadence-production result=PASS jobs=4/4 mismatches=0 approval_gates=true retries=3
+[2026-08-07T05:06:00Z] gate=google-owner-profiles result=PASS profiles=2/2 gmail=true calendar=true drive=true correlation_ids=matched
+[2026-08-07T05:06:00Z] gate=agent-nexus-google-aggregation result=PASS google_workspace=operational false_reconnect_recommendation=false
+[2026-08-07T05:06:00Z] gate=owner-control-plane result=PASS_WITH_DEGRADED_DEPENDENCIES leadops=degraded paperclip=degraded openclaw_sync=degraded drive_knowledge=degraded
+[2026-08-07T05:06:00Z] gate=autonomy-policy result=PASS global_pause=false rt_mode=assist rosser_mode=assist protected_actions=11
+[2026-08-07T05:07:00Z] gate=tailscale-root-gmail result=PASS root_http=200 gmail_health_http=200
+[2026-08-07T05:07:00Z] gate=tailscale-voice-mcp result=DEGRADED reason=local_voice_services_inactive
+
 ## 2026-08-06 CRM UI, agents, and autonomy audit
 
 - RUN_ID: 20260806-crm-ui-agents-full-audit

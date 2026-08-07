@@ -35,7 +35,7 @@
 - [x] Created a clean branch from the verified production commit.
 - [x] Validated the repo computer-environment manifest.
 - [x] Completed UI, integration, Figma-source, and Tailscale durability inventories.
-- [x] Merged the reviewed Tailscale Funnel/Gmail durability fix after CI passed; the healthy live gateway did not require a restart.
+- [x] Merged the reviewed Tailscale Funnel/Gmail durability fixes through PR 8, reconciled the VM, and verified the root UI and Gmail health endpoint at HTTP 200.
 - [x] Captured current desktop/mobile baselines and measured cold/warm performance.
 - [x] Created the observed Figma audit file, captured the current product, and inventoried its subscribed Simple Design System and Material 3 libraries.
 - [x] Implemented fail-closed CRM ownership, draft-first, and approval-gate corrections.
@@ -53,7 +53,9 @@
 - [x] Run final local verification gates, dependency audit, and staged secret scan.
 - [x] Audited the live OpenClaw CPU alert, disabled unfunded model heartbeats, removed a stale plugin declaration, restarted cleanly, and re-verified Tailscale/Gmail health.
 - [x] Run production health, authenticated desktop/phone, performance, and cadence gates.
-- [ ] Deploy the exact Hosting/Cloud Run binding gate, verify rollback posture, update final reports, and email the mobile link.
+- [x] Deployed and verified the exact Hosting/Cloud Run binding gate through PRs 27-28.
+- [x] Merged and deployed PR 29, reran owner/control-plane and production UI/cadence verification, and updated final reports.
+- [x] Emailed the verified mobile link and honest remaining limitations to Marcus; confirmed one matching message in Sent.
 
 ## Decisions
 - Use `codex/crm-full-audit-20260806` at `C:\CTO Projects\agency-os-crm-audit-20260806` to avoid the user’s dirty primary worktree.
@@ -78,16 +80,17 @@
 - Final local gates after response-boundary and retry hardening: lint passed; TypeScript passed; 94 unit files/365 tests passed in the deterministic single-worker run; full smoke passed; responsive desktop/phone browser tests passed 4/4; production build passed with 96 routes.
 - The earlier concurrent 92-file unit run hit the previously observed resource-sensitive five-second timeout in `api-secrets-fallback`; that file passed 3/3 in isolation. After the final additions, the complete 94-file single-worker suite passed 365/365.
 - Dependency audit: full tree 12 findings (0 critical, 4 high, 8 moderate); production-only resolver 13 findings (0 critical, 4 high, 9 moderate). Remaining fixes require breaking major upgrades.
-- Pre-deploy rollback channel `rollback-crm-audit-20260806` preserves the previously serving Hosting state through 2026-08-13. Before the exact-binding release, Cloud Run's rollback target is the ready `ssrleadflowreview-release-31140407269-2` revision.
+- Pre-deploy rollback channel `rollback-crm-audit-20260806` preserves the earlier Hosting state through 2026-08-13. The immediate pre-PR29 Cloud Run rollback target is the ready `ssrleadflowreview-release-31144584399-1` revision.
 - Staged `gitleaks` scan passed with no leaks.
 - The 2026-08-06 RT Solutions, Rosser Gallery, and AICF scheduler requests all reached Cloud Run at their expected times and returned HTTP 200 on the old revision. Structured logs exposed `oauth.no_tokens` and `revenue.day2.response_loop_failed` inside the RT run, proving the old response was only partially successful.
 - Focused organization-profile, draft-recovery, Day 2/Day 30 response boundary, Scheduler retry, HTTP fallback, and agent-action regression coverage passed 43/43 across seven files. RT/RTS select `rt_solutions_work`, Rosser selects `rosser_gallery_work`, historical tasks can supply missing organization context, truly context-free historical work preserves the legacy path, non-empty unsupported or contradictory context fails closed, and incomplete response work throws 502 only after Day 30 persists independent outputs.
 - The enhanced cadence audit initially found retry drift on all four live jobs. After applying the bounded retry policy, the 2026-08-07T02:33:16Z production audit passed 4/4 with zero mismatches.
 - The OpenClaw gateway CPU alert was traced to hourly heartbeats retrying two unfunded model providers. After backing up the runtime config, setting the heartbeat interval to `0m`, removing an unavailable plugin declaration, and restarting, the service reported heartbeats disabled, settled near 0-1% CPU, and retained HTTP 200 Gmail triage health through Tailscale.
-- GitHub Actions recovered. PR 24 merged at `a2fb315`, candidate-first deployment hardening PR 25 merged at `f85d5bf`, and the bundled control-plane knowledge-pack fix PR 26 merged at `38592d2`; their required checks passed.
+- GitHub Actions recovered. PRs 24-26 merged their CRM, deployment, and control-plane foundations; PR 27 proved rollback on an unsupported Firebase flag; PR 28 fixed and verified exact version binding; PR 29 corrected organization-profile aggregation in Agent Nexus. All final required checks passed.
 - Production public and authenticated browser gates passed: 7/7 public responsive checks and 2/2 authenticated CRM checks across Desktop Chrome and Pixel 7. Across 32 authenticated performance samples, all audited routes had zero actionable console errors, zero page errors, and zero horizontal overflow; desktop p75 LCP ranged from 428-1640 ms and Pixel 7 p75 LCP from 476-2024 ms.
-- Production run `31140407269` attempt 2 passed tests, build, candidate smoke, promotion, and cleanup. Cloud Run serves `ssrleadflowreview-release-31140407269-2` at 100%, while authoritative Hosting metadata still pins the live rewrite to `release-31140407269-1`. This reproducible one-run lag is the remaining release blocker even though both revisions contain the same source fix.
-- The pending release gate refreshes the same preview channel only after candidate promotion, requires a new finalized Hosting version with exactly one `/**` rewrite to the exact release tag, re-smokes that URL, detects concurrent Hosting/Cloud Run changes, and restores both layers after an ambiguous clone failure.
+- Production run `31148399551` passed tests, build, candidate smoke, promotion, exact-binding verification, and cleanup. Cloud Run serves `ssrleadflowreview-release-31148399551-1` at 100%; Firebase version `3d9736052cc7a3c9` is FINALIZED with exactly one `/**` rewrite to tag `release-31148399551-1`.
+- Final owner-authenticated checks show both organization Google profiles connected with Gmail, Calendar, and Drive; Agent Nexus reports Google Workspace operational without the old false reconnect warning. Legitimate degraded dependencies remain visible: LeadOps HTTP 405, Paperclip unconfigured, OpenClaw sync manifest missing, and Drive knowledge degraded.
+- Artist-manager, lead inbox, and prospecting loops are enabled and show successful execution evidence, but a daily meeting/application-ready-opportunity outcome SLO is not yet proven.
 
 ## Local verification and deployment
 - Install and verify locally with `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run test:unit`, `npm run test:smoke`, and `npm run build`.

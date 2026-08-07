@@ -433,7 +433,6 @@ jobs:
             REBIND_LOG_FILE="$(mktemp)"
             echo "Firebase Hosting rebind attempt $REBIND_ATTEMPT/$REBIND_MAX_ATTEMPTS for channel $FIREBASE_DEPLOY_CHANNEL"
             if node scripts/firebase-deploy.mjs hosting:channel:deploy "$FIREBASE_DEPLOY_CHANNEL" \
-              --site "$FIREBASE_HOSTING_SITE" \
               --project "$FIREBASE_PROJECT_ID" \
               --expires 1d \
               --non-interactive 2>&1 | tee "$REBIND_LOG_FILE"; then

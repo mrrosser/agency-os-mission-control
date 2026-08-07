@@ -52,8 +52,8 @@
 - [x] Added credential-gated authenticated desktop and Pixel-class CRM Playwright coverage without a production auth bypass.
 - [x] Run final local verification gates, dependency audit, and staged secret scan.
 - [x] Audited the live OpenClaw CPU alert, disabled unfunded model heartbeats, removed a stale plugin declaration, restarted cleanly, and re-verified Tailscale/Gmail health.
-- [ ] Run production health, authenticated desktop/phone, performance, and cadence gates.
-- [ ] Deploy, verify rollback posture, update reports, and email the mobile link.
+- [x] Run production health, authenticated desktop/phone, performance, and cadence gates.
+- [ ] Deploy the exact Hosting/Cloud Run binding gate, verify rollback posture, update final reports, and email the mobile link.
 
 ## Decisions
 - Use `codex/crm-full-audit-20260806` at `C:\CTO Projects\agency-os-crm-audit-20260806` to avoid the user’s dirty primary worktree.
@@ -78,16 +78,20 @@
 - Final local gates after response-boundary and retry hardening: lint passed; TypeScript passed; 94 unit files/365 tests passed in the deterministic single-worker run; full smoke passed; responsive desktop/phone browser tests passed 4/4; production build passed with 96 routes.
 - The earlier concurrent 92-file unit run hit the previously observed resource-sensitive five-second timeout in `api-secrets-fallback`; that file passed 3/3 in isolation. After the final additions, the complete 94-file single-worker suite passed 365/365.
 - Dependency audit: full tree 12 findings (0 critical, 4 high, 8 moderate); production-only resolver 13 findings (0 critical, 4 high, 9 moderate). Remaining fixes require breaking major upgrades.
-- Pre-deploy rollback channel `rollback-crm-audit-20260806` preserves the previously serving Hosting state through 2026-08-13. Cloud Run rollback target remains `ssrleadflowreview-00297-dnx` until post-deploy verification completes.
+- Pre-deploy rollback channel `rollback-crm-audit-20260806` preserves the previously serving Hosting state through 2026-08-13. Before the exact-binding release, Cloud Run's rollback target is the ready `ssrleadflowreview-release-31140407269-2` revision.
 - Staged `gitleaks` scan passed with no leaks.
 - The 2026-08-06 RT Solutions, Rosser Gallery, and AICF scheduler requests all reached Cloud Run at their expected times and returned HTTP 200 on the old revision. Structured logs exposed `oauth.no_tokens` and `revenue.day2.response_loop_failed` inside the RT run, proving the old response was only partially successful.
 - Focused organization-profile, draft-recovery, Day 2/Day 30 response boundary, Scheduler retry, HTTP fallback, and agent-action regression coverage passed 43/43 across seven files. RT/RTS select `rt_solutions_work`, Rosser selects `rosser_gallery_work`, historical tasks can supply missing organization context, truly context-free historical work preserves the legacy path, non-empty unsupported or contradictory context fails closed, and incomplete response work throws 502 only after Day 30 persists independent outputs.
-- The enhanced cadence audit correctly reports retry drift on all four live jobs because production still has the old zero-retry defaults. Applying the bounded retry policy is a required post-deploy step before the cadence gate can pass.
+- The enhanced cadence audit initially found retry drift on all four live jobs. After applying the bounded retry policy, the 2026-08-07T02:33:16Z production audit passed 4/4 with zero mismatches.
 - The OpenClaw gateway CPU alert was traced to hourly heartbeats retrying two unfunded model providers. After backing up the runtime config, setting the heartbeat interval to `0m`, removing an unavailable plugin declaration, and restarting, the service reported heartbeats disabled, settled near 0-1% CPU, and retained HTTP 200 Gmail triage health through Tailscale.
-- GitHub Actions remains under an official major incident. Required runs on the latest pushed head were cancelled with zero executed steps, so protected merge/deployment remains pending a fresh green run after recovery; no admin bypass is being used during the outage.
+- GitHub Actions recovered. PR 24 merged at `a2fb315`, candidate-first deployment hardening PR 25 merged at `f85d5bf`, and the bundled control-plane knowledge-pack fix PR 26 merged at `38592d2`; their required checks passed.
+- Production public and authenticated browser gates passed: 7/7 public responsive checks and 2/2 authenticated CRM checks across Desktop Chrome and Pixel 7. Across 32 authenticated performance samples, all audited routes had zero actionable console errors, zero page errors, and zero horizontal overflow; desktop p75 LCP ranged from 428-1640 ms and Pixel 7 p75 LCP from 476-2024 ms.
+- Production run `31140407269` attempt 2 passed tests, build, candidate smoke, promotion, and cleanup. Cloud Run serves `ssrleadflowreview-release-31140407269-2` at 100%, while authoritative Hosting metadata still pins the live rewrite to `release-31140407269-1`. This reproducible one-run lag is the remaining release blocker even though both revisions contain the same source fix.
+- The pending release gate refreshes the same preview channel only after candidate promotion, requires a new finalized Hosting version with exactly one `/**` rewrite to the exact release tag, re-smokes that URL, detects concurrent Hosting/Cloud Run changes, and restores both layers after an ambiguous clone failure.
 
 ## Local verification and deployment
 - Install and verify locally with `npm ci`, `npm run lint`, `npx tsc --noEmit`, `npm run test:unit`, `npm run test:smoke`, and `npm run build`.
 - Run responsive browser coverage with `npx playwright test tests/playwright/responsive-shell.spec.ts --project=chromium --project=mobile-chrome`.
 - Authenticated CRM coverage requires temporary `PLAYWRIGHT_TEST_EMAIL` and `PLAYWRIGHT_TEST_PASSWORD` environment variables plus `PLAYWRIGHT_BASE_URL`; no credential is committed or logged.
 - Production deploys through `.github/workflows/firebase-hosting-merge.yml` after reviewed merge to the default branch. Monitor Firebase App Hosting/Cloud Run and keep the previously active ready revision as the rollback target until post-deploy verification passes.
+- The merge workflow must not report success unless the live Hosting channel version and Cloud Run release tag identify the same verified revision. Its post-promotion preview refresh and REST metadata checks enforce that invariant before cloning live.

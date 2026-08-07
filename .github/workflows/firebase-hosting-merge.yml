@@ -272,12 +272,54 @@ jobs:
           FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE || 'leadflow-review' }}
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
+          NPM_CONFIG_PRODUCTION: "true"
+          NODE_ENV: "production"
         run: |
           set -euo pipefail
           PROMOTION_COMPLETE=0
           TRAFFIC_SWITCHED=0
+          HOSTING_CLONE_STARTED=0
+          ACCESS_TOKEN=""
+          PREVIOUS_LIVE_HOSTING_RELEASE=""
+          PREVIOUS_LIVE_HOSTING_VERSION=""
+          REFRESHED_HOSTING_RELEASE=""
+          REFRESHED_HOSTING_VERSION=""
+          get_hosting_channel() {
+            local channel_id="$1"
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_HOSTING_SITE}/channels/${channel_id}"
+          }
           rollback_runtime() {
-            if [ "$PROMOTION_COMPLETE" = "1" ] || [ "$TRAFFIC_SWITCHED" != "1" ] || [ -z "$PREVIOUS_LIVE_REVISION" ]; then
+            if [ "$PROMOTION_COMPLETE" = "1" ]; then
+              return
+            fi
+            if [ "$HOSTING_CLONE_STARTED" = "1" ] && \
+               [ -n "$ACCESS_TOKEN" ] && \
+               [ -n "$PREVIOUS_LIVE_HOSTING_VERSION" ] && \
+               [ -n "$REFRESHED_HOSTING_VERSION" ]; then
+              ROLLBACK_LIVE_CHANNEL="$(get_hosting_channel live 2>/dev/null || true)"
+              ROLLBACK_LIVE_HOSTING_VERSION="$(jq -r '.release.version.name // empty' \
+                <<< "$ROLLBACK_LIVE_CHANNEL" 2>/dev/null || true)"
+              if [ "$ROLLBACK_LIVE_HOSTING_VERSION" = "$REFRESHED_HOSTING_VERSION" ]; then
+                echo "Promotion failed after the Hosting clone started; restoring the prior live Hosting version."
+                ENCODED_ROLLBACK_VERSION="$(jq -rn --arg value "$PREVIOUS_LIVE_HOSTING_VERSION" '$value | @uri')"
+                ROLLBACK_MESSAGE="$(jq -n --arg message "Workflow ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} automatic rollback" '{message: $message}')"
+                curl --fail --silent --show-error \
+                  --request POST \
+                  --header "Authorization: Bearer $ACCESS_TOKEN" \
+                  --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+                  --header "Content-Type: application/json" \
+                  --data "$ROLLBACK_MESSAGE" \
+                  --output /dev/null \
+                  "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_HOSTING_SITE}/releases?versionName=${ENCODED_ROLLBACK_VERSION}" || true
+              elif [ "$ROLLBACK_LIVE_HOSTING_VERSION" != "$PREVIOUS_LIVE_HOSTING_VERSION" ]; then
+                echo "Live Hosting changed to an unrelated version; refusing to overwrite the newer Hosting state."
+              fi
+            fi
+            if [ "$TRAFFIC_SWITCHED" != "1" ] || [ -z "$PREVIOUS_LIVE_REVISION" ]; then
               return
             fi
             ROLLBACK_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
@@ -324,6 +366,46 @@ jobs:
             echo "Cloud Run routing changed during smoke validation; refusing promotion."
             exit 1
           fi
+
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          LIVE_CHANNEL_BEFORE="$(get_hosting_channel live)"
+          PREVIEW_CHANNEL_BEFORE="$(get_hosting_channel "$FIREBASE_DEPLOY_CHANNEL")"
+          EXPECTED_LIVE_CHANNEL="sites/${FIREBASE_HOSTING_SITE}/channels/live"
+          EXPECTED_PREVIEW_CHANNEL="sites/${FIREBASE_HOSTING_SITE}/channels/${FIREBASE_DEPLOY_CHANNEL}"
+          EXPECTED_LIVE_URL="https://${FIREBASE_HOSTING_SITE}.web.app"
+          PREVIOUS_LIVE_CHANNEL_NAME="$(jq -r '.name // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PREVIOUS_LIVE_CHANNEL_URL="$(jq -r '.url // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PREVIOUS_LIVE_HOSTING_RELEASE="$(jq -r '.release.name // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PREVIOUS_LIVE_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PREVIOUS_LIVE_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$LIVE_CHANNEL_BEFORE")"
+          PRE_REBIND_HOSTING_RELEASE="$(jq -r '.release.name // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          PRE_REBIND_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          PRE_REBIND_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          PRE_REBIND_HOSTING_TYPE="$(jq -r '.release.type // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          PRE_REBIND_CHANNEL_NAME="$(jq -r '.name // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          PRE_REBIND_CHANNEL_URL="$(jq -r '.url // empty' <<< "$PREVIEW_CHANNEL_BEFORE")"
+          if [ "$PREVIOUS_LIVE_CHANNEL_NAME" != "$EXPECTED_LIVE_CHANNEL" ] || \
+             [ "${PREVIOUS_LIVE_CHANNEL_URL%/}" != "$EXPECTED_LIVE_URL" ] || \
+             [ "$PREVIOUS_LIVE_HOSTING_STATUS" != "FINALIZED" ]; then
+            echo "Unable to snapshot a finalized live Firebase Hosting version before promotion."
+            exit 1
+          fi
+          if [ "$PRE_REBIND_CHANNEL_NAME" != "$EXPECTED_PREVIEW_CHANNEL" ] || \
+             [ "${PRE_REBIND_CHANNEL_URL%/}" != "${FIREBASE_PREVIEW_URL%/}" ] || \
+             [ "$PRE_REBIND_HOSTING_TYPE" != "DEPLOY" ] || \
+             [ "$PRE_REBIND_HOSTING_STATUS" != "FINALIZED" ]; then
+            echo "The initial Firebase preview channel is not a finalized deploy at the expected URL."
+            exit 1
+          fi
+          case "$PREVIOUS_LIVE_HOSTING_VERSION" in
+            "sites/$FIREBASE_HOSTING_SITE/versions/"*) ;;
+            *) echo "Live Firebase Hosting version identifier is invalid."; exit 1 ;;
+          esac
+          case "$PRE_REBIND_HOSTING_VERSION" in
+            "sites/$FIREBASE_HOSTING_SITE/versions/"*) ;;
+            *) echo "Preview Firebase Hosting version identifier is invalid."; exit 1 ;;
+          esac
+
           TRAFFIC_SWITCHED=1
           gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
@@ -340,12 +422,230 @@ jobs:
             echo "Cloud Run did not route 100 percent to the verified release candidate."
             exit 1
           fi
+
+          # Firebase Hosting resolves a framework rewrite to the Cloud Run tag that is
+          # serving when the Hosting version is created. Refresh the preview only after
+          # promotion, then prove that exact binding before cloning it to live.
+          REBIND_MAX_ATTEMPTS=4
+          REBIND_ATTEMPT=1
+          REBIND_COMPLETE=0
+          while [ "$REBIND_ATTEMPT" -le "$REBIND_MAX_ATTEMPTS" ]; do
+            REBIND_LOG_FILE="$(mktemp)"
+            echo "Firebase Hosting rebind attempt $REBIND_ATTEMPT/$REBIND_MAX_ATTEMPTS for channel $FIREBASE_DEPLOY_CHANNEL"
+            if node scripts/firebase-deploy.mjs hosting:channel:deploy "$FIREBASE_DEPLOY_CHANNEL" \
+              --site "$FIREBASE_HOSTING_SITE" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --expires 1d \
+              --non-interactive 2>&1 | tee "$REBIND_LOG_FILE"; then
+              rm -f "$REBIND_LOG_FILE"
+              REBIND_COMPLETE=1
+              break
+            fi
+
+            if grep -qiE 'unable to queue the operation|http error: 409|status code 409|another operation is in progress|operation is currently in progress' "$REBIND_LOG_FILE" && \
+               [ "$REBIND_ATTEMPT" -lt "$REBIND_MAX_ATTEMPTS" ]; then
+              REBIND_BACKOFF_SECONDS=$((REBIND_ATTEMPT * 15))
+              echo "Firebase operation conflict detected during Hosting rebind; retrying in ${REBIND_BACKOFF_SECONDS}s..."
+              rm -f "$REBIND_LOG_FILE"
+              sleep "$REBIND_BACKOFF_SECONDS"
+              REBIND_ATTEMPT=$((REBIND_ATTEMPT + 1))
+              continue
+            fi
+
+            echo "Firebase Hosting rebind failed and was not retryable."
+            rm -f "$REBIND_LOG_FILE"
+            exit 1
+          done
+          if [ "$REBIND_COMPLETE" != "1" ]; then
+            echo "Firebase Hosting rebind exhausted all attempts."
+            exit 1
+          fi
+
+          REBOUND_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          REBOUND_SERVING_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' <<< "$REBOUND_STATE")"
+          REBOUND_CANDIDATE_TRAFFIC="$(jq -r --arg revision "$FIREBASE_RUNTIME_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$REBOUND_STATE")"
+          REBOUND_TAGGED_REVISION="$(jq -r --arg tag "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+            <<< "$REBOUND_STATE")"
+          REBOUND_CANDIDATE_STATE="$(gcloud run revisions describe "$FIREBASE_RUNTIME_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          REBOUND_CANDIDATE_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$REBOUND_CANDIDATE_STATE")"
+          REBOUND_CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$REBOUND_CANDIDATE_STATE")"
+          if [ "$REBOUND_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$REBOUND_CANDIDATE_TRAFFIC" != "100" ] || \
+             [ "$REBOUND_TAGGED_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$REBOUND_CANDIDATE_IMAGE" != "$FIREBASE_RUNTIME_IMAGE" ] || \
+             [ "$REBOUND_CANDIDATE_READY" != "True" ]; then
+            echo "Cloud Run routing changed during the Firebase Hosting rebind; refusing live clone."
+            exit 1
+          fi
+
+          METADATA_VERIFIED=0
+          HOSTING_REWRITE_TAG=""
+          TARGET_REWRITE_COUNT=0
+          MATCHING_REWRITE_COUNT=0
+          for METADATA_ATTEMPT in $(seq 1 10); do
+            if ! REFRESHED_CHANNEL_STATE="$(get_hosting_channel "$FIREBASE_DEPLOY_CHANNEL")"; then
+              if [ "$METADATA_ATTEMPT" -lt 10 ]; then
+                sleep 3
+                continue
+              fi
+              break
+            fi
+
+            REFRESHED_CHANNEL_NAME="$(jq -r '.name // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            REFRESHED_CHANNEL_URL="$(jq -r '.url // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            REFRESHED_HOSTING_RELEASE="$(jq -r '.release.name // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            REFRESHED_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            REFRESHED_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            REFRESHED_HOSTING_TYPE="$(jq -r '.release.type // empty' <<< "$REFRESHED_CHANNEL_STATE")"
+            TARGET_REWRITE_COUNT="$(jq -r \
+              --arg service "$FIREBASE_SSR_SERVICE" \
+              --arg region "$FIREBASE_REGION" \
+              '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region)] | length' \
+              <<< "$REFRESHED_CHANNEL_STATE")"
+            MATCHING_REWRITE_COUNT="$(jq -r \
+              --arg service "$FIREBASE_SSR_SERVICE" \
+              --arg region "$FIREBASE_REGION" \
+              --arg tag "$FIREBASE_RELEASE_TAG" \
+              '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region and .run.tag == $tag)] | length' \
+              <<< "$REFRESHED_CHANNEL_STATE")"
+            HOSTING_REWRITE_TAG="$(jq -r \
+              --arg service "$FIREBASE_SSR_SERVICE" \
+              --arg region "$FIREBASE_REGION" \
+              '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region) | .run.tag][0] // empty' \
+              <<< "$REFRESHED_CHANNEL_STATE")"
+
+            if [ "$REFRESHED_CHANNEL_NAME" = "$EXPECTED_PREVIEW_CHANNEL" ] && \
+               [ "${REFRESHED_CHANNEL_URL%/}" = "${FIREBASE_PREVIEW_URL%/}" ] && \
+               [ "$REFRESHED_HOSTING_RELEASE" != "$PRE_REBIND_HOSTING_RELEASE" ] && \
+               [ "$REFRESHED_HOSTING_VERSION" != "$PRE_REBIND_HOSTING_VERSION" ] && \
+               [ "$REFRESHED_HOSTING_TYPE" = "DEPLOY" ] && \
+               [ "$REFRESHED_HOSTING_STATUS" = "FINALIZED" ] && \
+               [ "$TARGET_REWRITE_COUNT" = "1" ] && \
+               [ "$MATCHING_REWRITE_COUNT" = "1" ] && \
+               [ "$HOSTING_REWRITE_TAG" = "$FIREBASE_RELEASE_TAG" ]; then
+              METADATA_VERIFIED=1
+              break
+            fi
+            if [ "$METADATA_ATTEMPT" -lt 10 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$METADATA_VERIFIED" != "1" ]; then
+            echo "Refreshed Firebase Hosting preview metadata did not satisfy the release invariant."
+            exit 1
+          fi
+          case "$REFRESHED_HOSTING_VERSION" in
+            "sites/$FIREBASE_HOSTING_SITE/versions/"*) ;;
+            *) echo "Refreshed Firebase Hosting version identifier is invalid."; exit 1 ;;
+          esac
+
+          SMOKE_BASE_URL="$FIREBASE_PREVIEW_URL" \
+            SMOKE_TEST_UID="ci-hosting-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            npm run test:postdeploy
+
+          PRE_CLONE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          PRE_CLONE_SERVING_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' <<< "$PRE_CLONE_STATE")"
+          PRE_CLONE_CANDIDATE_TRAFFIC="$(jq -r --arg revision "$FIREBASE_RUNTIME_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$PRE_CLONE_STATE")"
+          PRE_CLONE_TAGGED_REVISION="$(jq -r --arg tag "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+            <<< "$PRE_CLONE_STATE")"
+          PRE_CLONE_CANDIDATE_STATE="$(gcloud run revisions describe "$FIREBASE_RUNTIME_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          PRE_CLONE_CANDIDATE_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$PRE_CLONE_CANDIDATE_STATE")"
+          PRE_CLONE_CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$PRE_CLONE_CANDIDATE_STATE")"
+          PRE_CLONE_PREVIEW_STATE="$(get_hosting_channel "$FIREBASE_DEPLOY_CHANNEL")"
+          PRE_CLONE_LIVE_STATE="$(get_hosting_channel live)"
+          PRE_CLONE_PREVIEW_TARGET_REWRITES="$(jq -r \
+            --arg service "$FIREBASE_SSR_SERVICE" \
+            --arg region "$FIREBASE_REGION" \
+            --arg tag "$FIREBASE_RELEASE_TAG" \
+            '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region and .run.tag == $tag)] | length' \
+            <<< "$PRE_CLONE_PREVIEW_STATE")"
+          if [ "$PRE_CLONE_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$PRE_CLONE_CANDIDATE_TRAFFIC" != "100" ] || \
+             [ "$PRE_CLONE_TAGGED_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$PRE_CLONE_CANDIDATE_IMAGE" != "$FIREBASE_RUNTIME_IMAGE" ] || \
+             [ "$PRE_CLONE_CANDIDATE_READY" != "True" ] || \
+             [ "$(jq -r '.release.name // empty' <<< "$PRE_CLONE_PREVIEW_STATE")" != "$REFRESHED_HOSTING_RELEASE" ] || \
+             [ "$(jq -r '.release.version.name // empty' <<< "$PRE_CLONE_PREVIEW_STATE")" != "$REFRESHED_HOSTING_VERSION" ] || \
+             [ "$(jq -r '.release.version.status // empty' <<< "$PRE_CLONE_PREVIEW_STATE")" != "FINALIZED" ] || \
+             [ "$PRE_CLONE_PREVIEW_TARGET_REWRITES" != "1" ] || \
+             [ "$(jq -r '.release.name // empty' <<< "$PRE_CLONE_LIVE_STATE")" != "$PREVIOUS_LIVE_HOSTING_RELEASE" ] || \
+             [ "$(jq -r '.release.version.name // empty' <<< "$PRE_CLONE_LIVE_STATE")" != "$PREVIOUS_LIVE_HOSTING_VERSION" ]; then
+            echo "Cloud Run or Firebase Hosting changed during refreshed preview smoke; refusing live clone."
+            exit 1
+          fi
+
+          HOSTING_CLONE_STARTED=1
           node scripts/firebase-deploy.mjs hosting:clone \
             "$FIREBASE_HOSTING_SITE:$FIREBASE_DEPLOY_CHANNEL" \
             "$FIREBASE_HOSTING_SITE:live" \
             --project "$FIREBASE_PROJECT_ID" \
             --non-interactive
+
+          LIVE_PROMOTION_VERIFIED=0
+          for LIVE_ATTEMPT in $(seq 1 10); do
+            if LIVE_CHANNEL_AFTER="$(get_hosting_channel live)"; then
+              LIVE_CHANNEL_NAME="$(jq -r '.name // empty' <<< "$LIVE_CHANNEL_AFTER")"
+              LIVE_CHANNEL_URL="$(jq -r '.url // empty' <<< "$LIVE_CHANNEL_AFTER")"
+              LIVE_HOSTING_VERSION="$(jq -r '.release.version.name // empty' <<< "$LIVE_CHANNEL_AFTER")"
+              LIVE_HOSTING_STATUS="$(jq -r '.release.version.status // empty' <<< "$LIVE_CHANNEL_AFTER")"
+              LIVE_TARGET_REWRITE_COUNT="$(jq -r \
+                --arg service "$FIREBASE_SSR_SERVICE" \
+                --arg region "$FIREBASE_REGION" \
+                '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region)] | length' \
+                <<< "$LIVE_CHANNEL_AFTER")"
+              LIVE_MATCHING_REWRITE_COUNT="$(jq -r \
+                --arg service "$FIREBASE_SSR_SERVICE" \
+                --arg region "$FIREBASE_REGION" \
+                --arg tag "$FIREBASE_RELEASE_TAG" \
+                '[.release.version.config.rewrites[]? | select(.glob == "/**" and .run.serviceId == $service and .run.region == $region and .run.tag == $tag)] | length' \
+                <<< "$LIVE_CHANNEL_AFTER")"
+              if [ "$LIVE_CHANNEL_NAME" = "$EXPECTED_LIVE_CHANNEL" ] && \
+                 [ "${LIVE_CHANNEL_URL%/}" = "$EXPECTED_LIVE_URL" ] && \
+                 [ "$LIVE_HOSTING_VERSION" = "$REFRESHED_HOSTING_VERSION" ] && \
+                 [ "$LIVE_HOSTING_STATUS" = "FINALIZED" ] && \
+                 [ "$LIVE_TARGET_REWRITE_COUNT" = "1" ] && \
+                 [ "$LIVE_MATCHING_REWRITE_COUNT" = "1" ]; then
+                LIVE_PROMOTION_VERIFIED=1
+                break
+              fi
+            fi
+            if [ "$LIVE_ATTEMPT" -lt 10 ]; then
+              sleep 3
+            fi
+          done
+          if [ "$LIVE_PROMOTION_VERIFIED" != "1" ]; then
+            echo "Live Firebase Hosting did not bind to the exact refreshed preview version and release tag."
+            exit 1
+          fi
+
+          POST_CLONE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          POST_CLONE_SERVING_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' <<< "$POST_CLONE_STATE")"
+          POST_CLONE_TAGGED_REVISION="$(jq -r --arg tag "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+            <<< "$POST_CLONE_STATE")"
+          if [ "$POST_CLONE_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$POST_CLONE_TAGGED_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
+            echo "Cloud Run routing changed during the live Firebase Hosting clone."
+            exit 1
+          fi
           PROMOTION_COMPLETE=1
+          unset ACCESS_TOKEN
           trap - EXIT
       - name: Cleanup preview channel
         if: ${{ always() && env.GCP_AUTH_READY == '1' && env.DEPLOY_PERFORMED == '1' }}

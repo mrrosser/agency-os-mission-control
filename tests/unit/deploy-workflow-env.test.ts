@@ -22,7 +22,7 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain("cancel-in-progress: false");
   });
 
-  it("smokes a pinned runtime revision before routing it and refreshing live Hosting", () => {
+  it("smokes a pinned runtime revision and verifies the rebound Hosting tag before live clone", () => {
     const source = readFileSync(
       join(process.cwd(), ".github/workflows/firebase-hosting-merge.yml"),
       "utf8"
@@ -35,12 +35,29 @@ describe("Firebase deployment environment propagation", () => {
     const trafficPromotion = source.indexOf(
       '--to-revisions="$FIREBASE_RUNTIME_REVISION=100"'
     );
+    const firstChannelDeploy = source.indexOf("hosting:channel:deploy");
+    const hostingRebind = source.indexOf(
+      "hosting:channel:deploy",
+      firstChannelDeploy + 1
+    );
+    const rewriteAssertion = source.indexOf('METADATA_VERIFIED" != "1"');
+    const reboundSmoke = source.indexOf(
+      'SMOKE_BASE_URL="$FIREBASE_PREVIEW_URL"'
+    );
     const hostingPromotion = source.indexOf("hosting:clone");
+    const liveVersionAssertion = source.indexOf(
+      'LIVE_HOSTING_VERSION" = "$REFRESHED_HOSTING_VERSION"',
+      hostingPromotion + 1
+    );
 
     expect(candidateTag).toBeGreaterThan(-1);
     expect(smoke).toBeGreaterThan(candidateTag);
     expect(trafficPromotion).toBeGreaterThan(smoke);
-    expect(hostingPromotion).toBeGreaterThan(trafficPromotion);
+    expect(hostingRebind).toBeGreaterThan(trafficPromotion);
+    expect(rewriteAssertion).toBeGreaterThan(hostingRebind);
+    expect(reboundSmoke).toBeGreaterThan(rewriteAssertion);
+    expect(hostingPromotion).toBeGreaterThan(reboundSmoke);
+    expect(liveVersionAssertion).toBeGreaterThan(hostingPromotion);
     expect(source).toContain('RUNTIME_IMAGE" != "$DEPLOY_IMAGE');
     expect(source).toContain("--no-traffic");
     expect(source).toContain(
@@ -64,6 +81,33 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain("TRAFFIC_SWITCHED=0");
     expect(source).toContain('TRAFFIC_SWITCHED" != "1"');
     expect(source).toContain("SMOKE_BASE_URL: ${{ env.SMOKE_BASE_URL }}");
+    expect(source).toContain("firebasehosting.googleapis.com/v1beta1/sites/");
+    expect(source).toContain('x-goog-user-project: $FIREBASE_PROJECT_ID');
+    expect(source).toContain('REBOUND_CANDIDATE_TRAFFIC" != "100"');
+    expect(source).toContain(
+      'PRE_CLONE_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION"'
+    );
+    expect(source).toContain('REFRESHED_HOSTING_VERSION" != "$PRE_REBIND_HOSTING_VERSION"');
+    expect(source).toContain('REFRESHED_HOSTING_STATUS" = "FINALIZED"');
+    expect(source).toContain('MATCHING_REWRITE_COUNT" = "1"');
+    expect(source).toContain('HOSTING_CLONE_STARTED=1');
+    expect(source).toContain('ROLLBACK_LIVE_HOSTING_VERSION" = "$REFRESHED_HOSTING_VERSION"');
+    expect(source).toContain('versionName=${ENCODED_ROLLBACK_VERSION}');
+    expect(source).toContain('PREVIOUS_LIVE_HOSTING_RELEASE');
+    expect(source).toContain('EXPECTED_LIVE_URL="https://${FIREBASE_HOSTING_SITE}.web.app"');
+    expect(source).toContain('LIVE_CHANNEL_NAME" = "$EXPECTED_LIVE_CHANNEL"');
+  });
+
+  it("checks the deployed control-plane knowledge pack and removes its synthetic user", () => {
+    const source = readFileSync(
+      join(process.cwd(), "scripts/post-deploy-smoke.mjs"),
+      "utf8"
+    );
+
+    expect(source).toContain("/api/agents/control-plane");
+    expect(source).toContain('skill?.id === "knowledge_pack_v2"');
+    expect(source).toContain('knowledgePack?.state === "operational"');
+    expect(source).toContain("await auth.deleteUser(uid)");
   });
 
   it("bundles the Agent Nexus knowledge pack into the SSR route", () => {

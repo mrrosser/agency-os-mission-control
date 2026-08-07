@@ -189,6 +189,26 @@ async function main() {
       "X-Idempotency-Key": crypto.randomUUID(),
     };
 
+    // The SSR control plane must carry its required static knowledge pack in the deployed image.
+    {
+      const { response, payload } = await requestJson(`${baseUrl}/api/agents/control-plane`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Agent control-plane check failed (${response.status}): ${JSON.stringify(payload)}`
+        );
+      }
+      const knowledgePack = Array.isArray(payload?.skills)
+        ? payload.skills.find((skill) => skill?.id === "knowledge_pack_v2")
+        : null;
+      assert(
+        knowledgePack?.state === "operational",
+        `Agent control-plane knowledge pack is not operational: ${JSON.stringify(knowledgePack)}`
+      );
+      console.log("[smoke] control-plane knowledge pack passed");
+    }
+
     // 3) Seed one lead for deterministic worker run
     await db.collection("leads").doc(leadDocId).set({
       userId: uid,
@@ -357,6 +377,12 @@ async function main() {
         await Promise.all([...leadsSnap.docs.map((doc) => doc.ref.delete()), ...jobsSnap.docs.map((doc) => doc.ref.delete())]);
         await runRef.delete();
       }
+    } catch {
+      // ignore cleanup errors
+    }
+
+    try {
+      await auth.deleteUser(uid);
     } catch {
       // ignore cleanup errors
     }

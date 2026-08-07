@@ -308,6 +308,28 @@ describe("agents control-plane route", () => {
 
     getAdminDbMock.mockReturnValue({
       collection: (name: string) => {
+        if (name === "runtime_heartbeats") {
+          return {
+            doc: () => ({
+              get: async () => ({
+                exists: true,
+                data: () => ({
+                  runtimeId: "openclaw-gateway",
+                  receivedAt: new Date(),
+                  sentAt: new Date().toISOString(),
+                  sourceCommit: "a".repeat(40),
+                  services: {
+                    openclaw_gateway: "active",
+                    voice_mcp_rt: "active",
+                    voice_mcp_rosser: "active",
+                    voice_mcp_router: "active",
+                  },
+                }),
+              }),
+            }),
+          };
+        }
+
         if (name === "identities") {
           return {
             doc: () => ({
@@ -429,7 +451,14 @@ describe("agents control-plane route", () => {
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "paperclip_system")?.state).toBe("operational");
-    expect(payload.services.some((service: { id: string }) => service.id === "openclaw_sync")).toBe(true);
+    expect(
+      payload.services.find((service: { id: string }) => service.id === "openclaw_sync")
+    ).toEqual(
+      expect.objectContaining({
+        state: "operational",
+        detail: expect.stringContaining("authenticated receipt"),
+      })
+    );
     expect(
       payload.topology.find((item: { serviceId: string; links: Array<{ agentId: string }> }) => item.serviceId === "paperclip_system")?.links.some((link: { agentId: string }) => link.agentId === "orchestrator")
     ).toBe(true);

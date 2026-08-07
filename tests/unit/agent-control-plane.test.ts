@@ -19,10 +19,14 @@ const NO_EXTERNAL_TOOLS = {
   smAutoEndpoint: null,
   leadOpsEndpoint: null,
   paperclipEndpoint: null,
-  openClawSyncGeneratedAt: null,
-  openClawSyncTargetRoot: null,
-  openClawSyncManifestPath: null,
-  openClawSyncStaleHours: null,
+  openClawHeartbeatState: "offline",
+  openClawHeartbeatReason: "missing",
+  openClawHeartbeatReceivedAt: null,
+  openClawHeartbeatSentAt: null,
+  openClawHeartbeatAgeSeconds: null,
+  openClawHeartbeatRuntimeId: "openclaw-gateway",
+  openClawHeartbeatSourceCommit: null,
+  openClawHeartbeatServices: {},
 } as const;
 
 const DEFAULT_PAPERCLIP = {
@@ -155,7 +159,7 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.services.find((service) => service.id === "smauto_mcp")?.state).toBe("degraded");
     expect(snapshot.services.find((service) => service.id === "leadops_mcp")?.state).toBe("degraded");
     expect(snapshot.services.find((service) => service.id === "paperclip_system")?.state).toBe("degraded");
-    expect(snapshot.services.find((service) => service.id === "openclaw_sync")?.state).toBe("degraded");
+    expect(snapshot.services.find((service) => service.id === "openclaw_sync")?.state).toBe("offline");
     expect(snapshot.services.find((service) => service.id === "square_pos")?.state).toBe("degraded");
     expect(snapshot.diagnostics.recommendations[0]).toContain("OpenAI API key");
   });
@@ -277,10 +281,19 @@ describe("buildControlPlaneSnapshot", () => {
           toolCount: 5,
           detail: "Live MCP initialize + tools/list probe passed.",
         },
-        openClawSyncGeneratedAt: "2026-02-16T16:30:00.000Z",
-        openClawSyncTargetRoot: "C:\\CTO Projects\\AI_HELL_MARY",
-        openClawSyncManifestPath: "C:\\CTO Projects\\AI_HELL_MARY\\docs\\generated\\mission-control\\sync-manifest.json",
-        openClawSyncStaleHours: 1,
+        openClawHeartbeatState: "operational",
+        openClawHeartbeatReason: "fresh",
+        openClawHeartbeatReceivedAt: "2026-02-16T17:59:00.000Z",
+        openClawHeartbeatSentAt: "2026-02-16T17:58:59.000Z",
+        openClawHeartbeatAgeSeconds: 60,
+        openClawHeartbeatRuntimeId: "openclaw-gateway",
+        openClawHeartbeatSourceCommit: "a".repeat(40),
+        openClawHeartbeatServices: {
+          openclaw_gateway: "active",
+          voice_mcp_rt: "active",
+          voice_mcp_rosser: "active",
+          voice_mcp_router: "active",
+        },
       },
       posWorker: {
         health: "operational",
@@ -495,10 +508,19 @@ describe("buildControlPlaneSnapshot", () => {
         smAutoEndpoint: "https://smauto.example/mcp",
         leadOpsEndpoint: "ftp://leadops.local",
         paperclipEndpoint: "paperclip-local",
-        openClawSyncGeneratedAt: "2026-02-10T18:00:00.000Z",
-        openClawSyncTargetRoot: "C:\\CTO Projects\\AI_HELL_MARY",
-        openClawSyncManifestPath: "C:\\CTO Projects\\AI_HELL_MARY\\docs\\generated\\mission-control\\sync-manifest.json",
-        openClawSyncStaleHours: 144,
+        openClawHeartbeatState: "degraded",
+        openClawHeartbeatReason: "stale",
+        openClawHeartbeatReceivedAt: "2026-02-10T18:00:00.000Z",
+        openClawHeartbeatSentAt: "2026-02-10T17:59:59.000Z",
+        openClawHeartbeatAgeSeconds: 518400,
+        openClawHeartbeatRuntimeId: "openclaw-gateway",
+        openClawHeartbeatSourceCommit: "b".repeat(40),
+        openClawHeartbeatServices: {
+          openclaw_gateway: "active",
+          voice_mcp_rt: "active",
+          voice_mcp_rosser: "active",
+          voice_mcp_router: "active",
+        },
       },
       posWorker: null,
       paperclip: DEFAULT_PAPERCLIP,
@@ -522,7 +544,7 @@ describe("buildControlPlaneSnapshot", () => {
     expect(String(smAuto?.detail || "")).toContain("live initialize + tools/list probe has not passed");
     expect(String(leadOps?.detail || "")).toContain("invalid");
     expect(String(paperclip?.detail || "")).toContain("invalid");
-    expect(String(openClawSync?.detail || "")).toContain("last sync");
+    expect(String(openClawSync?.detail || "")).toContain("authenticated receipt");
   });
 
   it("marks revenue KPI degraded when a critical outcome gate fails", () => {

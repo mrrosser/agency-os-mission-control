@@ -25,7 +25,7 @@ copy .env.local.example .env.local
 - Optional: `APIFY_TOKEN` + `APIFY_GOOGLE_MAPS_ACTOR_ID` (enables Apify Maps fallback/provider)
 - Optional: `APIFY_EST_COST_PER_1K_RESULTS_USD` (used for estimated Apify source cost in diagnostics)
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
-- Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_API_KEY`
+- Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_AUTH_MODE`, `LEADOPS_MCP_ID_TOKEN_AUDIENCE`, `LEADOPS_MCP_API_KEY`
 - Optional (Paperclip orchestration + OpenClaw runtime visibility): `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL`, `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID`, `PAPERCLIP_TIMEOUT_MS`, `PAPERCLIP_HEALTH_PATH`, `PAPERCLIP_COMPANIES_PATH`, `PAPERCLIP_AGENTS_PATH`, `PAPERCLIP_ACTIVE_RUNS_PATH`, `PAPERCLIP_ACTION_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE`, `AI_HELL_MARY_ROOT`
 - Required for operator controls: `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions; controls fail closed when unset)
 - Optional (internal rollout guardrails): `NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI=false`
@@ -142,6 +142,8 @@ npm run crm:backfill:paperclip -- --uid <firebase_uid> --company-id <paperclip_c
   - `SMAUTO_MCP_AUTH_MODE=none|api_key|id_token`
   - `SMAUTO_MCP_ID_TOKEN_AUDIENCE` (required when `SMAUTO_MCP_AUTH_MODE=id_token`)
   - `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`)
+  - `LEADOPS_MCP_AUTH_MODE=none|api_key|id_token` (defaults to `api_key` when a key exists, otherwise `none`)
+  - `LEADOPS_MCP_ID_TOKEN_AUDIENCE` (required when `LEADOPS_MCP_AUTH_MODE=id_token`; use the Cloud Run service URL without `/mcp`)
   - `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL` (base visibility URL)
   - `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID` (enables direct lifecycle proxy actions, live Paperclip summary counts, and canonical customer-memory reads/writes)
   - `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE` (customer-memory proxy paths when Paperclip is the CRM source of truth)
@@ -382,8 +384,10 @@ Required GitHub Actions configuration:
   - `vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL` (optional; defaults to `social.dispatch.enqueue`)
   - `vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED` (defaults to `false` for MCP session endpoints)
   - `vars.SMAUTO_MCP_PROTOCOL_VERSION` (defaults to `2025-03-26`)
-  - `vars.LEADOPS_MCP_SERVER_URL` (defaults to `https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp`)
-  - `secrets.LEADOPS_MCP_API_KEY` (optional but recommended; required for preflight-ready LeadOps MCP auth)
+  - `vars.LEADOPS_MCP_SERVER_URL` (defaults to `https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app/mcp`)
+  - `vars.LEADOPS_MCP_AUTH_MODE` (defaults to `id_token`)
+  - `vars.LEADOPS_MCP_ID_TOKEN_AUDIENCE` (defaults to `https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app`)
+  - `secrets.LEADOPS_MCP_API_KEY` (only required when `LEADOPS_MCP_AUTH_MODE=api_key`)
 
 Production health monitor:
 - `.github/workflows/postdeploy-health-monitor.yml` runs authenticated smoke on a schedule.

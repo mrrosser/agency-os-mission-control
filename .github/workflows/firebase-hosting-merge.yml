@@ -147,7 +147,9 @@ jobs:
           SMAUTO_MCP_SOCIAL_DISPATCH_TOOL: ${{ vars.SMAUTO_MCP_SOCIAL_DISPATCH_TOOL || 'social.dispatch.enqueue' }}
           SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED: ${{ vars.SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED || 'false' }}
           SMAUTO_MCP_PROTOCOL_VERSION: ${{ vars.SMAUTO_MCP_PROTOCOL_VERSION || '2025-03-26' }}
-          LEADOPS_MCP_SERVER_URL: ${{ vars.LEADOPS_MCP_SERVER_URL || 'https://leadops-engine-gdyt2qma6a-uc.a.run.app/mcp' }}
+          LEADOPS_MCP_SERVER_URL: ${{ vars.LEADOPS_MCP_SERVER_URL || 'https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app/mcp' }}
+          LEADOPS_MCP_AUTH_MODE: ${{ vars.LEADOPS_MCP_AUTH_MODE || 'id_token' }}
+          LEADOPS_MCP_ID_TOKEN_AUDIENCE: ${{ vars.LEADOPS_MCP_ID_TOKEN_AUDIENCE || 'https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app' }}
           LEADOPS_MCP_API_KEY: ${{ secrets.LEADOPS_MCP_API_KEY || '' }}
           AGENT_ACTION_ALLOWED_UIDS: ${{ secrets.AGENT_ACTION_ALLOWED_UIDS || '' }}
         run: |
@@ -204,6 +206,8 @@ jobs:
           append_env_update "SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED" "$SMAUTO_MCP_WEBHOOK_FALLBACK_ENABLED"
           append_env_update "SMAUTO_MCP_PROTOCOL_VERSION" "$SMAUTO_MCP_PROTOCOL_VERSION"
           append_env_update "LEADOPS_MCP_SERVER_URL" "$LEADOPS_MCP_SERVER_URL"
+          append_env_update "LEADOPS_MCP_AUTH_MODE" "$LEADOPS_MCP_AUTH_MODE"
+          append_env_update "LEADOPS_MCP_ID_TOKEN_AUDIENCE" "$LEADOPS_MCP_ID_TOKEN_AUDIENCE"
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"

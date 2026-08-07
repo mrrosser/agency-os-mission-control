@@ -128,7 +128,7 @@ npm run revenue:cadence:audit
 
 ## Safety
 
-- Keep `requireApprovalGates=true` unless explicitly approved to disable.
-- If a legacy template is not approval-safe yet, set `REVENUE_AUTOMATION_DAY2_REQUIRE_APPROVAL_GATES=false` temporarily and track remediation.
+- `requireApprovalGates=true` is mandatory. The route forces approval gates on even if a caller submits `false`.
+- Quarantine or repair a legacy template that is not approval-safe; never weaken the scheduler or worker policy to run it.
 - Day 2 is still draft-first by policy; no auto-send from this loop.
 - Treat any token mismatch as a hard failure (403) and rotate token on suspected leakage.

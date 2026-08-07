@@ -11,11 +11,11 @@ Map business capabilities to the backend that serves them, with explicit connect
 | Capability | Primary backend/tool | Required runtime config | Fallback behavior |
 | --- | --- | --- | --- |
 | Lead sourcing + qualification | `agency-os-mission-control` APIs (`/api/lead-runs/*`) | `GOOGLE_PLACES_API_KEY` or `APIFY_TOKEN` | Run from CRM-only lead pool when providers are missing |
-| Social content orchestration | `SMAuto` MCP endpoint + Mission Control dispatch worker (`/api/social/drafts/dispatch/worker-task`) | `SMAUTO_MCP_SERVER_URL` + (`SMAUTO_MCP_AUTH_MODE` and auth creds), `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist) | Keep content tasks in `social_dispatch_queue` (`pending_external_tool`/`failed`) until worker drain succeeds |
+| Social content orchestration | `SMAuto` MCP endpoint + Mission Control dispatch worker (`/api/social/drafts/dispatch/worker-task`) | `SMAUTO_MCP_SERVER_URL` + (`SMAUTO_MCP_AUTH_MODE` and auth creds), successful `initialize` + `tools/list` probe, `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist) | Report the connector degraded and keep content tasks in `social_dispatch_queue` (`pending_external_tool`/`failed`) until the live probe and worker drain succeed |
 | Social draft approvals in Google Space | Mission Control Social Draft APIs (`/api/social/drafts*`) + Google Chat webhook | `SOCIAL_DRAFT_WORKER_TOKEN` (or Scheduler OIDC allowlist `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific webhook env) | Keep drafts in `pending_approval` when webhook is unavailable; approved drafts auto-queue as `pending_external_tool` in `social_dispatch_queue` |
 | Social onboarding and connection diagnostics | Mission Control onboarding status API (`/api/social/onboarding/status`) + Integrations/Settings UI cards | Firebase user auth, runtime preflight envs, optional `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` for external account selector CTA | Users can still run manually via runbooks; checklist highlights exact missing step and queue health |
 | Research intelligence pulls | OpenClaw research + Firecrawl | `FIRECRAWL_API_KEY` | Continue in reduced mode using standard web search sources |
-| Mission-control lead operations tools | LeadOps MCP endpoint | `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`) | Keep operator UI active; block external write actions |
+| Mission-control lead operations tools | LeadOps MCP endpoint | `LEADOPS_MCP_SERVER_URL` (+ optional `LEADOPS_MCP_API_KEY`) and successful `initialize` + `tools/list` probe | Report configured-but-unproven endpoints degraded; keep operator UI active and block external write actions |
 | Email/Calendar execution | Google Workspace tools | OAuth scopes for Gmail + Calendar | Draft-only flow with explicit operator approval |
 | Day-1 revenue daily loop (service mode) | Mission Control Day1 APIs (`/api/revenue/day1*`) | `REVENUE_DAY1_WORKER_TOKEN`, lead template + queue envs | Run manually via authenticated `POST /api/revenue/day1` |
 
@@ -25,7 +25,7 @@ Map business capabilities to the backend that serves them, with explicit connect
 3. Validate runtime checks:
    - UI: `/dashboard/settings` -> **Runtime Config Preflight**
    - API: `GET /api/runtime/preflight`
-4. Validate control-plane services:
+4. Validate control-plane services (a configured URL is not operational until its bounded live MCP probe passes):
    - UI: `/dashboard/agents` -> **Services + Tools**
    - API: `GET /api/agents/control-plane`
 

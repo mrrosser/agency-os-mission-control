@@ -2,6 +2,14 @@ import type { SecretStatus } from "@/lib/api/secrets";
 import type { AgentSpaceStatus } from "@/lib/agent-status";
 import type { LeadRunAlert, LeadRunQuotaSummary } from "@/lib/lead-runs/quotas";
 import {
+  AGENT_REGISTRY,
+  resolveAgentDefinition,
+  type AgentCapability,
+  type AgentScope,
+  type AgentServiceId,
+  type AgentTrustLevel,
+} from "@/lib/agents/registry";
+import {
   buildAutonomousBusinessSnapshot,
   type AdOpsInput,
   type AutonomousBusinessSnapshot,
@@ -84,10 +92,21 @@ export interface ControlPlaneExternalToolInput {
   smAutoEndpoint: string | null;
   leadOpsEndpoint: string | null;
   paperclipEndpoint: string | null;
+  smAutoProbe?: ControlPlaneConnectorProbe | null;
+  leadOpsProbe?: ControlPlaneConnectorProbe | null;
   openClawSyncGeneratedAt: string | null;
   openClawSyncTargetRoot: string | null;
   openClawSyncManifestPath: string | null;
   openClawSyncStaleHours: number | null;
+}
+
+export interface ControlPlaneConnectorProbe {
+  state: "operational" | "degraded";
+  checkedAt: string;
+  latencyMs: number;
+  protocolVersion: string;
+  toolCount: number | null;
+  detail: string;
 }
 
 export interface ControlPlanePosWorkerInput {
@@ -161,6 +180,10 @@ export interface ControlPlaneAgentSnapshot {
   state: AgentRuntimeState;
   lastSeenAt: string | null;
   channels: string[];
+  scopes?: AgentScope[];
+  trustLevel?: AgentTrustLevel;
+  capabilities?: AgentCapability[];
+  consequentialExternalWrites?: boolean;
   estimatedMonthlyCostUsd: number;
   blockedBy: string[];
 }
@@ -347,105 +370,13 @@ interface BuildControlPlaneSnapshotInput {
   };
 }
 
-type ServiceKey =
-  | "openai_brain"
-  | "google_workspace"
-  | "gmail_tooling"
-  | "calendar_tooling"
-  | "drive_knowledge"
-  | "twilio_voice"
-  | "elevenlabs_tts"
-  | "firecrawl_research"
-  | "square_pos"
-  | "smauto_mcp"
-  | "leadops_mcp"
-  | "paperclip_system"
-  | "openclaw_sync";
+type ServiceKey = AgentServiceId;
 
 const PROVIDER_TO_SERVICE: Partial<Record<ControlPlaneBillingProviderId, ServiceKey>> = {
   openai: "openai_brain",
   twilio: "twilio_voice",
   elevenlabs: "elevenlabs_tts",
 };
-
-const AGENT_DEFINITIONS: Array<{
-  id: string;
-  label: string;
-  role: string;
-  businessId: string | null;
-  baseMonthlyCostUsd: number;
-  requiredServices: ServiceKey[];
-  declaredServices?: ServiceKey[];
-  aliases: string[];
-}> = [
-  {
-    id: "orchestrator",
-    label: "Master Orchestrator",
-    role: "router",
-    businessId: null,
-    baseMonthlyCostUsd: 26,
-    requiredServices: ["openai_brain"],
-    declaredServices: ["smauto_mcp", "leadops_mcp", "paperclip_system", "openclaw_sync"],
-    aliases: ["main", "default", "coding"],
-  },
-  {
-    id: "biz-aicf",
-    label: "AI CoFoundry Agent",
-    role: "business-specialist",
-    businessId: "ai_cofoundry",
-    baseMonthlyCostUsd: 14,
-    requiredServices: ["openai_brain", "google_workspace"],
-    aliases: ["biz_aicf"],
-  },
-  {
-    id: "biz-rng",
-    label: "RNG Agent",
-    role: "business-specialist",
-    businessId: "rosser_nft_gallery",
-    baseMonthlyCostUsd: 14,
-    requiredServices: ["openai_brain", "google_workspace"],
-    aliases: ["biz_rng"],
-  },
-  {
-    id: "biz-rts",
-    label: "RT Solutions Agent",
-    role: "business-specialist",
-    businessId: "rt_solutions",
-    baseMonthlyCostUsd: 14,
-    requiredServices: ["openai_brain", "google_workspace"],
-    aliases: ["biz_rts"],
-  },
-  {
-    id: "fn-marketing",
-    label: "Marketing Agent",
-    role: "function-specialist",
-    businessId: null,
-    baseMonthlyCostUsd: 11,
-    requiredServices: ["openai_brain"],
-    declaredServices: ["smauto_mcp"],
-    aliases: ["fn_marketing"],
-  },
-  {
-    id: "fn-research",
-    label: "Research Agent",
-    role: "function-specialist",
-    businessId: null,
-    baseMonthlyCostUsd: 11,
-    requiredServices: ["openai_brain", "firecrawl_research"],
-    declaredServices: ["paperclip_system", "openclaw_sync", "leadops_mcp"],
-    aliases: ["fn_research"],
-  },
-  {
-    id: "fn-actions",
-    label: "Action Executor",
-    role: "writer",
-    businessId: null,
-    baseMonthlyCostUsd: 16,
-    requiredServices: ["gmail_tooling", "calendar_tooling", "google_workspace"],
-    declaredServices: ["leadops_mcp", "paperclip_system", "openclaw_sync"],
-    aliases: ["fn_actions"],
-  },
-];
 
 const ACTIVITY_MULTIPLIER: Record<AgentRuntimeState, number> = {
   active: 1,
@@ -503,22 +434,14 @@ function parseConnectorEndpoint(value: string | null | undefined): ParsedConnect
   }
 }
 
-function mapAgentAliases(agentId: string): string {
-  const normalized = agentId.trim().toLowerCase();
-  for (const def of AGENT_DEFINITIONS) {
-    if (def.id === normalized) return def.id;
-    if (def.aliases.includes(normalized)) return def.id;
-  }
-  return normalized;
-}
-
 function resolveServiceState(
   id: ServiceKey,
   secretStatus: SecretStatus,
   google: ControlPlaneGoogleCapabilities,
   driveSummary: ControlPlaneDriveSummary,
   externalTools: ControlPlaneExternalToolInput,
-  posWorker: ControlPlanePosWorkerInput | null | undefined
+  posWorker: ControlPlanePosWorkerInput | null | undefined,
+  paperclip?: PaperclipControlSnapshot
 ): ControlPlaneServiceSnapshot {
   if (id === "openai_brain") {
     const hasKey = secretStatus.openaiKey !== "missing";
@@ -682,12 +605,15 @@ function resolveServiceState(
 
   if (id === "smauto_mcp") {
     const endpoint = parseConnectorEndpoint(externalTools.smAutoEndpoint);
+    const probe = externalTools.smAutoProbe;
     return {
       id,
       label: "SMAuto MCP",
-      state: endpoint.origin ? "operational" : "degraded",
+      state: endpoint.origin && probe?.state === "operational" ? "operational" : "degraded",
       detail: endpoint.origin
-        ? `Connected via ${endpoint.origin}`
+        ? probe?.state === "operational"
+          ? `${probe.detail} (${probe.latencyMs}ms, ${probe.toolCount ?? 0} tools)`
+          : probe?.detail || `Endpoint configured at ${endpoint.origin}; live initialize + tools/list probe has not passed.`
         : endpoint.invalid
           ? "SMAUTO_MCP_SERVER_URL is invalid. Use a full http(s) URL."
           : "Set SMAUTO_MCP_SERVER_URL to enable social orchestration tool calls.",
@@ -698,12 +624,15 @@ function resolveServiceState(
 
   if (id === "leadops_mcp") {
     const endpoint = parseConnectorEndpoint(externalTools.leadOpsEndpoint);
+    const probe = externalTools.leadOpsProbe;
     return {
       id,
       label: "LeadOps MCP",
-      state: endpoint.origin ? "operational" : "degraded",
+      state: endpoint.origin && probe?.state === "operational" ? "operational" : "degraded",
       detail: endpoint.origin
-        ? `Connected via ${endpoint.origin}`
+        ? probe?.state === "operational"
+          ? `${probe.detail} (${probe.latencyMs}ms, ${probe.toolCount ?? 0} tools)`
+          : probe?.detail || `Endpoint configured at ${endpoint.origin}; live initialize + tools/list probe has not passed.`
         : endpoint.invalid
           ? "LEADOPS_MCP_SERVER_URL is invalid. Use a full http(s) URL."
           : "Set LEADOPS_MCP_SERVER_URL to enable LeadOps/mission-control backend tools.",
@@ -717,9 +646,11 @@ function resolveServiceState(
     return {
       id,
       label: "Paperclip System",
-      state: endpoint.origin ? "operational" : "degraded",
+      state: endpoint.origin && paperclip?.reachable ? "operational" : "degraded",
       detail: endpoint.origin
-        ? `Visible via ${endpoint.origin}`
+        ? paperclip?.reachable
+          ? `Live Paperclip health probe passed via ${endpoint.origin}.`
+          : paperclip?.detail || `Endpoint configured at ${endpoint.origin}; live health probe has not passed.`
         : endpoint.invalid
           ? "PAPERCLIP_SYSTEM_URL / PAPERCLIP_MCP_SERVER_URL is invalid. Use a full http(s) URL."
           : "Set PAPERCLIP_SYSTEM_URL or PAPERCLIP_MCP_SERVER_URL to surface Paperclip in Agent Nexus.",
@@ -866,7 +797,7 @@ function createTopologySnapshots(
 
   return services
     .map((service) => {
-      const links = AGENT_DEFINITIONS.flatMap((definition) => {
+      const links = AGENT_REGISTRY.flatMap((definition) => {
         let relationship: ControlPlaneInteractionRelationship | null = null;
         if (definition.requiredServices.includes(service.id as ServiceKey)) {
           relationship = "required";
@@ -1145,12 +1076,12 @@ function buildRecommendations(args: {
 
   const smAuto = serviceById.get("smauto_mcp");
   if (smAuto?.state !== "operational") {
-    recommendations.push("Configure SMAUTO_MCP_SERVER_URL to restore social orchestration tooling.");
+    recommendations.push("Configure SMAuto and make its live MCP initialize + tools/list probe pass before using social orchestration tooling.");
   }
 
   const leadOps = serviceById.get("leadops_mcp");
   if (leadOps?.state !== "operational") {
-    recommendations.push("Configure LEADOPS_MCP_SERVER_URL to enable LeadOps mission-control tool routing.");
+    recommendations.push("Configure LeadOps and make its live MCP initialize + tools/list probe pass before enabling tool routing.");
   }
 
   const paperclip = serviceById.get("paperclip_system");
@@ -1242,6 +1173,8 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     smAutoEndpoint: process.env.SMAUTO_MCP_SERVER_URL || null,
     leadOpsEndpoint: process.env.LEADOPS_MCP_SERVER_URL || null,
     paperclipEndpoint: process.env.PAPERCLIP_SYSTEM_URL || process.env.PAPERCLIP_MCP_SERVER_URL || null,
+    smAutoProbe: null,
+    leadOpsProbe: null,
     openClawSyncGeneratedAt: null,
     openClawSyncTargetRoot: null,
     openClawSyncManifestPath: null,
@@ -1260,7 +1193,15 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     resolveServiceState("square_pos", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
     resolveServiceState("smauto_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
     resolveServiceState("leadops_mcp", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
-    resolveServiceState("paperclip_system", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
+    resolveServiceState(
+      "paperclip_system",
+      input.secretStatus,
+      input.google,
+      input.driveSummary,
+      externalTools,
+      input.posWorker,
+      input.paperclip
+    ),
     resolveServiceState("openclaw_sync", input.secretStatus, input.google, input.driveSummary, externalTools, input.posWorker),
   ];
   const providerBilling = input.billing?.providers || [];
@@ -1271,7 +1212,8 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
   const latestSeenByAgent = new Map<string, string | null>();
 
   for (const [spaceId, status] of Object.entries(input.spaces)) {
-    const mappedAgentId = mapAgentAliases(status.agentId || "");
+    const mappedAgentId = resolveAgentDefinition(status.agentId || "")?.id;
+    if (!mappedAgentId) continue;
     if (!channelsByAgent.has(mappedAgentId)) channelsByAgent.set(mappedAgentId, new Set<string>());
     channelsByAgent.get(mappedAgentId)?.add(spaceId);
     const existing = latestSeenByAgent.get(mappedAgentId);
@@ -1287,7 +1229,7 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     }
   }
 
-  const agents = AGENT_DEFINITIONS.map((definition) => {
+  const agents = AGENT_REGISTRY.map((definition) => {
     const lastSeenAt = latestSeenByAgent.get(definition.id) || null;
     const baseState = deriveRuntimeState(lastSeenAt, nowMs);
     const blockedBy = definition.requiredServices
@@ -1305,6 +1247,10 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
       state,
       lastSeenAt,
       channels: Array.from(channelsByAgent.get(definition.id) || []),
+      scopes: [...definition.scopes],
+      trustLevel: definition.trustLevel,
+      capabilities: [...definition.capabilities],
+      consequentialExternalWrites: definition.canConsequentialExternalWrite,
       estimatedMonthlyCostUsd,
       blockedBy,
     } satisfies ControlPlaneAgentSnapshot;

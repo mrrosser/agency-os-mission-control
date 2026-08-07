@@ -8,6 +8,8 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { assertLeadRunOwner } from "@/lib/lead-runs/receipts";
 import {
   defaultLeadRunDiagnostics,
+  enforceLeadRunApprovalGates,
+  hasUngatedLeadRunActions,
   LEAD_RUN_JOB_DOC_ID,
   leadRunJobRef,
   triggerLeadRunWorker,
@@ -62,15 +64,15 @@ function serializeJob(job: LeadRunJobDoc) {
     status: job.status,
     config: {
       dryRun: Boolean(job.config?.dryRun),
-      draftFirst: Boolean(job.config?.draftFirst),
-      requireBookingConfirmation: job.config?.requireBookingConfirmation !== false,
+      draftFirst: true,
+      requireBookingConfirmation: true,
       timeZone: job.config?.timeZone || "UTC",
       businessKey: job.config?.businessKey || null,
       businessUnit: job.config?.businessUnit || null,
       offerCode: job.config?.offerCode || null,
-      useSMS: Boolean(job.config?.useSMS),
-      useAvatar: Boolean(job.config?.useAvatar),
-      useOutboundCall: Boolean(job.config?.useOutboundCall),
+      useSMS: false,
+      useAvatar: false,
+      useOutboundCall: false,
     },
     leadDocIds: job.leadDocIds || [],
     nextIndex: job.nextIndex || 0,
@@ -182,9 +184,9 @@ export const POST = withApiHandler(
         });
       }
 
-      const config: LeadRunJobConfig = {
+      const requestedConfig: LeadRunJobConfig = {
         dryRun: Boolean(body.config?.dryRun),
-        draftFirst: Boolean(body.config?.draftFirst),
+        draftFirst: body.config?.draftFirst ?? true,
         requireBookingConfirmation: body.config?.requireBookingConfirmation ?? true,
         timeZone: body.config?.timeZone || "UTC",
         useSMS: Boolean(body.config?.useSMS),
@@ -194,6 +196,18 @@ export const POST = withApiHandler(
         businessUnit,
         offerCode: offerResolution.offerCode,
       };
+      const config = enforceLeadRunApprovalGates(requestedConfig);
+      if (hasUngatedLeadRunActions(requestedConfig)) {
+        log.warn("lead-runs.jobs.protected_actions_forced_to_approval", {
+          runId,
+          uid: user.uid,
+          draftFirst: config.draftFirst,
+          requireBookingConfirmation: config.requireBookingConfirmation,
+          useSMS: config.useSMS,
+          useAvatar: config.useAvatar,
+          useOutboundCall: config.useOutboundCall,
+        });
+      }
 
       const orgId = await resolveLeadRunOrgId(user.uid, log);
       await claimLeadRunQuota({

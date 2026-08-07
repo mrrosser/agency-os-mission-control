@@ -3,11 +3,14 @@ import { GET as listCustomers, POST as upsertCustomer } from "@/app/api/crm/cust
 import { PATCH as updateCustomerStage } from "@/app/api/crm/customers/[customerId]/route";
 import { GET as getTimeline } from "@/app/api/crm/customers/[customerId]/timeline/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/handler";
 import { withIdempotency } from "@/lib/api/idempotency";
 import {
+  assertProjectedCustomerWriteAccess,
   getProjectedCustomerTimeline,
   listProjectedCustomers,
   normalizePaperclipCustomers,
+  upsertProjectedCustomer,
   updateProjectedCustomerStage,
 } from "@/lib/crm/customer-memory";
 import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
@@ -25,6 +28,7 @@ vi.mock("@/lib/api/idempotency", () => ({
 }));
 
 vi.mock("@/lib/crm/customer-memory", () => ({
+  assertProjectedCustomerWriteAccess: vi.fn(),
   listProjectedCustomers: vi.fn(),
   getProjectedCustomerTimeline: vi.fn(),
   upsertProjectedCustomer: vi.fn(),
@@ -40,8 +44,10 @@ vi.mock("@/lib/paperclip/client", () => ({
 
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const withIdempotencyMock = vi.mocked(withIdempotency);
+const assertProjectedCustomerWriteAccessMock = vi.mocked(assertProjectedCustomerWriteAccess);
 const listProjectedCustomersMock = vi.mocked(listProjectedCustomers);
 const getProjectedCustomerTimelineMock = vi.mocked(getProjectedCustomerTimeline);
+const upsertProjectedCustomerMock = vi.mocked(upsertProjectedCustomer);
 const updateProjectedCustomerStageMock = vi.mocked(updateProjectedCustomerStage);
 const normalizePaperclipCustomersMock = vi.mocked(normalizePaperclipCustomers);
 const readPaperclipClientConfigMock = vi.mocked(readPaperclipClientConfig);
@@ -55,6 +61,7 @@ describe("crm customer routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as never);
+    assertProjectedCustomerWriteAccessMock.mockResolvedValue(undefined);
     withIdempotencyMock.mockImplementation(async (_params, executor: () => Promise<unknown>) => ({
       data: await executor(),
       replayed: false,
@@ -160,6 +167,111 @@ describe("crm customer routes", () => {
     expect(data.customer.companyName).toBe("Alpha Dental");
   });
 
+  it("keeps submitted business, offer, and stage in the Paperclip fallback projection", async () => {
+    readPaperclipClientConfigMock.mockReturnValue({
+      baseUrl: "https://paperclip.example/system",
+      serviceToken: "secret",
+      timeoutMs: 1000,
+      defaultCompanyId: "company-1",
+      healthPath: "/api/health",
+      companiesPath: "/api/companies",
+      agentsPath: "/api/agents",
+      activeRunsPath: "/api/runs?state=active",
+      actionPathTemplate: "/api/agents/{agentId}/{action}",
+      customerRecordsPath: "/api/customers",
+      customerTimelinePathTemplate: "/api/customers/{customerId}/timeline",
+      customerUpdatePathTemplate: "/api/customers/{customerId}",
+    });
+    PaperclipClientMock.mockImplementation(
+      () =>
+        ({
+          upsertCustomer: vi.fn(async () => ({ items: [] })),
+        }) as never
+    );
+    normalizePaperclipCustomersMock.mockReturnValue([]);
+
+    const response = await upsertCustomer(
+      new Request("http://localhost/api/crm/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: "Gamma Studio",
+          businessUnit: "rt_solutions",
+          offerCode: "RTS-AI-LUNCH-LEARN",
+          pipelineStage: "proposal",
+        }),
+      }) as never,
+      routeContext() as never
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.customer).toMatchObject({
+      businessUnit: "rt_solutions",
+      offerCode: "RTS-AI-LUNCH-LEARN",
+      pipelineStage: "proposal",
+    });
+  });
+
+  it("denies an upsert when the projected customer belongs to another user", async () => {
+    assertProjectedCustomerWriteAccessMock.mockRejectedValue(
+      new ApiError(403, "Customer record is owned by another user")
+    );
+
+    const response = await upsertCustomer(
+      new Request("http://localhost/api/crm/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: "cust_foreign", companyName: "Foreign Customer" }),
+      }) as never,
+      routeContext() as never
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.error).toBe("Customer record is owned by another user");
+    expect(upsertProjectedCustomerMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back when Paperclip rejects customer ownership", async () => {
+    readPaperclipClientConfigMock.mockReturnValue({
+      baseUrl: "https://paperclip.example/system",
+      serviceToken: "secret",
+      timeoutMs: 1000,
+      defaultCompanyId: "company-1",
+      healthPath: "/api/health",
+      companiesPath: "/api/companies",
+      agentsPath: "/api/agents",
+      activeRunsPath: "/api/runs?state=active",
+      actionPathTemplate: "/api/agents/{agentId}/{action}",
+      customerRecordsPath: "/api/customers",
+      customerTimelinePathTemplate: "/api/customers/{customerId}/timeline",
+      customerUpdatePathTemplate: "/api/customers/{customerId}",
+    });
+    PaperclipClientMock.mockImplementation(
+      () =>
+        ({
+          upsertCustomer: vi.fn(async () => {
+            throw Object.assign(new Error("conflict"), { status: 409 });
+          }),
+        }) as never
+    );
+
+    const response = await upsertCustomer(
+      new Request("http://localhost/api/crm/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customerId: "cust_conflict", companyName: "Conflicted Customer" }),
+      }) as never,
+      routeContext() as never
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(data.error).toBe("Customer record is not writable by this user");
+    expect(upsertProjectedCustomerMock).not.toHaveBeenCalled();
+  });
+
   it("returns projected customer timeline when Paperclip is unavailable", async () => {
     getProjectedCustomerTimelineMock.mockResolvedValue([
       {
@@ -210,5 +322,25 @@ describe("crm customer routes", () => {
     expect(response.status).toBe(200);
     expect(data.sourceOfTruth).toBe("firestore_projected");
     expect(data.event.summary).toContain("proposal");
+  });
+
+  it("denies a stage update when the projected customer belongs to another user", async () => {
+    assertProjectedCustomerWriteAccessMock.mockRejectedValue(
+      new ApiError(403, "Customer record is owned by another user")
+    );
+
+    const response = await updateCustomerStage(
+      new Request("http://localhost/api/crm/customers/cust_foreign", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipelineStage: "proposal" }),
+      }) as never,
+      routeContext({ customerId: "cust_foreign" }) as never
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.error).toBe("Customer record is owned by another user");
+    expect(updateProjectedCustomerStageMock).not.toHaveBeenCalled();
   });
 });

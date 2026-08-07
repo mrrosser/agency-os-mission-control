@@ -83,6 +83,8 @@ interface ActivityLog {
     timestamp?: Timestamp | null;
 }
 
+const LIVE_LEAD_FALLBACK_LIMIT = 500;
+
 export default function DashboardPage() {
     const { user } = useAuth();
     const router = useRouter();
@@ -216,6 +218,18 @@ export default function DashboardPage() {
             return;
         }
 
+        const correlationId = crypto.randomUUID();
+        const handleSnapshotError = (source: string) => (error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error("dashboard.firestore_snapshot_failed", {
+                source,
+                uid: user.uid,
+                correlationId,
+                message,
+            });
+            setLoading(false);
+        };
+
         // 1. Real-time analytics doc listener (Primary)
         const unsubscribeAnalytics = onSnapshot(
             doc(db, "analytics", user.uid),
@@ -224,13 +238,20 @@ export default function DashboardPage() {
                     setAnalytics(snapshot.data() as AnalyticsData);
                 }
                 // Don't set loading false here yet, wait for leads/activities if empty
-            }
+            },
+            handleSnapshotError("analytics")
         );
 
-        // 2. Real-time leads calculation (Secondary/Live)
+        // 2. Bounded real-time leads calculation (secondary fallback).
+        // At the cap, preserve the primary analytics document rather than showing a partial total.
         const unsubscribeLeads = onSnapshot(
-            query(collection(db, "leads"), where("userId", "==", user.uid)),
+            query(
+                collection(db, "leads"),
+                where("userId", "==", user.uid),
+                limit(LIVE_LEAD_FALLBACK_LIMIT)
+            ),
             (snapshot) => {
+                if (snapshot.size >= LIVE_LEAD_FALLBACK_LIMIT) return;
                 const totalLeads = snapshot.size;
                 let converted = 0;
                 let meetingsScheduled = 0;
@@ -257,7 +278,8 @@ export default function DashboardPage() {
                     depositsCollected,
                     pipelineValue,
                 }));
-            }
+            },
+            handleSnapshotError("leads")
         );
 
         // 3. Real-time activity logs
@@ -283,7 +305,8 @@ export default function DashboardPage() {
                 }));
 
                 setLoading(false);
-            }
+            },
+            handleSnapshotError("activities")
         );
 
         return () => {

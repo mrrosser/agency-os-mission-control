@@ -14,6 +14,7 @@ import {
 import { runDay1RevenueAutomation } from "@/lib/revenue/day1-automation";
 import { runDay2RevenueAutomation } from "@/lib/revenue/day2-automation";
 import { runDay30RevenueAutomation } from "@/lib/revenue/day30-automation";
+import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
 
 const stageSchema = z.enum(["day1", "day2", "day30"]);
 
@@ -127,6 +128,27 @@ export const POST = withApiHandler(
       );
     }
 
+    const pause = await resolveRuntimePause({
+      uid,
+      businessKey: body.businessKey,
+      log,
+    });
+    if (pause.paused) {
+      log.warn("revenue.automation.autonomy_paused", {
+        uid,
+        businessKey: body.businessKey,
+        businessId: pause.businessId,
+        reason: pause.reason,
+      });
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: pause.reason,
+        businessKey: body.businessKey,
+        correlationId,
+      });
+    }
+
     const origin = request.nextUrl?.origin || new URL(request.url).origin;
     const requestedStages = normalizedRequestedStages(body.runStages, body.dueOnly);
     const effectiveStage = resolveRevenueAutomationStage(requestedStages);
@@ -180,7 +202,7 @@ export const POST = withApiHandler(
         followupSequence: body.followupSequence,
         processDueResponses: body.processDueResponses,
         responseLoopMaxTasks: body.responseLoopMaxTasks,
-        requireApprovalGates: body.requireApprovalGates,
+        requireApprovalGates: true,
       });
 
       return NextResponse.json({
@@ -209,7 +231,7 @@ export const POST = withApiHandler(
       followupSequence: body.followupSequence,
       processDueResponses: body.processDueResponses,
       responseLoopMaxTasks: body.responseLoopMaxTasks,
-      requireApprovalGates: body.requireApprovalGates,
+      requireApprovalGates: true,
       runCloserQueue: body.runCloserQueue,
       runRevenueMemory: body.runRevenueMemory,
       runWeeklyKpi: body.runWeeklyKpi ?? !body.dueOnly,

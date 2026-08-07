@@ -16,6 +16,8 @@ export default defineConfig([
     ".next/**",
     ".firebase/**",
     ".tmp/**",
+    // Local capture/browser profiles are generated evidence, not application source.
+    "tmp/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

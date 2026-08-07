@@ -6,6 +6,7 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import type { Logger } from "@/lib/logging";
 import {
+  persistGoogleAccountProfileTokens,
   persistGoogleAccountTokenFailure,
   persistGoogleAccountTokens,
   resolveGoogleAccountTokens,
@@ -255,6 +256,41 @@ export async function storeGoogleTokens(
   );
 
   log?.info("oauth.tokens.saved", { uid });
+}
+
+export async function storeGoogleProfileTokens(
+  uid: string,
+  profileId: string,
+  tokens: {
+    access_token?: string | null;
+    refresh_token?: string | null;
+    expiry_date?: number | null;
+    scope?: string | null;
+    token_type?: string | null;
+  },
+  log?: Logger
+) {
+  try {
+    const persisted = await persistGoogleAccountProfileTokens(uid, profileId, {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiryDate: tokens.expiry_date,
+      scope: tokens.scope,
+      tokenType: tokens.token_type,
+    });
+    log?.info("oauth.profile_tokens.saved", {
+      uid,
+      profileId: persisted.profileId,
+      accountId: persisted.accountId,
+      storageMode: "account_secret",
+    });
+    return persisted;
+  } catch (error) {
+    if (error instanceof Error && error.message === "Missing refresh token from Google") {
+      throw new ApiError(500, error.message);
+    }
+    throw error;
+  }
 }
 
 export function resolveMissionControlOrigin(

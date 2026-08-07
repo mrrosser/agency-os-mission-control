@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -10,31 +10,71 @@ const DEFAULT_LOCATION = "us-central1";
 const DEFAULT_TIME_ZONE = "America/Chicago";
 const GCLOUD_BIN = "gcloud";
 const GCLOUD_USE_SHELL = false;
+const GCLOUD_CONFIG_NAME_PATTERN = /^[a-z][-a-z0-9]*$/;
+
+export const EXPECTED_RETRY_CONFIG = Object.freeze({
+  retryCount: 3,
+  maxRetryDuration: "0s",
+  minBackoffDuration: "60s",
+  maxBackoffDuration: "300s",
+  maxDoublings: 2,
+});
 
 // repo-improvement: gcloud-runtime-hardening
 export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   const { preferFresh = false } = options;
   const sourceEnv = { ...baseEnv };
+  const requestedActiveConfigName = String(
+    sourceEnv.CLOUDSDK_ACTIVE_CONFIG_NAME || ""
+  ).trim();
+  if (
+    requestedActiveConfigName &&
+    !GCLOUD_CONFIG_NAME_PATTERN.test(requestedActiveConfigName)
+  ) {
+    throw new Error("Invalid CLOUDSDK_ACTIVE_CONFIG_NAME");
+  }
 
   let configRoot = sourceEnv.CLOUDSDK_CONFIG?.trim();
+  let freshConfig = false;
+  if (!configRoot && !preferFresh) {
+    const defaultCandidates = [
+      sourceEnv.APPDATA ? join(sourceEnv.APPDATA, "gcloud") : "",
+      join(homedir(), ".config", "gcloud"),
+    ].filter(Boolean);
+    configRoot = defaultCandidates.find((candidate) => existsSync(candidate));
+  }
   if (!configRoot || preferFresh) {
     configRoot = mkdtempSync(join(tmpdir(), "mission-control-gcloud-"));
+    freshConfig = true;
   }
 
   const logDir = join(configRoot, "logs");
-  const configDir = join(configRoot, "configurations");
   mkdirSync(logDir, { recursive: true });
-  mkdirSync(configDir, { recursive: true });
-  writeFileSync(join(configDir, "config_default"), "[core]\ndisable_usage_reporting = True\n", {
-    encoding: "utf8",
-  });
+  if (freshConfig) {
+    const configDir = join(configRoot, "configurations");
+    mkdirSync(configDir, { recursive: true });
+    const configName = requestedActiveConfigName || "default";
+    writeFileSync(
+      join(configDir, `config_${configName}`),
+      "[core]\ndisable_usage_reporting = True\n",
+      { encoding: "utf8" }
+    );
+  }
 
-  return {
+  const writableEnv = {
     ...sourceEnv,
     CLOUDSDK_CONFIG: configRoot,
     CLOUDSDK_LOG_DIR: logDir,
-    CLOUDSDK_ACTIVE_CONFIG_NAME: "default",
   };
+  // Preserve the caller's named active configuration. When the variable is
+  // absent, gcloud reads the active_config marker from the selected config
+  // root. Only a newly-created isolated root should be pinned to default.
+  if (requestedActiveConfigName) {
+    writableEnv.CLOUDSDK_ACTIVE_CONFIG_NAME = requestedActiveConfigName;
+  } else if (freshConfig) {
+    writableEnv.CLOUDSDK_ACTIVE_CONFIG_NAME = "default";
+  }
+  return writableEnv;
 }
 
 export function buildGcloudInvocation(args, options = {}) {
@@ -56,56 +96,64 @@ export function buildGcloudInvocation(args, options = {}) {
   };
 }
 
-const JOB_SPECS = [
+export const JOB_SPECS = [
   {
-    name: "revenue-day1-rts-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-rts",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_RTS_CRON",
+    defaultSchedule: "5 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "rts",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day1-rng-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-rng",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_RNG_CRON",
+    defaultSchedule: "20 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "rng",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day1-aicf-start",
-    endpointPath: "/api/revenue/day1/worker-task",
-    payload: { templateId: true, uid: true, requireApprovalGates: null, runWeeklyKpi: null },
+    name: "revenue-automation-aicf",
+    endpointPath: "/api/revenue/automation/daily/worker-task",
+    scheduleEnv: "REVENUE_AUTOMATION_AICF_CRON",
+    defaultSchedule: "35 5 * * *",
+    payload: {
+      uid: true,
+      businessKey: "aicf",
+      dueOnly: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: false,
+      runStagesIncludes: "day30",
+    },
   },
   {
-    name: "revenue-day2-rts-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day2-rng-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day2-aicf-loop",
-    endpointPath: "/api/revenue/day2/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: null },
-  },
-  {
-    name: "revenue-day30-rts-daily",
+    name: "revenue-weekly-brain",
     endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-rng-daily",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-aicf-daily",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: false },
-  },
-  {
-    name: "revenue-day30-weekly-brain",
-    endpointPath: "/api/revenue/day30/worker-task",
-    payload: { templateIds: true, uid: true, requireApprovalGates: true, runWeeklyKpi: true },
+    scheduleEnv: "REVENUE_WEEKLY_BRAIN_CRON",
+    defaultSchedule: "10 6 * * 1",
+    payload: {
+      templateIds: true,
+      uid: true,
+      dryRun: false,
+      requireApprovalGates: true,
+      runWeeklyKpi: true,
+    },
   },
 ];
 
@@ -143,6 +191,55 @@ function sanitizePath(value) {
   }
 }
 
+function durationSeconds(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(\d+)(?:\.(\d+))?s$/.exec(value.trim());
+  if (!match) return null;
+  const wholeSeconds = Number(match[1]);
+  const fractionalSeconds = match[2] ? Number(`0.${match[2]}`) : 0;
+  return wholeSeconds + fractionalSeconds;
+}
+
+function formatActual(value) {
+  return value === undefined || value === null ? "<unset>" : String(value);
+}
+
+export function validateRetryConfig(
+  retryConfig,
+  expectedRetryConfig = EXPECTED_RETRY_CONFIG
+) {
+  const actual = retryConfig && typeof retryConfig === "object" ? retryConfig : {};
+  const mismatches = [];
+
+  for (const field of ["retryCount", "maxDoublings"]) {
+    if (actual[field] !== expectedRetryConfig[field]) {
+      mismatches.push(
+        `retryConfig.${field} expected=${expectedRetryConfig[field]} actual=${formatActual(
+          actual[field]
+        )}`
+      );
+    }
+  }
+
+  for (const field of [
+    "maxRetryDuration",
+    "minBackoffDuration",
+    "maxBackoffDuration",
+  ]) {
+    const actualSeconds = durationSeconds(actual[field]);
+    const expectedSeconds = durationSeconds(expectedRetryConfig[field]);
+    if (actualSeconds === null || actualSeconds !== expectedSeconds) {
+      mismatches.push(
+        `retryConfig.${field} expected=${expectedRetryConfig[field]} actual=${formatActual(
+          actual[field]
+        )}`
+      );
+    }
+  }
+
+  return mismatches;
+}
+
 function validatePayload(payload, spec) {
   const mismatches = [];
   if (!payload || typeof payload !== "object") {
@@ -161,6 +258,32 @@ function validatePayload(payload, spec) {
 
   if (spec.uid && typeof payload.uid !== "string") {
     mismatches.push("payload.uid missing");
+  }
+
+  if (typeof spec.businessKey === "string" && payload.businessKey !== spec.businessKey) {
+    mismatches.push(
+      `payload.businessKey expected=${spec.businessKey} actual=${String(payload.businessKey)}`
+    );
+  }
+
+  for (const booleanField of ["dueOnly", "dryRun"]) {
+    if (
+      typeof spec[booleanField] === "boolean" &&
+      payload[booleanField] !== spec[booleanField]
+    ) {
+      mismatches.push(
+        `payload.${booleanField} expected=${spec[booleanField]} actual=${String(
+          payload[booleanField]
+        )}`
+      );
+    }
+  }
+
+  if (
+    typeof spec.runStagesIncludes === "string" &&
+    (!Array.isArray(payload.runStages) || !payload.runStages.includes(spec.runStagesIncludes))
+  ) {
+    mismatches.push(`payload.runStages missing=${spec.runStagesIncludes}`);
   }
 
   if (
@@ -261,6 +384,13 @@ async function main() {
         );
       }
 
+      const expectedSchedule = readEnv(spec.scheduleEnv, spec.defaultSchedule);
+      if (described.schedule !== expectedSchedule) {
+        jobMismatch.push(
+          `schedule expected=${expectedSchedule} actual=${String(described.schedule || "")}`
+        );
+      }
+
       const actualPath = sanitizePath(target.uri || "");
       if (actualPath !== spec.endpointPath) {
         jobMismatch.push(`path expected=${spec.endpointPath} actual=${actualPath || "<none>"}`);
@@ -280,6 +410,7 @@ async function main() {
       }
 
       jobMismatch.push(...validatePayload(payload, spec.payload));
+      jobMismatch.push(...validateRetryConfig(described.retryConfig));
 
       if (jobMismatch.length > 0) {
         mismatches.push({ job: spec.name, issues: jobMismatch });
@@ -293,11 +424,16 @@ async function main() {
         timeZone: described.timeZone || null,
         uri: target.uri || null,
         hasOidc,
+        retryConfig: described.retryConfig || null,
         payloadSummary: payload
           ? {
               uidPresent: typeof payload.uid === "string" && payload.uid.length > 0,
               templateId: typeof payload.templateId === "string" ? payload.templateId : null,
               templateIds: Array.isArray(payload.templateIds) ? payload.templateIds : null,
+              businessKey: typeof payload.businessKey === "string" ? payload.businessKey : null,
+              dueOnly: typeof payload.dueOnly === "boolean" ? payload.dueOnly : null,
+              dryRun: typeof payload.dryRun === "boolean" ? payload.dryRun : null,
+              runStages: Array.isArray(payload.runStages) ? payload.runStages : null,
               requireApprovalGates:
                 typeof payload.requireApprovalGates === "boolean"
                   ? payload.requireApprovalGates
@@ -318,6 +454,7 @@ async function main() {
         timeZone: null,
         uri: null,
         hasOidc: false,
+        retryConfig: null,
         payloadSummary: null,
         mismatches: [message],
       });
@@ -330,6 +467,7 @@ async function main() {
     projectId,
     location,
     expectedTimeZone,
+    expectedRetryConfig: EXPECTED_RETRY_CONFIG,
     requireOidc,
     jobCount: JOB_SPECS.length,
     mismatchCount: mismatches.length,

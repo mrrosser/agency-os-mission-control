@@ -57,10 +57,11 @@ export function BetaFeedback() {
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
                 <Button
-                    className="fixed bottom-4 right-4 h-12 rounded-full shadow-lg bg-zinc-900 border border-zinc-700 hover:bg-zinc-800 text-white z-50 animate-in fade-in slide-in-from-bottom-5"
+                    aria-label="Open beta feedback"
+                    className="fixed bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] right-3 z-40 h-11 w-11 animate-in rounded-full border border-zinc-700 bg-zinc-900 p-0 text-white shadow-lg fade-in slide-in-from-bottom-5 hover:bg-zinc-800 sm:bottom-4 sm:right-4 sm:w-auto sm:px-4"
                 >
-                    <MessageSquarePlus className="mr-2 h-4 w-4 text-blue-500" />
-                    Beta Feedback
+                    <MessageSquarePlus className="h-4 w-4 text-blue-400 sm:mr-2" />
+                    <span className="sr-only sm:not-sr-only">Beta Feedback</span>
                 </Button>
             </DialogTrigger>
             <DialogContent className="bg-zinc-950 border-zinc-800 text-white sm:max-w-[425px]">

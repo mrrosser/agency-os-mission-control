@@ -42,6 +42,12 @@ import {
     workspaceKeyFromBusinessUnit,
     type BusinessWorkspaceKey,
 } from "@/lib/revenue/offers";
+import {
+    OPERATIONS_POLL_INTERVAL_MS,
+    isTerminalLeadRunStatus,
+    shouldRefreshRunReceipts,
+    type LeadRunPollSnapshot,
+} from "@/lib/operations/polling";
 
 interface DriveCreateFolderResponse {
     success?: boolean;
@@ -263,6 +269,12 @@ interface LeadRunJob {
     lastError?: string | null;
 }
 
+interface LoadRunReceiptsOptions {
+    silent?: boolean;
+    includeDiagnostics?: boolean;
+    signal?: AbortSignal;
+}
+
 type ApiErrorIssue = { path?: Array<string | number>; message?: string };
 type ApiErrorDetails = { issues?: ApiErrorIssue[] };
 
@@ -358,8 +370,8 @@ export default function OperationsPage() {
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
     const [businessKey, setBusinessKey] = useState<BusinessWorkspaceKey>("aicf");
     const [offerCode, setOfferCode] = useState<string>(DEFAULT_OFFER_CODE_BY_BUSINESS.ai_cofoundry);
-    const [draftFirst, setDraftFirst] = useState(false);
-    const [dryRun, setDryRun] = useState(false);
+    const [draftFirst, setDraftFirst] = useState(true);
+    const [dryRun, setDryRun] = useState(true);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
     const [receiptLeads, setReceiptLeads] = useState<LeadReceiptLeadView[]>([]);
     const [receiptRunMeta, setReceiptRunMeta] = useState<NonNullable<LeadRunReceiptsResponse["run"]> | null>(null);
@@ -389,6 +401,9 @@ export default function OperationsPage() {
     const [loadingReceipts, setLoadingReceipts] = useState(false);
     const [receiptRunIdInput, setReceiptRunIdInput] = useState("");
     const [backgroundJob, setBackgroundJob] = useState<LeadRunJob | null>(null);
+    const receiptsInFlightRef = useRef(false);
+    const backgroundPollInFlightRef = useRef(false);
+    const backgroundPollSnapshotRef = useRef<LeadRunPollSnapshot | null>(null);
     const [startingBackgroundRun, setStartingBackgroundRun] = useState(false);
     const [jobActionLoading, setJobActionLoading] = useState(false);
     const [lastErrorMessage, setLastErrorMessage] = useState<string | null>(null);
@@ -792,12 +807,16 @@ export default function OperationsPage() {
         }
     };
 
-    const loadRunReceipts = async (runId: string) => {
-        if (!user) return;
+    const loadRunReceipts = async (runId: string, options: LoadRunReceiptsOptions = {}) => {
+        if (!user) return false;
         const normalizedRunId = runId.trim();
-        if (!normalizedRunId) return;
+        if (!normalizedRunId || receiptsInFlightRef.current) return false;
 
-        setLoadingReceipts(true);
+        const silent = options.silent === true;
+        const includeDiagnostics = options.includeDiagnostics !== false;
+        receiptsInFlightRef.current = true;
+
+        if (!silent) setLoadingReceipts(true);
         try {
             const headers = await buildAuthHeaders(user, {
                 correlationId: normalizedRunId,
@@ -805,6 +824,7 @@ export default function OperationsPage() {
             const res = await fetch(`/api/lead-runs/${normalizedRunId}/receipts`, {
                 method: "GET",
                 headers,
+                signal: options.signal,
             });
             const data = await readApiJson<LeadRunReceiptsResponse & { error?: string }>(res);
             if (!res.ok) {
@@ -838,17 +858,23 @@ export default function OperationsPage() {
             }));
 
             localStorage.setItem("mission_control_last_run_id", normalizedRunId);
-            void loadTelemetryGroups(normalizedRunId);
-            void loadQuotaSummary();
-            void loadAlerts();
-            toast.success(`Loaded receipts for run ${normalizedRunId.slice(0, 8)}`);
+            if (includeDiagnostics) {
+                void loadTelemetryGroups(normalizedRunId);
+                void loadQuotaSummary();
+                void loadAlerts();
+            }
+            if (!silent) toast.success(`Loaded receipts for run ${normalizedRunId.slice(0, 8)}`);
+            return true;
         } catch (error: unknown) {
+            if (error instanceof Error && error.name === "AbortError") return false;
             const message = error instanceof Error ? error.message : String(error);
             setLastErrorMessage(message);
-            toast.error("Could not load run receipts", { description: message });
+            if (!silent) toast.error("Could not load run receipts", { description: message });
             reportClientError(message, { source: "operations.load_receipts" });
+            return false;
         } finally {
-            setLoadingReceipts(false);
+            receiptsInFlightRef.current = false;
+            if (!silent) setLoadingReceipts(false);
         }
     };
 
@@ -857,7 +883,7 @@ export default function OperationsPage() {
         const stored = localStorage.getItem("mission_control_last_run_id");
         if (stored) {
             setReceiptRunIdInput(stored);
-            void loadRunReceipts(stored);
+            void loadRunReceipts(stored, { silent: true, includeDiagnostics: true });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid]);
@@ -899,28 +925,16 @@ export default function OperationsPage() {
         const wantsSMS = Boolean(outreach.useSMS);
         const wantsCall = Boolean(outreach.useOutboundCall);
         const wantsAvatar = Boolean(outreach.useAvatar);
-        const wantsDraftFirst = Boolean(outreach.draftFirst);
-
-        if (wantsSMS && !hasTwilio) {
-            toast.warning("Template requested SMS, but Twilio config is incomplete.", {
-                description: "Set SID, token, and phone number in Settings. SMS has been disabled for this run.",
-            });
-        }
-        if (wantsCall && !(hasTwilio && hasElevenLabs)) {
-            toast.warning("Template requested outbound calls, but required keys are missing.", {
-                description: "Set Twilio SID/token/phone and ElevenLabs key. Outbound calls have been disabled for this run.",
-            });
-        }
-        if (wantsAvatar && !hasHeyGen) {
-            toast.warning("Template requested avatar video, but HeyGen key is missing.", {
-                description: "Avatar video has been disabled for this run.",
+        if (wantsSMS || wantsCall || wantsAvatar || outreach.draftFirst === false) {
+            toast.info("Protected template actions need approval", {
+                description: "This run will create Gmail drafts only. SMS, calls, avatar dispatch, direct email sends, and calendar creation stay disabled until their approval records are connected.",
             });
         }
 
-        setUseSMS(wantsSMS && hasTwilio);
-        setUseOutboundCall(wantsCall && hasTwilio && hasElevenLabs);
-        setUseAvatar(wantsAvatar && hasHeyGen);
-        setDraftFirst(wantsDraftFirst);
+        setUseSMS(false);
+        setUseOutboundCall(false);
+        setUseAvatar(false);
+        setDraftFirst(true);
     };
 
     const onSelectTemplate = (templateId: string) => {
@@ -1097,8 +1111,8 @@ export default function OperationsPage() {
         addLog("\n🛑 Lead run stopped by user.");
     };
 
-    const refreshBackgroundJob = async (runId: string) => {
-        if (!user) return;
+    const refreshBackgroundJob = async (runId: string, signal?: AbortSignal): Promise<LeadRunJob | null> => {
+        if (!user) return null;
         try {
             const headers = await buildAuthHeaders(user, {
                 correlationId: runId,
@@ -1106,6 +1120,7 @@ export default function OperationsPage() {
             const res = await fetch(`/api/lead-runs/${runId}/jobs`, {
                 method: "GET",
                 headers,
+                signal,
             });
             const data = await readApiJson<{ job?: LeadRunJob | null; error?: string }>(res);
             if (!res.ok) {
@@ -1115,43 +1130,43 @@ export default function OperationsPage() {
                     `Failed to load background job (status ${res.status}${cid ? ` cid=${cid}` : ""})`
                 );
             }
-            setBackgroundJob(data.job || null);
-            if (data.job) {
+            const job = data.job || null;
+            setBackgroundJob(job);
+            if (job) {
                 setDiagnostics((prev) => ({
                     ...prev,
-                    candidateTotal: data.job?.diagnostics?.sourceFetched ?? prev.candidateTotal ?? 0,
-                    scoredCount: data.job?.diagnostics?.sourceScored ?? prev.scoredCount ?? 0,
+                    candidateTotal: job.diagnostics?.sourceFetched ?? prev.candidateTotal ?? 0,
+                    scoredCount: job.diagnostics?.sourceScored ?? prev.scoredCount ?? 0,
                     filteredOut:
-                        data.job?.diagnostics?.sourceFilteredByScore ??
+                        job.diagnostics?.sourceFilteredByScore ??
                         prev.filteredOut ??
                         0,
-                    sourceWithEmail: data.job?.diagnostics?.sourceWithEmail ?? prev.sourceWithEmail ?? 0,
-                    sourceWithoutEmail: data.job?.diagnostics?.sourceWithoutEmail ?? prev.sourceWithoutEmail ?? 0,
-                    queueLagSeconds: data.job?.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
-                    processed: data.job?.diagnostics?.processedLeads || prev.processed || 0,
-                    failedLeads: data.job?.diagnostics?.failedLeads || prev.failedLeads || 0,
+                    sourceWithEmail: job.diagnostics?.sourceWithEmail ?? prev.sourceWithEmail ?? 0,
+                    sourceWithoutEmail: job.diagnostics?.sourceWithoutEmail ?? prev.sourceWithoutEmail ?? 0,
+                    queueLagSeconds: job.queueLagSeconds ?? prev.queueLagSeconds ?? 0,
+                    processed: job.diagnostics?.processedLeads || prev.processed || 0,
+                    failedLeads: job.diagnostics?.failedLeads || prev.failedLeads || 0,
                     calendarRetries:
-                        data.job?.diagnostics?.calendarRetries || prev.calendarRetries || 0,
-                    meetingsScheduled: data.job?.diagnostics?.meetingsScheduled || prev.meetingsScheduled || 0,
-                    meetingsDrafted: data.job?.diagnostics?.meetingsDrafted || prev.meetingsDrafted || 0,
-                    emailsSent: data.job?.diagnostics?.emailsSent || prev.emailsSent || 0,
-                    emailsDrafted: data.job?.diagnostics?.emailsDrafted || prev.emailsDrafted || 0,
-                    noEmail: data.job?.diagnostics?.noEmail || prev.noEmail || 0,
-                    noSlot: data.job?.diagnostics?.noSlot || prev.noSlot || 0,
-                    smsSent: data.job?.diagnostics?.smsSent || prev.smsSent || 0,
-                    callsPlaced: data.job?.diagnostics?.callsPlaced || prev.callsPlaced || 0,
-                    avatarsQueued: data.job?.diagnostics?.avatarsQueued || prev.avatarsQueued || 0,
-                    channelFailures: data.job?.diagnostics?.channelFailures || prev.channelFailures || 0,
+                        job.diagnostics?.calendarRetries || prev.calendarRetries || 0,
+                    meetingsScheduled: job.diagnostics?.meetingsScheduled || prev.meetingsScheduled || 0,
+                    meetingsDrafted: job.diagnostics?.meetingsDrafted || prev.meetingsDrafted || 0,
+                    emailsSent: job.diagnostics?.emailsSent || prev.emailsSent || 0,
+                    emailsDrafted: job.diagnostics?.emailsDrafted || prev.emailsDrafted || 0,
+                    noEmail: job.diagnostics?.noEmail || prev.noEmail || 0,
+                    noSlot: job.diagnostics?.noSlot || prev.noSlot || 0,
+                    smsSent: job.diagnostics?.smsSent || prev.smsSent || 0,
+                    callsPlaced: job.diagnostics?.callsPlaced || prev.callsPlaced || 0,
+                    avatarsQueued: job.diagnostics?.avatarsQueued || prev.avatarsQueued || 0,
+                    channelFailures: job.diagnostics?.channelFailures || prev.channelFailures || 0,
                 }));
-                if (data.job.status === "completed" || data.job.status === "failed") {
-                    void loadQuotaSummary();
-                    void loadAlerts();
-                }
             }
+            return job;
         } catch (error: unknown) {
+            if (error instanceof Error && error.name === "AbortError") return null;
             const message = error instanceof Error ? error.message : String(error);
             setLastErrorMessage(message);
             reportClientError(message, { source: "operations.refresh_background_job", runId });
+            return null;
         }
     };
 
@@ -1348,14 +1363,15 @@ export default function OperationsPage() {
                     action: "start",
                     config: {
                         dryRun,
-                        draftFirst,
+                        draftFirst: true,
+                        requireBookingConfirmation: true,
                         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
                         businessKey,
                         businessUnit: selectedBusinessUnit,
                         offerCode: normalizeOfferCode(offerCode) || DEFAULT_OFFER_CODE_BY_BUSINESS[selectedBusinessUnit],
-                        useSMS,
-                        useAvatar,
-                        useOutboundCall,
+                        useSMS: false,
+                        useAvatar: false,
+                        useOutboundCall: false,
                     },
                 }),
             });
@@ -1398,17 +1414,55 @@ export default function OperationsPage() {
         if (!backgroundJob) return;
         if (!(backgroundJob.status === "queued" || backgroundJob.status === "running")) return;
 
-        const interval = window.setInterval(() => {
-            void refreshBackgroundJob(sourceRunId);
-            void loadRunReceipts(sourceRunId);
-        }, 5000);
+        const controller = new AbortController();
+        let disposed = false;
 
-        return () => window.clearInterval(interval);
+        const poll = async () => {
+            if (disposed || document.visibilityState === "hidden" || backgroundPollInFlightRef.current) return;
+            backgroundPollInFlightRef.current = true;
+            try {
+                const job = await refreshBackgroundJob(sourceRunId, controller.signal);
+                if (!job || disposed) return;
+
+                const snapshot: LeadRunPollSnapshot = {
+                    runId: job.runId,
+                    status: job.status,
+                    nextIndex: job.nextIndex,
+                };
+                const receiptsChanged = shouldRefreshRunReceipts(backgroundPollSnapshotRef.current, snapshot);
+                if (receiptsChanged) {
+                    const terminal = isTerminalLeadRunStatus(job.status);
+                    const receiptsLoaded = await loadRunReceipts(sourceRunId, {
+                        silent: true,
+                        includeDiagnostics: terminal,
+                        signal: terminal ? undefined : controller.signal,
+                    });
+                    if (receiptsLoaded) {
+                        backgroundPollSnapshotRef.current = snapshot;
+                    }
+                } else {
+                    backgroundPollSnapshotRef.current = snapshot;
+                }
+            } finally {
+                backgroundPollInFlightRef.current = false;
+            }
+        };
+
+        void poll();
+        const interval = window.setInterval(() => void poll(), OPERATIONS_POLL_INTERVAL_MS);
+
+        return () => {
+            disposed = true;
+            controller.abort();
+            window.clearInterval(interval);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.uid, sourceRunId, backgroundJob?.status]);
 
     const handleRun = async () => {
-        const legacyInlineEnabled = process.env.NEXT_PUBLIC_ENABLE_LEGACY_INLINE_RUN === "true";
+        const legacyInlineEnabled =
+            process.env.NODE_ENV !== "production" &&
+            process.env.NEXT_PUBLIC_ENABLE_LEGACY_INLINE_RUN === "true";
         if (!legacyInlineEnabled) {
             addLog("ℹ Worker mode enabled: starting background run.");
             await startBackgroundRun();
@@ -2776,7 +2830,7 @@ export default function OperationsPage() {
                                 <div className="pt-4 border-t border-zinc-800 space-y-3">
                                     <div className="space-y-1">
                                         <h3 className="text-sm font-semibold text-white">Outreach Power-Ups ⚡</h3>
-                                        <p className="text-xs text-zinc-400">Enhance outreach with AI channels</p>
+                                        <p className="text-xs text-zinc-400">Protected channels remain visible here but require a future approval workflow.</p>
                                     </div>
 
                                     <div className="pt-4 border-t border-zinc-800">
@@ -2800,13 +2854,14 @@ export default function OperationsPage() {
                                                     id="useSMS"
                                                     checked={useSMS}
                                                     onChange={(e) => setUseSMS(e.target.checked)}
-                                                    disabled={!hasTwilio}
+                                                    disabled
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-blue-600 focus:ring-blue-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
                                                     <label htmlFor="useSMS" className="text-sm font-medium leading-none text-zinc-200">
                                                         Enable SMS Follow-up
                                                     </label>
+                                                    <p className="text-xs text-zinc-500">Approval-gated; disabled for automatic runs.</p>
                                                 </div>
                                             </div>
 
@@ -2816,7 +2871,7 @@ export default function OperationsPage() {
                                                     id="useOutboundCall"
                                                     checked={useOutboundCall}
                                                     onChange={(e) => setUseOutboundCall(e.target.checked)}
-                                                    disabled={!hasTwilio || !hasElevenLabs}
+                                                    disabled
                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-red-600 focus:ring-red-500/20 disabled:opacity-50"
                                                 />
                                                 <div className="grid gap-1.5 leading-none">
@@ -2824,7 +2879,7 @@ export default function OperationsPage() {
                                                         AI Outbound Call
                                                     </label>
                                                     <p className="text-xs text-zinc-500">
-                                                        Calls lead & plays personalized message
+                                                        Approval-gated; disabled for automatic runs.
                                                     </p>
                                                 </div>
                                             </div>
@@ -2835,7 +2890,7 @@ export default function OperationsPage() {
                                                      id="useAvatar"
                                                      checked={useAvatar}
                                                      onChange={(e) => setUseAvatar(e.target.checked)}
-                                                     disabled={!hasHeyGen}
+                                                     disabled
                                                      className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-green-600 focus:ring-green-500/20 disabled:opacity-50"
                                                  />
                                                  <div className="grid gap-1.5 leading-none">
@@ -2843,7 +2898,7 @@ export default function OperationsPage() {
                                                          Context-Aware Avatar Video
                                                      </label>
                                                      <p className="text-xs text-zinc-500">
-                                                         Generates script from Knowledge Base
+                                                         Approval-gated; disabled for automatic runs.
                                                      </p>
                                                  </div>
                                              </div>
@@ -2854,14 +2909,15 @@ export default function OperationsPage() {
                                                      id="draftFirst"
                                                      checked={draftFirst}
                                                      onChange={(e) => setDraftFirst(e.target.checked)}
-                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20"
+                                                     disabled
+                                                     className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-yellow-500 focus:ring-yellow-500/20 disabled:opacity-70"
                                                  />
                                                  <div className="grid gap-1.5 leading-none">
                                                      <label htmlFor="draftFirst" className="text-sm font-medium leading-none text-zinc-200">
                                                          Draft-first outreach mode
                                                      </label>
                                                      <p className="text-xs text-zinc-500">
-                                                         Save/send as Gmail drafts for review instead of immediate send.
+                                                         Enforced: automatic runs create Gmail drafts for review instead of sending.
                                                      </p>
                                                  </div>
                                              </div>

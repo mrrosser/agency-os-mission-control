@@ -9,6 +9,11 @@ import { withIdempotency } from "@/lib/api/idempotency";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
 import { createDraftEmail } from "@/lib/google/gmail";
 import { buildLeadActionIdempotencyKey } from "@/lib/lead-runs/ids";
+import {
+  loadLeadRunJob,
+  resolveLeadRunBusinessKey,
+  resolveLeadRunGoogleProfileId,
+} from "@/lib/lead-runs/jobs";
 import { assertLeadRunOwner, recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 import { findDncMatch, type DncEntry } from "@/lib/outreach/dnc";
 import { buildFollowupMessagePlan, resolveFollowupBranch, type FollowupBranch } from "@/lib/revenue/close-rate-playbooks";
@@ -72,6 +77,44 @@ function parseNonNegativeInt(value: unknown, fallback: number): number {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return parsed;
+}
+
+export interface FollowupFailureDisposition {
+  status: "pending" | "failed";
+  attempts: number;
+  maxAttempts: number;
+  retryScheduled: boolean;
+  retryAtMs: number | null;
+}
+
+export function planFollowupTaskFailure(args: {
+  attempts: number;
+  nowMs: number;
+  maxAttempts?: number;
+}): FollowupFailureDisposition {
+  const attempts = Math.max(1, parsePositiveInt(args.attempts, 1));
+  const maxAttempts = Math.min(
+    Math.max(parsePositiveInt(args.maxAttempts, 3), 1),
+    5
+  );
+  if (attempts >= maxAttempts) {
+    return {
+      status: "failed",
+      attempts,
+      maxAttempts,
+      retryScheduled: false,
+      retryAtMs: null,
+    };
+  }
+
+  const delayMs = Math.min(5 * 60_000, 60_000 * 2 ** Math.min(attempts - 1, 4));
+  return {
+    status: "pending",
+    attempts,
+    maxAttempts,
+    retryScheduled: true,
+    retryAtMs: args.nowMs + delayMs,
+  };
 }
 
 export async function listFollowupTasks(args: {
@@ -343,7 +386,62 @@ export async function processDueFollowupDraftTasks(args: {
   const maxTasks = Math.min(Math.max(args.maxTasks || 5, 1), 25);
   const nowMs = Date.now();
 
-  const accessToken = args.dryRun ? null : await getAccessTokenForUser(args.uid, args.log);
+  const candidatesSnap = await tasksRef(args.runId).orderBy("dueAtMs", "asc").limit(100).get();
+  const candidates = candidatesSnap.docs
+    .map((doc) => ({ id: doc.id, ...(doc.data() as Partial<FollowupTask>) }))
+    .filter((task) => task.uid === args.uid);
+
+  const leadRunJob = await loadLeadRunJob(args.runId);
+  let businessKey: ReturnType<typeof resolveLeadRunBusinessKey> | null = null;
+  let contextSource: "lead_run_job" | "followup_tasks" | "legacy_no_context" =
+    "legacy_no_context";
+  try {
+    const jobBusinessKey = leadRunJob
+      ? resolveLeadRunBusinessKey(leadRunJob.config)
+      : null;
+    let taskBusinessKey: ReturnType<typeof resolveLeadRunBusinessKey> | null = null;
+    const taskBusinessUnits = Array.from(
+      new Set(
+        candidates
+          .map((task) => String(task.lead?.businessUnit || "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    for (const businessUnit of taskBusinessUnits) {
+      const derived = resolveLeadRunBusinessKey({
+        businessKey: taskBusinessKey || jobBusinessKey || undefined,
+        businessUnit: businessUnit as NonNullable<
+          Parameters<typeof resolveLeadRunBusinessKey>[0]
+        >["businessUnit"],
+      });
+      taskBusinessKey ||= derived;
+    }
+
+    businessKey = jobBusinessKey || taskBusinessKey;
+    contextSource = jobBusinessKey
+      ? "lead_run_job"
+      : taskBusinessKey
+        ? "followup_tasks"
+        : "legacy_no_context";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    args.log?.error("outreach.followups.business_context_invalid", {
+      runId: args.runId,
+      error: message,
+    });
+    throw new ApiError(409, message);
+  }
+  const googleProfileId = resolveLeadRunGoogleProfileId(businessKey || undefined);
+  args.log?.info("outreach.followups.google_profile_resolved", {
+    runId: args.runId,
+    businessKey,
+    googleProfileId,
+    contextSource,
+  });
+
+  const accessToken = args.dryRun
+    ? null
+    : await getAccessTokenForUser(args.uid, args.log, { profileId: googleProfileId });
   if (!args.dryRun && !accessToken) {
     throw new ApiError(401, "Missing Google access token");
   }
@@ -353,11 +451,6 @@ export async function processDueFollowupDraftTasks(args: {
   const founderName = String(identity.founderName || "Founder");
   const businessName = String(identity.businessName || "Mission Control");
   const primaryService = String(identity.primaryService || "growth support");
-
-  const candidatesSnap = await tasksRef(args.runId).orderBy("dueAtMs", "asc").limit(100).get();
-  const candidates = candidatesSnap.docs
-    .map((doc) => ({ id: doc.id, ...(doc.data() as Partial<FollowupTask>) }))
-    .filter((task) => task.uid === args.uid);
 
   let processed = 0;
   let completed = 0;
@@ -580,19 +673,32 @@ export async function processDueFollowupDraftTasks(args: {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       failed += 1;
+      const failure = planFollowupTaskFailure({
+        attempts: claimed.attempts,
+        nowMs: Date.now(),
+        maxAttempts: parsePositiveInt(process.env.FOLLOWUPS_MAX_ATTEMPTS, 3),
+      });
+      const failurePatch: Record<string, unknown> = {
+        status: failure.status,
+        leaseUntilMs: null,
+        lastError: message,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (failure.retryAtMs !== null) {
+        failurePatch.dueAtMs = failure.retryAtMs;
+      }
       await tasksRef(args.runId).doc(claimed.taskId).set(
-        {
-          status: "failed",
-          leaseUntilMs: null,
-          lastError: message,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
+        failurePatch,
         { merge: true }
       );
       args.log?.warn("outreach.followups.task_failed", {
         runId: args.runId,
         taskId: claimed.taskId,
         leadDocId: claimed.leadDocId,
+        attempts: failure.attempts,
+        maxAttempts: failure.maxAttempts,
+        retryScheduled: failure.retryScheduled,
+        retryAtMs: failure.retryAtMs,
         error: message,
       });
     }

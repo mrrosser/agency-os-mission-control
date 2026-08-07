@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/agents/actions/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
-import { getAdminDb } from "@/lib/firebase-admin";
 import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
+import { getAutonomyPolicy } from "@/lib/agents/autonomy-policy-store";
+import { createDefaultAutonomyPolicy } from "@/lib/agents/autonomy-policy";
 
 vi.mock("@/lib/api/auth", () => ({
   requireFirebaseAuth: vi.fn(),
@@ -12,10 +13,6 @@ vi.mock("@/lib/api/auth", () => ({
 vi.mock("@/lib/api/idempotency", () => ({
   getIdempotencyKey: vi.fn(),
   withIdempotency: vi.fn(),
-}));
-
-vi.mock("@/lib/firebase-admin", () => ({
-  getAdminDb: vi.fn(),
 }));
 
 vi.mock("@/lib/paperclip/client", () => ({
@@ -30,12 +27,16 @@ vi.mock("@/lib/paperclip/client", () => ({
   },
 }));
 
+vi.mock("@/lib/agents/autonomy-policy-store", () => ({
+  getAutonomyPolicy: vi.fn(),
+}));
+
 const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const getIdempotencyKeyMock = vi.mocked(getIdempotencyKey);
 const withIdempotencyMock = vi.mocked(withIdempotency);
-const getAdminDbMock = vi.mocked(getAdminDb);
 const readPaperclipClientConfigMock = vi.mocked(readPaperclipClientConfig);
 const PaperclipClientMock = vi.mocked(PaperclipClient);
+const getAutonomyPolicyMock = vi.mocked(getAutonomyPolicy);
 
 function createContext() {
   return { params: Promise.resolve({}) };
@@ -43,13 +44,12 @@ function createContext() {
 
 describe("agents actions route", () => {
   const originalEnv = process.env;
-  const setMock = vi.fn(async (_data: Record<string, unknown>) => undefined);
 
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...originalEnv };
-    setMock.mockReset();
-    setMock.mockImplementation(async (_data: Record<string, unknown>) => undefined);
+    process.env.AGENT_ACTION_ALLOWED_UIDS = "user-1";
+    getAutonomyPolicyMock.mockResolvedValue(createDefaultAutonomyPolicy("user-1"));
     requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
     getIdempotencyKeyMock.mockReturnValue("idempotency-1");
     withIdempotencyMock.mockImplementation(async (_params, executor) => ({
@@ -68,16 +68,9 @@ describe("agents actions route", () => {
           })),
         }) as never
     );
-    getAdminDbMock.mockReturnValue({
-      collection: vi.fn(() => ({
-        doc: vi.fn(() => ({
-          set: setMock,
-        })),
-      })),
-    } as unknown as ReturnType<typeof getAdminDb>);
   });
 
-  it("queues ping action", async () => {
+  it("fails visibly when ping has no configured executor", async () => {
     const req = new Request("http://localhost/api/agents/actions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -94,19 +87,8 @@ describe("agents actions route", () => {
     );
     const data = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(data.ok).toBe(true);
-    expect(data.status).toBe("queued");
-    expect(data.agentId).toBe("orchestrator");
-    expect(data.action).toBe("ping");
-    expect(typeof data.requestId).toBe("string");
-    expect(setMock).toHaveBeenCalledOnce();
-    expect(setMock.mock.calls[0]?.[0]).toMatchObject({
-      uid: "user-1",
-      agentId: "orchestrator",
-      action: "ping",
-      status: "queued",
-    });
+    expect(res.status).toBe(503);
+    expect(data.error).toBe("No executor configured for agent action 'ping'");
   });
 
   it("rejects route action without target", async () => {
@@ -127,6 +109,47 @@ describe("agents actions route", () => {
 
     expect(res.status).toBe(400);
     expect(String(data.error || "")).toContain("Invalid payload");
+  });
+
+  it("fails visibly when route has no configured executor", async () => {
+    const req = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: "fn-actions",
+        action: "route",
+        target: "orchestrator",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(data.error).toBe("No executor configured for agent action 'route'");
+  });
+
+  it("rejects an unknown agent target", async () => {
+    const req = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: "arbitrary-agent",
+        action: "ping",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(data.error).toBe("Unknown agentId");
   });
 
   it("enforces allowlist when AGENT_ACTION_ALLOWED_UIDS is set", async () => {
@@ -151,10 +174,88 @@ describe("agents actions route", () => {
     expect(data.error).toBe("Forbidden");
   });
 
-  it("forwards resume to Paperclip when proxy is configured", async () => {
+  it("fails closed when AGENT_ACTION_ALLOWED_UIDS is missing", async () => {
+    delete process.env.AGENT_ACTION_ALLOWED_UIDS;
+
+    const req = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agentId: "orchestrator",
+        action: "ping",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(data.error).toBe("Forbidden");
+  });
+
+  it.each(["pause", "resume"] as const)(
+    "forwards %s to Paperclip when proxy is configured",
+    async (action) => {
+      readPaperclipClientConfigMock.mockReturnValue({
+        baseUrl: "https://paperclip.example/system",
+        serviceToken: "secret",
+        timeoutMs: 1000,
+        defaultCompanyId: "company-1",
+        healthPath: "/api/health",
+        companiesPath: "/api/companies",
+        agentsPath: "/api/agents",
+        activeRunsPath: "/api/runs?state=active",
+        actionPathTemplate: "/api/agents/{agentId}/{action}",
+        customerRecordsPath: "/api/customers",
+        customerTimelinePathTemplate: "/api/customers/{customerId}/timeline",
+        customerUpdatePathTemplate: "/api/customers/{customerId}",
+      });
+
+      const req = new Request("http://localhost/api/agents/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: "orchestrator",
+          action,
+          idempotencyKey: `${action}-1`,
+        }),
+      });
+
+      const res = await POST(
+        req as unknown as Parameters<typeof POST>[0],
+        createContext() as unknown as Parameters<typeof POST>[1]
+      );
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.status).toBe("forwarded");
+      expect(data.proxied).toBe(true);
+    }
+  );
+
+  it("blocks execution-starting actions while allowing emergency shutdown", async () => {
+    getAutonomyPolicyMock.mockResolvedValue({
+      ...createDefaultAutonomyPolicy("user-1"),
+      globalKillSwitch: true,
+    });
+
+    const resume = new Request("http://localhost/api/agents/actions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: "orchestrator", action: "resume" }),
+    });
+    const resumeResponse = await POST(
+      resume as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+    expect(resumeResponse.status).toBe(423);
+
     readPaperclipClientConfigMock.mockReturnValue({
       baseUrl: "https://paperclip.example/system",
-      serviceToken: "secret",
+      serviceToken: "test-token",
       timeoutMs: 1000,
       defaultCompanyId: "company-1",
       healthPath: "/api/health",
@@ -166,26 +267,15 @@ describe("agents actions route", () => {
       customerTimelinePathTemplate: "/api/customers/{customerId}/timeline",
       customerUpdatePathTemplate: "/api/customers/{customerId}",
     });
-
-    const req = new Request("http://localhost/api/agents/actions", {
+    const terminate = new Request("http://localhost/api/agents/actions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentId: "orchestrator",
-        action: "resume",
-        idempotencyKey: "resume-1",
-      }),
+      body: JSON.stringify({ agentId: "orchestrator", action: "terminate" }),
     });
-
-    const res = await POST(
-      req as unknown as Parameters<typeof POST>[0],
+    const terminateResponse = await POST(
+      terminate as unknown as Parameters<typeof POST>[0],
       createContext() as unknown as Parameters<typeof POST>[1]
     );
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.status).toBe("forwarded");
-    expect(data.proxied).toBe(true);
-    expect(setMock).not.toHaveBeenCalled();
+    expect(terminateResponse.status).toBe(200);
   });
 });

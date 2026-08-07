@@ -27,7 +27,7 @@ copy .env.local.example .env.local
 - Optional: `FIRECRAWL_API_KEY` (for website enrichment during sourcing)
 - Optional (recommended for cross-project tools): `SMAUTO_MCP_SERVER_URL`, `SMAUTO_MCP_API_KEY`, `LEADOPS_MCP_SERVER_URL`, `LEADOPS_MCP_API_KEY`
 - Optional (Paperclip orchestration + OpenClaw runtime visibility): `PAPERCLIP_SYSTEM_URL` or `PAPERCLIP_MCP_SERVER_URL`, `PAPERCLIP_API_BASE_URL`, `PAPERCLIP_SERVICE_TOKEN`, `PAPERCLIP_DEFAULT_COMPANY_ID`, `PAPERCLIP_TIMEOUT_MS`, `PAPERCLIP_HEALTH_PATH`, `PAPERCLIP_COMPANIES_PATH`, `PAPERCLIP_AGENTS_PATH`, `PAPERCLIP_ACTIVE_RUNS_PATH`, `PAPERCLIP_ACTION_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_RECORDS_PATH`, `PAPERCLIP_CUSTOMER_TIMELINE_PATH_TEMPLATE`, `PAPERCLIP_CUSTOMER_UPDATE_PATH_TEMPLATE`, `AI_HELL_MARY_ROOT`
-- Optional (recommended for operator controls): `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions)
+- Required for operator controls: `AGENT_ACTION_ALLOWED_UIDS` (comma-separated Firebase UIDs allowed to queue agent actions; controls fail closed when unset)
 - Optional (internal rollout guardrails): `NEXT_PUBLIC_ENABLE_INTERNAL_REVENUE_UI=false`
 - Optional: `TWILIO_*`, `ELEVENLABS_API_KEY`, `HEYGEN_API_KEY`
 - Optional (recommended for live OpenAI billing pulls): `OPENAI_ADMIN_API_KEY`
@@ -534,6 +534,10 @@ npm run promptfoo:eval
 npm run promptfoo:code-scan
 npm run promptfoo:redteam
 ```
+
+## Agent Autonomy Policy
+
+The server-side policy API supports fail-closed `assist`, `supervised`, and `autonomous_safe` modes for RT Solutions and Rosser Gallery. Setup, protected-action rules, local verification, and deployment checks are documented in [docs/autonomy-policy.md](docs/autonomy-policy.md).
 
 ## Hybrid Sprint Verification (Outcome Gates + Inbox Rubric v2)
 ```bash

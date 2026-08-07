@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildFirstScanTourSteps, firstIncompleteStepIndex } from "@/lib/onboarding/first-scan";
+import {
+  buildFirstScanTourStatePatch,
+  buildFirstScanTourSteps,
+  firstIncompleteStepIndex,
+} from "@/lib/onboarding/first-scan";
 
 describe("first scan tour helpers", () => {
   it("marks steps done based on signals", () => {
@@ -25,6 +29,20 @@ describe("first scan tour helpers", () => {
     });
 
     expect(firstIncompleteStepIndex(steps)).toBe(0);
+  });
+
+  it("persists dismissal in the nested shape read by tour boot", () => {
+    const timestamp = { serverTimestamp: true };
+
+    expect(buildFirstScanTourStatePatch("user-1", "dismissed", timestamp)).toEqual({
+      uid: "user-1",
+      onboarding: {
+        firstScanTourV1: {
+          version: 1,
+          dismissedAt: timestamp,
+        },
+      },
+    });
   });
 });
 

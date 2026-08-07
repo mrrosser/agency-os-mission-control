@@ -1,13 +1,31 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const useAllProjects = process.env.PLAYWRIGHT_PROJECTS === "all";
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
+const localPort = Number(process.env.PLAYWRIGHT_PORT || 3000);
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://localhost:${localPort}`;
 const useLocalWebServer = !process.env.PLAYWRIGHT_BASE_URL;
+const localFirebaseEnv = {
+  NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "playwright-local-api-key",
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:
+    process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "playwright-local.firebaseapp.com",
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "playwright-local",
+  NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "playwright-local.appspot.com",
+  NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:
+    process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "0000000000",
+  NEXT_PUBLIC_FIREBASE_APP_ID:
+    process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:0000000000:web:playwright-local",
+};
 
 const projects = [
   {
     name: "chromium",
     use: { ...devices["Desktop Chrome"] },
+  },
+  {
+    name: "mobile-chrome",
+    testMatch: /(responsive-shell|authenticated-crm)\.spec\.ts/,
+    use: { ...devices["Pixel 7"] },
   },
 ];
 
@@ -36,8 +54,9 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: useLocalWebServer
     ? {
-        command: "npm run dev -- --port 3000",
-        port: 3000,
+        command: `npm run dev -- --port ${localPort}`,
+        port: localPort,
+        env: localFirebaseEnv,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
       }

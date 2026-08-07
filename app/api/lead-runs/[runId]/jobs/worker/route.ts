@@ -15,6 +15,8 @@ import { buildLeadActionIdempotencyKey } from "@/lib/lead-runs/ids";
 import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
 import {
   defaultLeadRunDiagnostics,
+  enforceLeadRunApprovalGates,
+  hasUngatedLeadRunActions,
   leadRunJobRef,
   resolveLeadRunGoogleProfileId,
   triggerLeadRunWorker,
@@ -23,6 +25,7 @@ import {
   type LeadRunJobDoc,
   type LeadRunJobStatus,
 } from "@/lib/lead-runs/jobs";
+import { resolveRuntimePause } from "@/lib/agents/autonomy-runtime";
 import {
   buildInitialLeadStageProgress,
   updateLeadStageProgress,
@@ -165,6 +168,9 @@ async function processLead(
   },
   log: Logger
 ): Promise<Partial<LeadRunJobDiagnostics>> {
+  if (hasUngatedLeadRunActions(args.config)) {
+    throw new ApiError(409, "Protected lead-run actions require human approval");
+  }
   const diag: Partial<LeadRunJobDiagnostics> = { processedLeads: 1 };
   const leadName = args.lead.founderName || "there";
   const leadEmail = args.lead.email?.trim();
@@ -414,6 +420,31 @@ async function processLead(
       runId: args.runId,
       leadDocId: args.leadDocId,
       pipelineStage: normalizeCrmPipelineStage(args.lead.pipelineStage || args.lead.status),
+    });
+  } else if (!args.config.dryRun) {
+    const calendarKey = buildLeadActionIdempotencyKey({
+      runId: args.runId,
+      leadDocId: args.leadDocId,
+      action: "calendar.schedule",
+    });
+    await recordLeadActionReceipt(
+      {
+        runId: args.runId,
+        leadDocId: args.leadDocId,
+        actionId: "calendar.booking",
+        uid: args.uid,
+        correlationId: args.correlationId,
+        status: "skipped",
+        dryRun: false,
+        replayed: false,
+        idempotencyKey: calendarKey,
+        data: { reason: "approval_required", bookingConfirmed: true },
+      },
+      log
+    );
+    log.info("lead_runs.calendar.approval_required", {
+      runId: args.runId,
+      leadDocId: args.leadDocId,
     });
   } else {
     let scheduleResult: ScheduleAttemptResult = { kind: "no_slot" };
@@ -1223,7 +1254,60 @@ export const POST = withApiHandler(
       });
     }
 
-    const job = claim.job;
+    const pause = await resolveRuntimePause({
+      uid: claim.job.userId,
+      businessKey: claim.job.config?.businessKey,
+      businessUnit: claim.job.config?.businessUnit,
+      log,
+    });
+    if (pause.paused) {
+      await jobRef.set(
+        {
+          status: "paused",
+          leaseUntil: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+          correlationId,
+          pauseReason: pause.reason,
+        },
+        { merge: true }
+      );
+      await releaseLeadRunConcurrencySlot({
+        orgId: claim.job.orgId || claim.job.userId,
+        runId,
+        correlationId,
+        log,
+      });
+      log.warn("lead_runs.job.autonomy_paused", {
+        runId,
+        uid: claim.job.userId,
+        businessId: pause.businessId,
+        reason: pause.reason,
+      });
+      return NextResponse.json({
+        ok: true,
+        status: "paused",
+        skipped: true,
+        reason: pause.reason,
+        correlationId,
+      });
+    }
+
+    const protectedConfig = enforceLeadRunApprovalGates(claim.job.config);
+    if (hasUngatedLeadRunActions(claim.job.config)) {
+      await jobRef.set(
+        {
+          config: protectedConfig,
+          updatedAt: FieldValue.serverTimestamp(),
+          correlationId,
+        },
+        { merge: true }
+      );
+      log.warn("lead_runs.worker.protected_actions_forced_to_approval", {
+        runId,
+        uid: claim.job.userId,
+      });
+    }
+    const job = { ...claim.job, config: protectedConfig };
     const leadDocId = job.leadDocIds[job.nextIndex];
     if (!leadDocId) {
       await jobRef.set(

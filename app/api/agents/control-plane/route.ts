@@ -37,6 +37,8 @@ import { BUSINESS_UNIT_OPTIONS, OFFER_DEFINITIONS } from "@/lib/revenue/offers";
 import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
 import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
 import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
+import { resolveCallerBusinessIds } from "@/lib/agents/registry";
+import { probeConfiguredMcpConnectors } from "@/lib/mcp/connector-health";
 
 const TELEMETRY_GROUP_LIMIT = 8;
 const KNOWLEDGE_PACK_PATH = path.join(
@@ -750,14 +752,16 @@ async function readWeeklyKpiSummary(uid: string): Promise<ControlPlaneRevenueKpi
 }
 
 export const GET = withApiHandler(
-  async ({ request, log }) => {
+  async ({ request, correlationId, log }) => {
     const user = await requireFirebaseAuth(request, log);
+    const orgId = await resolveLeadRunOrgId(user.uid, log);
+    const businessIds = resolveCallerBusinessIds(user as unknown as Record<string, unknown>);
+    const externalToolConfig = readExternalToolConfig();
 
     const [
       spaces,
       secretStatus,
       googleTokens,
-      orgId,
       driveSummary,
       skillHealth,
       telemetryGroups,
@@ -769,12 +773,12 @@ export const GET = withApiHandler(
       openClawSync,
       paperclip,
       customerProjection,
+      connectorProbes,
     ] =
       await Promise.all([
-        getAgentSpaceStatus(user.uid, log),
+        getAgentSpaceStatus(user.uid, { orgId, businessIds }, log),
         getSecretStatus(user.uid),
         getStoredGoogleTokens(user.uid),
-        resolveLeadRunOrgId(user.uid, log),
         readDriveSummary(user.uid),
         readSkillHealth(log),
         listTelemetryGroups(user.uid, TELEMETRY_GROUP_LIMIT),
@@ -786,6 +790,12 @@ export const GET = withApiHandler(
         readOpenClawSyncStatus(log),
         readPaperclipSummary(log),
         readCustomerProjection(user.uid, log),
+        probeConfiguredMcpConnectors({
+          smAutoEndpoint: externalToolConfig.smAutoEndpoint,
+          leadOpsEndpoint: externalToolConfig.leadOpsEndpoint,
+          correlationId,
+          log,
+        }),
       ]);
 
     const [quota, alerts] = await Promise.all([
@@ -798,8 +808,9 @@ export const GET = withApiHandler(
       google.connected = true;
     }
     const externalTools = {
-      ...readExternalToolConfig(),
+      ...externalToolConfig,
       ...openClawSync,
+      ...connectorProbes,
     };
     const budgetGovernor = buildBudgetGovernorInput({
       secretStatus,

@@ -12,7 +12,12 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { db } from "@/lib/firebase";
 import { useSecretsStatus } from "@/lib/hooks/use-secrets-status";
 import { buildAuthHeaders, getResponseCorrelationId, readApiJson } from "@/lib/api/client";
-import { buildFirstScanTourSteps, firstIncompleteStepIndex, type FirstScanTourSignals } from "@/lib/onboarding/first-scan";
+import {
+  buildFirstScanTourStatePatch,
+  buildFirstScanTourSteps,
+  firstIncompleteStepIndex,
+  type FirstScanTourSignals,
+} from "@/lib/onboarding/first-scan";
 
 type GoogleStatusPayload = {
   connected?: boolean;
@@ -119,11 +124,7 @@ export function FirstScanTour() {
     try {
       await setDoc(
         doc(db, "users", user.uid),
-        {
-          uid: user.uid,
-          "onboarding.firstScanTourV1.version": 1,
-          [`onboarding.firstScanTourV1.${mode}At`]: serverTimestamp(),
-        } as Record<string, unknown>,
+        buildFirstScanTourStatePatch(user.uid, mode, serverTimestamp()),
         { merge: true }
       );
     } catch (error: unknown) {

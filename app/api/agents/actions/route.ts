@@ -4,13 +4,14 @@ import { z } from "zod";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
-import { getAdminDb } from "@/lib/firebase-admin";
 import {
   PaperclipClient,
   PaperclipClientError,
   readPaperclipClientConfig,
   type PaperclipLifecycleAction,
 } from "@/lib/paperclip/client";
+import { resolveAgentDefinition } from "@/lib/agents/registry";
+import { getAutonomyPolicy } from "@/lib/agents/autonomy-policy-store";
 
 const actionSchema = z
   .object({
@@ -49,7 +50,11 @@ function readBooleanEnv(name: string, fallback: boolean = false): boolean {
 }
 
 function isPaperclipLifecycleAction(action: z.infer<typeof actionSchema>["action"]): action is PaperclipLifecycleAction {
-  return action === "resume" || action === "terminate" || action === "wakeup";
+  return action === "pause" || action === "resume" || action === "terminate" || action === "wakeup";
+}
+
+function startsAgentExecution(action: z.infer<typeof actionSchema>["action"]): boolean {
+  return action === "resume" || action === "route" || action === "wakeup";
 }
 
 export const POST = withApiHandler(
@@ -62,11 +67,31 @@ export const POST = withApiHandler(
     }
 
     const allowedUids = parseAllowedUids(process.env.AGENT_ACTION_ALLOWED_UIDS);
-    if (allowedUids.size > 0 && !allowedUids.has(user.uid)) {
+    if (allowedUids.size === 0 || !allowedUids.has(user.uid)) {
       throw new ApiError(403, "Forbidden");
     }
 
-    const payload = parsed.data;
+    const targetAgent = resolveAgentDefinition(parsed.data.agentId);
+    if (!targetAgent) {
+      throw new ApiError(400, "Unknown agentId");
+    }
+    const payload = { ...parsed.data, agentId: targetAgent.id };
+    if (startsAgentExecution(payload.action)) {
+      let policyPaused = true;
+      try {
+        policyPaused = (await getAutonomyPolicy(user.uid)).globalKillSwitch;
+      } catch (error) {
+        log.error("agents.action.autonomy_policy_read_failed", {
+          uid: user.uid,
+          agentId: payload.agentId,
+          action: payload.action,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH") || policyPaused) {
+        throw new ApiError(423, "Mission Control global execution pause is enabled");
+      }
+    }
     const idempotencyKey = getIdempotencyKey(request, payload);
     const result = await withIdempotency(
       {
@@ -76,14 +101,9 @@ export const POST = withApiHandler(
         log,
       },
       async () => {
-        const nowIso = new Date().toISOString();
         const requestId = randomUUID();
 
         if (isPaperclipLifecycleAction(payload.action)) {
-          if (readBooleanEnv("MISSION_CONTROL_GLOBAL_KILL_SWITCH")) {
-            throw new ApiError(423, "Mission Control global kill switch is enabled");
-          }
-
           const config = readPaperclipClientConfig();
           if (!config) {
             throw new ApiError(503, "Paperclip proxy is not configured");
@@ -127,38 +147,14 @@ export const POST = withApiHandler(
           }
         }
 
-        await getAdminDb()
-          .collection("agentActionRequests")
-          .doc(requestId)
-          .set({
-            requestId,
-            uid: user.uid,
-            agentId: payload.agentId,
-            action: payload.action,
-            target: payload.target || null,
-            note: payload.note || null,
-            status: "queued",
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            correlationId,
-          });
-
-        log.info("agents.action.queued", {
+        log.error("agents.action.executor_unavailable", {
           uid: user.uid,
           agentId: payload.agentId,
           action: payload.action,
           hasTarget: Boolean(payload.target),
           requestId,
         });
-
-        return {
-          ok: true,
-          requestId,
-          status: "queued" as const,
-          agentId: payload.agentId,
-          action: payload.action,
-          target: payload.target || null,
-        };
+        throw new ApiError(503, `No executor configured for agent action '${payload.action}'`);
       }
     );
 

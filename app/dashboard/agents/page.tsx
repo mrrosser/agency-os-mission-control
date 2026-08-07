@@ -8,6 +8,7 @@ import { buildLiveFeedItems, filterLiveFeed, summarizeLiveFeed, type TimelineFil
 import type { AutonomyClass } from "@/lib/control-plane/autonomous-business";
 import { RepoImprovementInbox } from "@/components/operations/RepoImprovementInbox";
 import { GrowthResearchInbox } from "@/components/operations/GrowthResearchInbox";
+import { AutonomyPolicyControls } from "@/components/agents/AutonomyPolicyControls";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -424,6 +425,12 @@ export default function AgentNexusPage() {
       action: "pause" | "ping" | "route" | "resume" | "terminate" | "wakeup"
     ) => {
       if (!user) return;
+      if (
+        action === "terminate" &&
+        !window.confirm(`Terminate ${agent.label}? This can interrupt active work and cannot be undone from this screen.`)
+      ) {
+        return;
+      }
       const actionKey = `${agent.id}:${action}`;
       setAgentActionState((prev) => ({ ...prev, [actionKey]: true }));
       setAgentActionFeedback(null);
@@ -467,6 +474,7 @@ export default function AgentNexusPage() {
         setAgentActionFeedback(
           `${agent.label}: ${statusLabel} ${action}${action === "route" ? ` -> ${body.target}` : ""}${replayed}`
         );
+        await loadSnapshot("refresh");
       } catch (actionError: unknown) {
         setAgentActionFeedback(
           actionError instanceof Error ? actionError.message : `Failed to queue ${action} action for ${agent.label}`
@@ -475,7 +483,7 @@ export default function AgentNexusPage() {
         setAgentActionState((prev) => ({ ...prev, [actionKey]: false }));
       }
     },
-    [user]
+    [loadSnapshot, user]
   );
 
   if (loading) {
@@ -529,6 +537,8 @@ export default function AgentNexusPage() {
             </div>
           )}
         </section>
+
+        <AutonomyPolicyControls />
 
         {snapshot && (
           <>

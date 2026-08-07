@@ -1,11 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  outputFileTracingIncludes: {
-    "/api/agents/control-plane": [
-      "./please-review/from-root/config-templates/knowledge-pack.v2.json",
-    ],
-  },
   serverExternalPackages: [
     "@google-cloud/tasks",
     "@google-cloud/secret-manager",

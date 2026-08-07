@@ -66,13 +66,16 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain("SMOKE_BASE_URL: ${{ env.SMOKE_BASE_URL }}");
   });
 
-  it("packages the Agent Nexus knowledge pack with the standalone SSR route", () => {
-    const source = readFileSync(join(process.cwd(), "next.config.ts"), "utf8");
-
-    expect(source).toContain("outputFileTracingIncludes");
-    expect(source).toContain('"/api/agents/control-plane"');
-    expect(source).toContain(
-      '"./please-review/from-root/config-templates/knowledge-pack.v2.json"'
+  it("bundles the Agent Nexus knowledge pack into the SSR route", () => {
+    const source = readFileSync(
+      join(process.cwd(), "app/api/agents/control-plane/route.ts"),
+      "utf8"
     );
+
+    expect(source).toContain(
+      'import knowledgePackV2 from "@/please-review/from-root/config-templates/knowledge-pack.v2.json"'
+    );
+    expect(source).not.toContain("KNOWLEDGE_PACK_PATH");
+    expect(source).not.toContain("fs.readFile(KNOWLEDGE_PACK_PATH");
   });
 });

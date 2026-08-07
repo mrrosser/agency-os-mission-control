@@ -39,15 +39,9 @@ import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
 import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
 import { resolveCallerBusinessIds } from "@/lib/agents/registry";
 import { probeConfiguredMcpConnectors } from "@/lib/mcp/connector-health";
+import knowledgePackV2 from "@/please-review/from-root/config-templates/knowledge-pack.v2.json";
 
 const TELEMETRY_GROUP_LIMIT = 8;
-const KNOWLEDGE_PACK_PATH = path.join(
-  process.cwd(),
-  "please-review",
-  "from-root",
-  "config-templates",
-  "knowledge-pack.v2.json"
-);
 
 function parseDateLike(value: unknown): Date | null {
   if (!value) return null;
@@ -473,30 +467,17 @@ async function readDriveSummary(uid: string): Promise<ControlPlaneDriveSummary> 
   };
 }
 
-async function readSkillHealth(log: { warn: (msg: string, data?: Record<string, unknown>) => void }): Promise<ControlPlaneSkillHealthInput> {
-  try {
-    const raw = await fs.readFile(KNOWLEDGE_PACK_PATH, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const globalPolicies = (parsed.globalPolicies || {}) as Record<string, unknown>;
+function readSkillHealth(): ControlPlaneSkillHealthInput {
+  // Firebase packages the compiled route reliably; arbitrary runtime file paths are not preserved.
+  const parsed = knowledgePackV2 as Record<string, unknown>;
+  const globalPolicies = (parsed.globalPolicies || {}) as Record<string, unknown>;
 
-    return {
-      knowledgePackPresent: true,
-      hasAgentTopology: Boolean(globalPolicies.agentTopology),
-      hasKnowledgeIngestionPolicy: Boolean(globalPolicies.knowledgeIngestionPolicy),
-      hasVoiceOpsPolicy: Boolean(globalPolicies.voiceOpsPolicy),
-    };
-  } catch (error) {
-    log.warn("agents.control_plane.knowledge_pack_missing", {
-      path: KNOWLEDGE_PACK_PATH,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return {
-      knowledgePackPresent: false,
-      hasAgentTopology: false,
-      hasKnowledgeIngestionPolicy: false,
-      hasVoiceOpsPolicy: false,
-    };
-  }
+  return {
+    knowledgePackPresent: true,
+    hasAgentTopology: Boolean(globalPolicies.agentTopology),
+    hasKnowledgeIngestionPolicy: Boolean(globalPolicies.knowledgeIngestionPolicy),
+    hasVoiceOpsPolicy: Boolean(globalPolicies.voiceOpsPolicy),
+  };
 }
 
 async function listTelemetryGroups(uid: string, limit: number): Promise<ControlPlaneTelemetryGroup[]> {
@@ -780,7 +761,7 @@ export const GET = withApiHandler(
         getSecretStatus(user.uid),
         getStoredGoogleTokens(user.uid),
         readDriveSummary(user.uid),
-        readSkillHealth(log),
+        readSkillHealth(),
         listTelemetryGroups(user.uid, TELEMETRY_GROUP_LIMIT),
         pullProviderBilling({ uid: user.uid, log }),
         readPosWorkerSummary(user.uid, log),

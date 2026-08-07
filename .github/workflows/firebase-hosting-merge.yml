@@ -124,7 +124,7 @@ jobs:
             exit 1
           fi
           echo "FIREBASE_DEPLOY_CHANNEL=$CHANNEL_ID" >> "$GITHUB_ENV"
-          echo "SMOKE_BASE_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+          echo "FIREBASE_PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
           echo "DEPLOY_PERFORMED=1" >> $GITHUB_ENV
       - name: Ensure SSR backend runtime config (webframeworks)
         if: ${{ env.GCP_AUTH_READY == '1' }}
@@ -160,6 +160,24 @@ jobs:
             echo "Unable to resolve Cloud Run service URL for $FIREBASE_SSR_SERVICE."
             exit 1
           fi
+          SERVICE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          DEPLOY_REVISION="$(jq -r '.status.latestCreatedRevisionName // empty' <<< "$SERVICE_STATE")"
+          PREVIOUS_LIVE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' <<< "$SERVICE_STATE")"
+          if [ -z "$DEPLOY_REVISION" ] || [ -z "$PREVIOUS_LIVE_REVISION" ]; then
+            echo "Unable to resolve the deployed or currently serving Cloud Run revision."
+            exit 1
+          fi
+          DEPLOY_IMAGE="$(gcloud run revisions describe "$DEPLOY_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format='value(spec.containers[0].image)')"
+          if [ -z "$DEPLOY_IMAGE" ]; then
+            echo "Unable to resolve the image for deployed revision $DEPLOY_REVISION."
+            exit 1
+          fi
           OIDC_AUDIENCES="$SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES"
           if [ -z "$OIDC_AUDIENCES" ]; then
             OIDC_AUDIENCES="$SERVICE_URL/api/social/drafts/weekly/worker-task,$SERVICE_URL/api/social/drafts/rng-weekly/worker-task"
@@ -189,31 +207,146 @@ jobs:
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
+          RUNTIME_SUFFIX="release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          RUNTIME_REVISION="${FIREBASE_SSR_SERVICE}-${RUNTIME_SUFFIX}"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
+            --image "$DEPLOY_IMAGE" \
             --memory 512Mi \
+            --no-traffic \
+            --revision-suffix "$RUNTIME_SUFFIX" \
             --update-env-vars "^##^$ENV_UPDATES" \
             --quiet
+          RUNTIME_REVISION_STATE="$(gcloud run revisions describe "$RUNTIME_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$RUNTIME_REVISION_STATE")"
+          if [ "$RUNTIME_IMAGE" != "$DEPLOY_IMAGE" ] || [ "$RUNTIME_READY" != "True" ]; then
+            echo "Runtime revision image or readiness does not match the Firebase deployment."
+            exit 1
+          fi
+          if ! jq -e '.spec.containers[0].env | map(.name) | index("AGENT_ACTION_ALLOWED_UIDS") != null' \
+            <<< "$RUNTIME_REVISION_STATE" >/dev/null; then
+            echo "Runtime revision is missing the Agent Nexus allowlist setting."
+            exit 1
+          fi
+          RELEASE_TAG="$RUNTIME_SUFFIX"
+          gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --update-tags="$RELEASE_TAG=$RUNTIME_REVISION" \
+            --quiet
+          TAGGED_SERVICE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          CANDIDATE_URL="$(jq -r --arg tag "$RELEASE_TAG" --arg revision "$RUNTIME_REVISION" '.status.traffic[]? | select(.tag == $tag and .revisionName == $revision) | .url' \
+            <<< "$TAGGED_SERVICE_STATE" | head -n1)"
+          CANDIDATE_TRAFFIC="$(jq -r --arg revision "$RUNTIME_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$TAGGED_SERVICE_STATE")"
+          PREVIOUS_LIVE_TRAFFIC="$(jq -r --arg revision "$PREVIOUS_LIVE_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$TAGGED_SERVICE_STATE")"
+          if [ -z "$CANDIDATE_URL" ] || [ "$CANDIDATE_TRAFFIC" != "0" ] || [ "$PREVIOUS_LIVE_TRAFFIC" != "100" ]; then
+            echo "Release candidate is not isolated at zero percent while the prior revision owns 100 percent."
+            exit 1
+          fi
+          echo "PREVIOUS_LIVE_REVISION=$PREVIOUS_LIVE_REVISION" >> "$GITHUB_ENV"
+          echo "FIREBASE_RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "FIREBASE_RUNTIME_REVISION=$RUNTIME_REVISION" >> "$GITHUB_ENV"
+          echo "FIREBASE_RUNTIME_IMAGE=$RUNTIME_IMAGE" >> "$GITHUB_ENV"
+          echo "SMOKE_BASE_URL=$CANDIDATE_URL" >> "$GITHUB_ENV"
       - name: Post-deploy production smoke
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
-          SMOKE_BASE_URL: ${{ env.SMOKE_BASE_URL || vars.PROD_SMOKE_BASE_URL || 'https://leadflow-review.web.app' }}
+          SMOKE_BASE_URL: ${{ env.SMOKE_BASE_URL }}
           SMOKE_TEST_UID: ci-smoke-user-${{ github.run_id }}-${{ github.run_attempt }}
         run: npm run test:postdeploy
-      - name: Promote preview channel to live
+      - name: Promote verified SSR revision and preview channel to live
         if: ${{ success() && env.GCP_AUTH_READY == '1' && env.DEPLOY_PERFORMED == '1' }}
         env:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE || 'leadflow-review' }}
+          FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
         run: |
           set -euo pipefail
+          PROMOTION_COMPLETE=0
+          TRAFFIC_SWITCHED=0
+          rollback_runtime() {
+            if [ "$PROMOTION_COMPLETE" = "1" ] || [ "$TRAFFIC_SWITCHED" != "1" ] || [ -z "$PREVIOUS_LIVE_REVISION" ]; then
+              return
+            fi
+            ROLLBACK_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --region "$FIREBASE_REGION" \
+              --format=json 2>/dev/null || true)"
+            ROLLBACK_LIVE_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' \
+              <<< "$ROLLBACK_STATE" 2>/dev/null || true)"
+            if [ "$ROLLBACK_LIVE_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
+              echo "Live traffic changed after this workflow switched it; refusing to overwrite the newer routing state."
+              return
+            fi
+            echo "Promotion failed; restoring Cloud Run traffic to $PREVIOUS_LIVE_REVISION."
+            gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --region "$FIREBASE_REGION" \
+              --to-revisions="$PREVIOUS_LIVE_REVISION=100" \
+              --update-tags="sm-candidate=$PREVIOUS_LIVE_REVISION" \
+              --quiet || true
+          }
+          trap rollback_runtime EXIT
+          CANDIDATE_STATE="$(gcloud run revisions describe "$FIREBASE_RUNTIME_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          CANDIDATE_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$CANDIDATE_STATE")"
+          CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$CANDIDATE_STATE")"
+          if [ "$CANDIDATE_IMAGE" != "$FIREBASE_RUNTIME_IMAGE" ] || [ "$CANDIDATE_READY" != "True" ]; then
+            echo "Release candidate changed or is no longer ready; refusing promotion."
+            exit 1
+          fi
+          PRE_SWITCH_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          TAGGED_CANDIDATE_REVISION="$(jq -r --arg tag "$FIREBASE_RELEASE_TAG" '[.status.traffic[]? | select(.tag == $tag) | .revisionName][0] // empty' \
+            <<< "$PRE_SWITCH_STATE")"
+          CANDIDATE_TRAFFIC="$(jq -r --arg revision "$FIREBASE_RUNTIME_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$PRE_SWITCH_STATE")"
+          PREVIOUS_LIVE_TRAFFIC="$(jq -r --arg revision "$PREVIOUS_LIVE_REVISION" '[.status.traffic[]? | select(.revisionName == $revision) | (.percent // 0)] | add // 0' \
+            <<< "$PRE_SWITCH_STATE")"
+          if [ "$TAGGED_CANDIDATE_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \
+             [ "$CANDIDATE_TRAFFIC" != "0" ] || [ "$PREVIOUS_LIVE_TRAFFIC" != "100" ]; then
+            echo "Cloud Run routing changed during smoke validation; refusing promotion."
+            exit 1
+          fi
+          TRAFFIC_SWITCHED=1
+          gcloud run services update-traffic "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --to-revisions="$FIREBASE_RUNTIME_REVISION=100" \
+            --update-tags="sm-candidate=$FIREBASE_RUNTIME_REVISION" \
+            --quiet
+          SERVING_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          SERVING_REVISION="$(jq -r '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName][0] // empty' <<< "$SERVING_STATE")"
+          if [ "$SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ]; then
+            echo "Cloud Run did not route 100 percent to the verified release candidate."
+            exit 1
+          fi
           node scripts/firebase-deploy.mjs hosting:clone \
             "$FIREBASE_HOSTING_SITE:$FIREBASE_DEPLOY_CHANNEL" \
             "$FIREBASE_HOSTING_SITE:live" \
             --project "$FIREBASE_PROJECT_ID" \
             --non-interactive
+          PROMOTION_COMPLETE=1
+          trap - EXIT
       - name: Cleanup preview channel
         if: ${{ always() && env.GCP_AUTH_READY == '1' && env.DEPLOY_PERFORMED == '1' }}
         env:

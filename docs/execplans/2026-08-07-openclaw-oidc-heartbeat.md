@@ -4,7 +4,7 @@ Date: 2026-08-07
 
 Owner: Codex / RT Solutions
 
-Status: implementation_in_progress
+Status: complete
 
 ## Goal
 
@@ -29,9 +29,9 @@ Replace the impossible Cloud Run filesystem-manifest check with a non-model, Goo
 - [x] Add focused unit and route smoke coverage.
 - [x] Persist the three non-secret heartbeat settings across Firebase/Cloud Run release revisions.
 - [x] Complete lint, typecheck, full unit/smoke, and production build.
-- [ ] Merge and deploy Agency OS with its OIDC environment allowlist.
-- [ ] Install the merged AI_HELL_MARY publisher and timer on the VM.
-- [ ] Verify an authenticated receipt and fresh control-plane status end to end.
+- [x] Merge and deploy Agency OS with its OIDC environment allowlist.
+- [x] Install the merged AI_HELL_MARY publisher and timer on the VM.
+- [x] Verify an authenticated receipt and fresh control-plane status end to end.
 
 ## Validation
 
@@ -43,6 +43,8 @@ npm run build
 ```
 
 2026-08-07 evidence: focused heartbeat/control-plane tests passed (21/21), repository lint passed, TypeScript passed, the full unit and smoke suites passed, and the production build passed. `npm audit --audit-level=high` reports the repository's existing 12 transitive findings (8 moderate, 4 high); the available complete fixes require breaking framework/Admin SDK upgrades and are outside this scoped heartbeat rollout.
+
+Live rollout evidence: Agency OS PR #31 merged as `6facad9388478692da3425a4e9917e5a1ec56c83`; deployment run `31204868508` completed successfully and promoted `ssrleadflowreview-release-31204868508-1` to 100% traffic. The active revision contains the exact audience, publisher-service-account allowlist, and runtime ID. An unauthenticated receipt was rejected with HTTP 401. The VM publisher merged as `487ae49e8f4bdddba7bc865bc1c1785a4fd928c5`; its first canary and next scheduled five-minute publish both returned HTTP 200. Firestore stored the exact source commit, all four active unit states, and a server `receivedAt`; an authenticated control-plane read reported `openclaw_sync` operational while a direct client receipt read failed closed with HTTP 403. Provider billing was unchanged and the model heartbeat remains disabled at `0m`.
 
 ## Rollback
 

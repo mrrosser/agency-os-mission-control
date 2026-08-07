@@ -94,10 +94,14 @@ export interface ControlPlaneExternalToolInput {
   paperclipEndpoint: string | null;
   smAutoProbe?: ControlPlaneConnectorProbe | null;
   leadOpsProbe?: ControlPlaneConnectorProbe | null;
-  openClawSyncGeneratedAt: string | null;
-  openClawSyncTargetRoot: string | null;
-  openClawSyncManifestPath: string | null;
-  openClawSyncStaleHours: number | null;
+  openClawHeartbeatState: "operational" | "degraded" | "offline";
+  openClawHeartbeatReason: string;
+  openClawHeartbeatReceivedAt: string | null;
+  openClawHeartbeatSentAt: string | null;
+  openClawHeartbeatAgeSeconds: number | null;
+  openClawHeartbeatRuntimeId: string;
+  openClawHeartbeatSourceCommit: string | null;
+  openClawHeartbeatServices: Record<string, "active" | "inactive" | "failed" | "unknown">;
 }
 
 export interface ControlPlaneConnectorProbe {
@@ -660,30 +664,38 @@ function resolveServiceState(
   }
 
   if (id === "openclaw_sync") {
-    if (!externalTools.openClawSyncGeneratedAt) {
-      const manifestHint = externalTools.openClawSyncManifestPath
-        ? `No sync manifest at ${externalTools.openClawSyncManifestPath}.`
-        : "Mission Control sync manifest not found.";
+    const heartbeatState = externalTools.openClawHeartbeatState;
+    const ageSeconds = externalTools.openClawHeartbeatAgeSeconds;
+    const ageDetail =
+      ageSeconds === null
+        ? "receipt age unavailable"
+        : ageSeconds < 60
+          ? `authenticated receipt ${ageSeconds}s ago`
+          : `authenticated receipt ${Math.floor(ageSeconds / 60)}m ago`;
+    const inactiveServices = Object.entries(externalTools.openClawHeartbeatServices)
+      .filter(([, state]) => state !== "active")
+      .map(([service]) => service);
+    const commit = externalTools.openClawHeartbeatSourceCommit?.slice(0, 12) || "commit unknown";
+
+    if (heartbeatState === "offline") {
       return {
         id,
-        label: "OpenClaw Runtime Sync",
-        state: "degraded",
-        detail: `${manifestHint} Run the Mission Control -> AI_HELL_MARY sync to refresh runtime artifacts.`,
+        label: "OpenClaw Runtime Heartbeat",
+        state: "offline",
+        detail: `Authenticated VM heartbeat is unavailable (${externalTools.openClawHeartbeatReason}).`,
         required: false,
         monthlyCostUsd: 0,
       };
     }
 
-    const staleHours = externalTools.openClawSyncStaleHours;
-    const freshness =
-      staleHours === null ? "freshness unknown" : `last sync ${staleHours}h ago`;
-    const targetRoot = externalTools.openClawSyncTargetRoot || "AI_HELL_MARY";
-
     return {
       id,
-      label: "OpenClaw Runtime Sync",
-      state: staleHours !== null && staleHours > 48 ? "degraded" : "operational",
-      detail: `${freshness} -> ${targetRoot}`,
+      label: "OpenClaw Runtime Heartbeat",
+      state: heartbeatState,
+      detail:
+        heartbeatState === "operational"
+          ? `${ageDetail} from ${externalTools.openClawHeartbeatRuntimeId} @ ${commit}; all critical units active.`
+          : `${ageDetail}; ${inactiveServices.length > 0 ? `unhealthy units: ${inactiveServices.join(", ")}` : externalTools.openClawHeartbeatReason}.`,
       required: false,
       monthlyCostUsd: 0,
     };
@@ -1091,7 +1103,7 @@ function buildRecommendations(args: {
 
   const openClawSync = serviceById.get("openclaw_sync");
   if (openClawSync?.state !== "operational") {
-    recommendations.push("Run the Mission Control -> AI_HELL_MARY sync so OpenClaw runtime artifacts stay current.");
+    recommendations.push("Restore the authenticated OpenClaw VM heartbeat publisher or any critical runtime unit it reports unhealthy.");
   }
 
   if (args.business.paperclip.state !== "operational") {
@@ -1175,10 +1187,14 @@ export function buildControlPlaneSnapshot(input: BuildControlPlaneSnapshotInput)
     paperclipEndpoint: process.env.PAPERCLIP_SYSTEM_URL || process.env.PAPERCLIP_MCP_SERVER_URL || null,
     smAutoProbe: null,
     leadOpsProbe: null,
-    openClawSyncGeneratedAt: null,
-    openClawSyncTargetRoot: null,
-    openClawSyncManifestPath: null,
-    openClawSyncStaleHours: null,
+    openClawHeartbeatState: "offline",
+    openClawHeartbeatReason: "missing",
+    openClawHeartbeatReceivedAt: null,
+    openClawHeartbeatSentAt: null,
+    openClawHeartbeatAgeSeconds: null,
+    openClawHeartbeatRuntimeId: "openclaw-gateway",
+    openClawHeartbeatSourceCommit: null,
+    openClawHeartbeatServices: {},
   };
 
   const serviceList: ControlPlaneServiceSnapshot[] = [

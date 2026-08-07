@@ -1,5 +1,3 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { NextResponse } from "next/server";
 import { withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
@@ -40,6 +38,7 @@ import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
 import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
 import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
 import { resolveCallerBusinessIds } from "@/lib/agents/registry";
+import { readOpenClawHeartbeatStatus } from "@/lib/agents/openclaw-heartbeat";
 import { probeConfiguredMcpConnectors } from "@/lib/mcp/connector-health";
 import knowledgePackV2 from "@/please-review/from-root/config-templates/knowledge-pack.v2.json";
 
@@ -582,65 +581,15 @@ function readExternalToolConfig(): ControlPlaneExternalToolInput {
     smAutoEndpoint: read("SMAUTO_MCP_SERVER_URL"),
     leadOpsEndpoint: read("LEADOPS_MCP_SERVER_URL"),
     paperclipEndpoint: read("PAPERCLIP_SYSTEM_URL") || read("PAPERCLIP_MCP_SERVER_URL"),
-    openClawSyncGeneratedAt: null,
-    openClawSyncTargetRoot: null,
-    openClawSyncManifestPath: null,
-    openClawSyncStaleHours: null,
+    openClawHeartbeatState: "offline",
+    openClawHeartbeatReason: "missing",
+    openClawHeartbeatReceivedAt: null,
+    openClawHeartbeatSentAt: null,
+    openClawHeartbeatAgeSeconds: null,
+    openClawHeartbeatRuntimeId: "openclaw-gateway",
+    openClawHeartbeatSourceCommit: null,
+    openClawHeartbeatServices: {},
   };
-}
-
-async function readOpenClawSyncStatus(
-  log: { warn: (msg: string, data?: Record<string, unknown>) => void }
-): Promise<
-  Pick<
-    ControlPlaneExternalToolInput,
-    | "openClawSyncGeneratedAt"
-    | "openClawSyncTargetRoot"
-    | "openClawSyncManifestPath"
-    | "openClawSyncStaleHours"
-  >
-> {
-  const targetRoot = asString(process.env.AI_HELL_MARY_ROOT) || "C:\\CTO Projects\\AI_HELL_MARY";
-  const manifestPath = path.join(
-    targetRoot,
-    "docs",
-    "generated",
-    "mission-control",
-    "sync-manifest.json"
-  );
-
-  try {
-    const raw = await fs.readFile(manifestPath, "utf8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const generatedAt = toIso(parsed.generatedAt);
-    const generatedMs = generatedAt ? Date.parse(generatedAt) : Number.NaN;
-    const staleHours =
-      Number.isFinite(generatedMs)
-        ? Math.max(0, Math.floor((Date.now() - generatedMs) / (60 * 60 * 1000)))
-        : null;
-
-    return {
-      openClawSyncGeneratedAt: generatedAt,
-      openClawSyncTargetRoot: asString(parsed.targetRoot) || targetRoot,
-      openClawSyncManifestPath: manifestPath,
-      openClawSyncStaleHours: staleHours,
-    };
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err?.code && err.code !== "ENOENT") {
-      log.warn("agents.control_plane.openclaw_sync_unavailable", {
-        manifestPath,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    return {
-      openClawSyncGeneratedAt: null,
-      openClawSyncTargetRoot: targetRoot,
-      openClawSyncManifestPath: manifestPath,
-      openClawSyncStaleHours: null,
-    };
-  }
 }
 
 function isValidHttpUrl(value: string | null): boolean {
@@ -799,7 +748,7 @@ export const GET = withApiHandler(
         readSocialPipelineSummary(user.uid, log),
         readWeeklyKpiSummary(user.uid),
         Promise.resolve(readRuntimeChecks()),
-        readOpenClawSyncStatus(log),
+        readOpenClawHeartbeatStatus(log),
         readPaperclipSummary(log),
         readCustomerProjection(user.uid, log),
         probeConfiguredMcpConnectors({
@@ -815,9 +764,16 @@ export const GET = withApiHandler(
       listLeadRunAlerts(orgId, 10),
     ]);
 
-    const externalTools = {
+    const externalTools: ControlPlaneExternalToolInput = {
       ...externalToolConfig,
-      ...openClawSync,
+      openClawHeartbeatState: openClawSync.state,
+      openClawHeartbeatReason: openClawSync.reason,
+      openClawHeartbeatReceivedAt: openClawSync.receivedAt,
+      openClawHeartbeatSentAt: openClawSync.sentAt,
+      openClawHeartbeatAgeSeconds: openClawSync.ageSeconds,
+      openClawHeartbeatRuntimeId: openClawSync.runtimeId,
+      openClawHeartbeatSourceCommit: openClawSync.sourceCommit,
+      openClawHeartbeatServices: openClawSync.services,
       ...connectorProbes,
     };
     const budgetGovernor = buildBudgetGovernorInput({
@@ -924,7 +880,7 @@ export const GET = withApiHandler(
       paperclipConfigured: isValidHttpUrl(externalTools.paperclipEndpoint),
       paperclipReachable: snapshot.business.paperclip.reachable,
       paperclipProxyActions: snapshot.business.paperclip.canProxyActions,
-      openClawSyncGeneratedAt: externalTools.openClawSyncGeneratedAt,
+      openClawHeartbeatReceivedAt: externalTools.openClawHeartbeatReceivedAt,
       posWorkerHealth: posWorker?.health || "unknown",
       posWorkerQueued: posWorker?.queuedEvents ?? null,
       socialDispatchPending: snapshot.operations.socialDispatch.pendingExternalTool,

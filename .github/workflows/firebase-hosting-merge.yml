@@ -151,6 +151,9 @@ jobs:
           LEADOPS_MCP_AUTH_MODE: ${{ vars.LEADOPS_MCP_AUTH_MODE || 'id_token' }}
           LEADOPS_MCP_ID_TOKEN_AUDIENCE: ${{ vars.LEADOPS_MCP_ID_TOKEN_AUDIENCE || 'https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app' }}
           LEADOPS_MCP_API_KEY: ${{ secrets.LEADOPS_MCP_API_KEY || '' }}
+          OPENCLAW_HEARTBEAT_OIDC_AUDIENCES: ${{ vars.OPENCLAW_HEARTBEAT_OIDC_AUDIENCES || '' }}
+          OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS: ${{ vars.OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS || 'openclaw-gateway@vibecheck-ik969.iam.gserviceaccount.com' }}
+          OPENCLAW_HEARTBEAT_RUNTIME_ID: ${{ vars.OPENCLAW_HEARTBEAT_RUNTIME_ID || 'openclaw-gateway' }}
           AGENT_ACTION_ALLOWED_UIDS: ${{ secrets.AGENT_ACTION_ALLOWED_UIDS || '' }}
         run: |
           set -euo pipefail
@@ -184,6 +187,10 @@ jobs:
           if [ -z "$OIDC_AUDIENCES" ]; then
             OIDC_AUDIENCES="$SERVICE_URL/api/social/drafts/weekly/worker-task,$SERVICE_URL/api/social/drafts/rng-weekly/worker-task"
           fi
+          HEARTBEAT_OIDC_AUDIENCES="$OPENCLAW_HEARTBEAT_OIDC_AUDIENCES"
+          if [ -z "$HEARTBEAT_OIDC_AUDIENCES" ]; then
+            HEARTBEAT_OIDC_AUDIENCES="$SERVICE_URL"
+          fi
           ENV_UPDATES="SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS=$SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS##SOCIAL_DRAFT_WORKER_OIDC_AUDIENCES=$OIDC_AUDIENCES"
           append_env_update() {
             local name="$1"
@@ -209,6 +216,9 @@ jobs:
           append_env_update "LEADOPS_MCP_AUTH_MODE" "$LEADOPS_MCP_AUTH_MODE"
           append_env_update "LEADOPS_MCP_ID_TOKEN_AUDIENCE" "$LEADOPS_MCP_ID_TOKEN_AUDIENCE"
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
+          append_env_update "OPENCLAW_HEARTBEAT_OIDC_AUDIENCES" "$HEARTBEAT_OIDC_AUDIENCES"
+          append_env_update "OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS" "$OPENCLAW_HEARTBEAT_OIDC_SERVICE_ACCOUNT_EMAILS"
+          append_env_update "OPENCLAW_HEARTBEAT_RUNTIME_ID" "$OPENCLAW_HEARTBEAT_RUNTIME_ID"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
           RUNTIME_SUFFIX="release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

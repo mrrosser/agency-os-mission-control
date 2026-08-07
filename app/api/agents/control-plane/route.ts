@@ -5,6 +5,8 @@ import { withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAgentSpaceStatus } from "@/lib/agent-status";
 import { getSecretStatus } from "@/lib/api/secrets";
+import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
+import { GOOGLE_BUSINESS_PROFILES } from "@/lib/google/business-profiles";
 import { getStoredGoogleTokens } from "@/lib/google/oauth";
 import {
   getLeadRunQuotaSummary,
@@ -539,6 +541,35 @@ function deriveGoogleCapabilities(scopeValue: string | null | undefined) {
   };
 }
 
+async function readGoogleCapabilities(uid: string, log: Logger) {
+  const [legacyTokens, ...profileTokens] = await Promise.all([
+    getStoredGoogleTokens(uid),
+    ...GOOGLE_BUSINESS_PROFILES.map(async (profile) => {
+      try {
+        const resolution = await resolveGoogleAccountTokens(uid, profile.profileId);
+        return resolution.record?.tokens || null;
+      } catch {
+        log.warn("agents.control_plane.google_profile_unavailable", {
+          uid,
+          businessId: profile.businessId,
+          profileId: profile.profileId,
+          errorCategory: "credential_vault_unavailable",
+        });
+        return null;
+      }
+    }),
+  ]);
+  const connectedTokenSets = [legacyTokens, ...profileTokens].filter(
+    (tokens): tokens is NonNullable<typeof tokens> =>
+      Boolean(tokens?.refreshToken || tokens?.accessToken)
+  );
+  const google = deriveGoogleCapabilities(
+    connectedTokenSets.map((tokens) => tokens.scope || "").filter(Boolean).join(" ")
+  );
+  google.connected = connectedTokenSets.length > 0;
+  return google;
+}
+
 function readExternalToolConfig(): ControlPlaneExternalToolInput {
   const read = (name: string): string | null => {
     const value = process.env[name];
@@ -742,7 +773,7 @@ export const GET = withApiHandler(
     const [
       spaces,
       secretStatus,
-      googleTokens,
+      google,
       driveSummary,
       skillHealth,
       telemetryGroups,
@@ -759,7 +790,7 @@ export const GET = withApiHandler(
       await Promise.all([
         getAgentSpaceStatus(user.uid, { orgId, businessIds }, log),
         getSecretStatus(user.uid),
-        getStoredGoogleTokens(user.uid),
+        readGoogleCapabilities(user.uid, log),
         readDriveSummary(user.uid),
         readSkillHealth(),
         listTelemetryGroups(user.uid, TELEMETRY_GROUP_LIMIT),
@@ -784,10 +815,6 @@ export const GET = withApiHandler(
       listLeadRunAlerts(orgId, 10),
     ]);
 
-    const google = deriveGoogleCapabilities(googleTokens?.scope || null);
-    if (!google.connected && (googleTokens?.refreshToken || googleTokens?.accessToken)) {
-      google.connected = true;
-    }
     const externalTools = {
       ...externalToolConfig,
       ...openClawSync,

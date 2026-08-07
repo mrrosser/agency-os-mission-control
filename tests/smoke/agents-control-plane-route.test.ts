@@ -3,6 +3,7 @@ import { GET } from "@/app/api/agents/control-plane/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAgentSpaceStatus } from "@/lib/agent-status";
 import { getSecretStatus } from "@/lib/api/secrets";
+import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import { getStoredGoogleTokens } from "@/lib/google/oauth";
 import {
   getLeadRunQuotaSummary,
@@ -37,6 +38,14 @@ vi.mock("@/lib/api/secrets", () => ({
 
 vi.mock("@/lib/google/oauth", () => ({
   getStoredGoogleTokens: vi.fn(async () => ({ scope: "" })),
+}));
+
+vi.mock("@/lib/google/account-token-store", () => ({
+  resolveGoogleAccountTokens: vi.fn(async () => ({
+    registryFound: false,
+    profileMapped: false,
+    record: null,
+  })),
 }));
 
 vi.mock("@/lib/lead-runs/quotas", () => ({
@@ -100,6 +109,7 @@ const requireAuthMock = vi.mocked(requireFirebaseAuth);
 const getAgentSpaceStatusMock = vi.mocked(getAgentSpaceStatus);
 const getSecretStatusMock = vi.mocked(getSecretStatus);
 const getStoredGoogleTokensMock = vi.mocked(getStoredGoogleTokens);
+const resolveGoogleAccountTokensMock = vi.mocked(resolveGoogleAccountTokens);
 const resolveOrgMock = vi.mocked(resolveLeadRunOrgId);
 const getQuotaMock = vi.mocked(getLeadRunQuotaSummary);
 const listAlertsMock = vi.mocked(listLeadRunAlerts);
@@ -148,9 +158,15 @@ describe("agents control-plane route", () => {
       googlePickerApiKey: "missing",
     });
     getStoredGoogleTokensMock.mockResolvedValue({
+      refreshToken: "legacy-refresh-token",
       scope:
         "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly",
     } as unknown as Awaited<ReturnType<typeof getStoredGoogleTokens>>);
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: false,
+      profileMapped: false,
+      record: null,
+    });
     resolveOrgMock.mockResolvedValue("org-1");
     getQuotaMock.mockResolvedValue({
       orgId: "org-1",
@@ -407,6 +423,9 @@ describe("agents control-plane route", () => {
         .map((agent: { id: string }) => agent.id)
     ).toEqual(["fn-actions"]);
     expect(payload.services.some((service: { id: string }) => service.id === "square_pos")).toBe(true);
+    expect(
+      payload.services.find((service: { id: string }) => service.id === "google_workspace")
+    ).toEqual(expect.objectContaining({ state: "operational" }));
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "smauto_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "leadops_mcp")?.state).toBe("operational");
     expect(payload.services.find((service: { id: string; state: string }) => service.id === "paperclip_system")?.state).toBe("operational");
@@ -427,5 +446,123 @@ describe("agents control-plane route", () => {
     expect(
       feedSummary.tasks + feedSummary.comments + feedSummary.status + feedSummary.decisions
     ).toBe(liveFeed.length);
+  });
+
+  it("reports Google Workspace from organization-scoped profile tokens", async () => {
+    getStoredGoogleTokensMock.mockResolvedValue(null);
+    resolveGoogleAccountTokensMock.mockImplementation(async (_uid, profileId) => ({
+      registryFound: true,
+      profileMapped: true,
+      record: {
+        accountId: `profile-${profileId}`,
+        profileId: profileId || null,
+        tokens: {
+          refreshToken: `refresh-${profileId}`,
+          scope:
+            profileId === "rt_solutions_work"
+              ? "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly"
+              : "https://www.googleapis.com/auth/calendar.events",
+        },
+      },
+    }));
+
+    const request = new Request("http://localhost/api/agents/control-plane", { method: "GET" });
+    const response = await GET(
+      request as unknown as Parameters<typeof GET>[0],
+      createContext() as unknown as Parameters<typeof GET>[1]
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledWith(
+      "user-1",
+      "rt_solutions_work"
+    );
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledWith(
+      "user-1",
+      "rosser_gallery_work"
+    );
+    expect(
+      payload.services.find((service: { id: string }) => service.id === "google_workspace")
+    ).toEqual(
+      expect.objectContaining({
+        state: "operational",
+      })
+    );
+    expect(payload.diagnostics.recommendations).not.toContain(
+      "Reconnect Google Workspace with Gmail + Calendar + Drive scopes for full agent actions."
+    );
+  });
+
+  it("fails closed when organization-scoped profile credentials are unavailable", async () => {
+    getStoredGoogleTokensMock.mockResolvedValue(null);
+    resolveGoogleAccountTokensMock.mockRejectedValue(new Error("secret manager unavailable"));
+
+    const request = new Request("http://localhost/api/agents/control-plane", { method: "GET" });
+    const response = await GET(
+      request as unknown as Parameters<typeof GET>[0],
+      createContext() as unknown as Parameters<typeof GET>[1]
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(
+      payload.services.find((service: { id: string }) => service.id === "google_workspace")
+    ).toEqual(
+      expect.objectContaining({
+        state: "offline",
+      })
+    );
+    expect(payload.diagnostics.recommendations).toContain(
+      "Reconnect Google Workspace with Gmail + Calendar + Drive scopes for full agent actions."
+    );
+  });
+
+  it("does not trust scopes from a profile without usable credentials", async () => {
+    getStoredGoogleTokensMock.mockResolvedValue(null);
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: true,
+      record: {
+        accountId: "profile-stale",
+        profileId: "rt_solutions_work",
+        tokens: {
+          scope:
+            "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.readonly",
+        },
+      },
+    });
+
+    const request = new Request("http://localhost/api/agents/control-plane", { method: "GET" });
+    const response = await GET(
+      request as unknown as Parameters<typeof GET>[0],
+      createContext() as unknown as Parameters<typeof GET>[1]
+    );
+    const payload = await response.json();
+    const googleServiceIds = new Set([
+      "google_workspace",
+      "gmail_tooling",
+      "calendar_tooling",
+      "drive_knowledge",
+    ]);
+    const googleServices = payload.services.filter((service: { id: string }) =>
+      googleServiceIds.has(service.id)
+    );
+
+    expect(response.status).toBe(200);
+    expect(googleServices).toHaveLength(4);
+    expect(
+      Object.fromEntries(
+        googleServices.map((service: { id: string; state: string }) => [
+          service.id,
+          service.state,
+        ])
+      )
+    ).toEqual({
+      google_workspace: "offline",
+      gmail_tooling: "offline",
+      calendar_tooling: "offline",
+      drive_knowledge: "offline",
+    });
   });
 });

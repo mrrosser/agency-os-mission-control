@@ -10,6 +10,7 @@ const DEFAULT_LOCATION = "us-central1";
 const DEFAULT_TIME_ZONE = "America/Chicago";
 const GCLOUD_BIN = "gcloud";
 const GCLOUD_USE_SHELL = false;
+const GCLOUD_CONFIG_NAME_PATTERN = /^[a-z][-a-z0-9]*$/;
 
 export const EXPECTED_RETRY_CONFIG = Object.freeze({
   retryCount: 3,
@@ -23,6 +24,15 @@ export const EXPECTED_RETRY_CONFIG = Object.freeze({
 export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   const { preferFresh = false } = options;
   const sourceEnv = { ...baseEnv };
+  const requestedActiveConfigName = String(
+    sourceEnv.CLOUDSDK_ACTIVE_CONFIG_NAME || ""
+  ).trim();
+  if (
+    requestedActiveConfigName &&
+    !GCLOUD_CONFIG_NAME_PATTERN.test(requestedActiveConfigName)
+  ) {
+    throw new Error("Invalid CLOUDSDK_ACTIVE_CONFIG_NAME");
+  }
 
   let configRoot = sourceEnv.CLOUDSDK_CONFIG?.trim();
   let freshConfig = false;
@@ -43,9 +53,12 @@ export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   if (freshConfig) {
     const configDir = join(configRoot, "configurations");
     mkdirSync(configDir, { recursive: true });
-    writeFileSync(join(configDir, "config_default"), "[core]\ndisable_usage_reporting = True\n", {
-      encoding: "utf8",
-    });
+    const configName = requestedActiveConfigName || "default";
+    writeFileSync(
+      join(configDir, `config_${configName}`),
+      "[core]\ndisable_usage_reporting = True\n",
+      { encoding: "utf8" }
+    );
   }
 
   const writableEnv = {
@@ -56,7 +69,9 @@ export function createWritableGcloudEnv(baseEnv = process.env, options = {}) {
   // Preserve the caller's named active configuration. When the variable is
   // absent, gcloud reads the active_config marker from the selected config
   // root. Only a newly-created isolated root should be pinned to default.
-  if (freshConfig) {
+  if (requestedActiveConfigName) {
+    writableEnv.CLOUDSDK_ACTIVE_CONFIG_NAME = requestedActiveConfigName;
+  } else if (freshConfig) {
     writableEnv.CLOUDSDK_ACTIVE_CONFIG_NAME = "default";
   }
   return writableEnv;

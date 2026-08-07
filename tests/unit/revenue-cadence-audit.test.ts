@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -47,10 +47,40 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
 
   it("preserves an explicitly selected named gcloud configuration", () => {
     const env = runAuditHelper(
-      `createWritableGcloudEnv({ ...process.env, CLOUDSDK_ACTIVE_CONFIG_NAME: "mission-control-audit" })`
+      `createWritableGcloudEnv(
+        { ...process.env, CLOUDSDK_ACTIVE_CONFIG_NAME: "mission-control-audit" },
+        { preferFresh: true }
+      )`
     );
 
     expect(env.CLOUDSDK_ACTIVE_CONFIG_NAME).toBe("mission-control-audit");
+    expect(
+      existsSync(
+        join(
+          String(env.CLOUDSDK_CONFIG),
+          "configurations",
+          "config_mission-control-audit"
+        )
+      )
+    ).toBe(true);
+  });
+
+  it("rejects an unsafe named gcloud configuration before creating files", () => {
+    const result = runAuditHelper(
+      `(() => {
+        try {
+          createWritableGcloudEnv(
+            { ...process.env, CLOUDSDK_ACTIVE_CONFIG_NAME: "x/../../../escaped" },
+            { preferFresh: true }
+          );
+          return { error: null };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        }
+      })()`
+    );
+
+    expect(result.error).toBe("Invalid CLOUDSDK_ACTIVE_CONFIG_NAME");
   });
 
   it("audits the consolidated live revenue cadence instead of removed legacy jobs", () => {

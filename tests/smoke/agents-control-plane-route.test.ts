@@ -383,6 +383,14 @@ describe("agents control-plane route", () => {
     expect(Array.isArray(payload.agents)).toBe(true);
     expect(Array.isArray(payload.services)).toBe(true);
     expect(Array.isArray(payload.skills)).toBe(true);
+    expect(payload.skills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "knowledge_pack_v2",
+          state: "operational",
+        }),
+      ])
+    );
     expect(Array.isArray(payload.diagnostics.alerts)).toBe(true);
     expect(Array.isArray(payload.diagnostics.bugs)).toBe(true);
     expect(typeof payload.operations?.queueHealth?.state).toBe("string");

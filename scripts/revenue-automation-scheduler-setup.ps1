@@ -135,7 +135,9 @@ function ConvertFrom-GcloudJson {
         [Parameter(Mandatory = $true)][string]$ResourceLabel
     )
     try {
-        return $Json | ConvertFrom-Json -Depth 50
+        # Windows PowerShell 5.1 does not expose this cmdlet's depth parameter.
+        # Its input parser still preserves the nested gcloud payload.
+        return $Json | ConvertFrom-Json
     } catch {
         throw "Unable to parse gcloud JSON for $ResourceLabel."
     }
@@ -191,7 +193,8 @@ function Ensure-DedicatedServiceAccount {
     )
     if ($result.ExitCode -eq 0) {
         $account = ConvertFrom-GcloudJson -Json $result.Output -ResourceLabel "revenue scheduler service account"
-        if ($account.disabled -eq $true) {
+        $disabledProperty = $account.PSObject.Properties["disabled"]
+        if ($null -ne $disabledProperty -and $disabledProperty.Value -eq $true) {
             throw "The dedicated revenue scheduler service account is disabled."
         }
         return
@@ -233,13 +236,45 @@ function Get-CloudRunEnvironment {
         [Parameter(Mandatory = $true)][string]$CloudRunRegion,
         [Parameter(Mandatory = $true)][string]$ProjectId
     )
-    $json = Invoke-GcloudJsonOutput -Args @(
+    $serviceJson = Invoke-GcloudJsonOutput -Args @(
         "run", "services", "describe", $CloudRunService,
         "--region", $CloudRunRegion,
         "--project", $ProjectId,
-        "--format=json(status.url,spec.template.spec.timeoutSeconds,spec.template.spec.containers[0].env)"
+        "--format=json(status.url,status.traffic)"
     )
-    return ConvertFrom-GcloudJson -Json $json -ResourceLabel "Cloud Run environment"
+    $service = ConvertFrom-GcloudJson -Json $serviceJson -ResourceLabel "Cloud Run service"
+    $servingAllocations = @($service.status.traffic | Where-Object {
+        $percentProperty = $_.PSObject.Properties["percent"]
+        $null -ne $percentProperty -and [int]$percentProperty.Value -eq 100
+    })
+    if ($servingAllocations.Count -ne 1 -or [string]::IsNullOrWhiteSpace("$($servingAllocations[0].revisionName)")) {
+        throw "Cloud Run must have exactly one named revision serving 100 percent of production traffic."
+    }
+
+    $servingRevisionName = "$($servingAllocations[0].revisionName)"
+    $revisionJson = Invoke-GcloudJsonOutput -Args @(
+        "run", "revisions", "describe", $servingRevisionName,
+        "--region", $CloudRunRegion,
+        "--project", $ProjectId,
+        "--format=json(metadata.name,spec.timeoutSeconds,spec.containers[0].env,status.conditions)"
+    )
+    $revision = ConvertFrom-GcloudJson -Json $revisionJson -ResourceLabel "serving Cloud Run revision"
+    $ready = @($revision.status.conditions | Where-Object {
+        $_.type -eq "Ready" -and "$($_.status)" -eq "True"
+    }).Count -eq 1
+
+    return [PSCustomObject]@{
+        status = [PSCustomObject]@{
+            url = $service.status.url
+            servingRevisionName = $servingRevisionName
+            servingRevisionReady = $ready
+        }
+        spec = [PSCustomObject]@{
+            template = [PSCustomObject]@{
+                spec = $revision.spec
+            }
+        }
+    }
 }
 
 function Get-EnvironmentValue {
@@ -269,6 +304,9 @@ function Assert-CloudRunAuthConfiguration {
 
     if ("$($ServiceDescription.status.url)".TrimEnd("/") -ne $ExpectedAudience.TrimEnd("/")) {
         throw "Cloud Run status URL does not match the revenue worker OIDC audience."
+    }
+    if (-not $ServiceDescription.status.servingRevisionReady) {
+        throw "The 100-percent-serving Cloud Run revision is not Ready."
     }
     if ([int]$ServiceDescription.spec.template.spec.timeoutSeconds -lt 900) {
         throw "Cloud Run must use a request timeout of at least 900 seconds for revenue workers."

@@ -10,6 +10,91 @@ interface CapturedGcloudCall {
   Args: string[];
 }
 
+function captureServingCloudRunRevision() {
+  const powerShell = String.raw`
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$source = Get-Content -LiteralPath $env:SCHEDULER_SCRIPT_PATH -Raw
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+  $source,
+  [ref]$tokens,
+  [ref]$parseErrors
+)
+if (@($parseErrors).Count -gt 0) { throw "Scheduler script did not parse." }
+foreach ($functionName in @("ConvertFrom-GcloudJson", "Get-CloudRunEnvironment")) {
+  $functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $functionName
+  }, $true)
+  if ($null -eq $functionAst) { throw "$functionName was not found." }
+  Invoke-Expression $functionAst.Extent.Text
+}
+
+$script:RevisionArgs = @()
+function Invoke-GcloudJsonOutput {
+  param([Parameter(Mandatory = $true)][string[]]$Args)
+  if ($Args[1] -eq "services") { return $env:TEST_SERVICE_JSON }
+  if ($Args[1] -eq "revisions") {
+    $script:RevisionArgs = @($Args)
+    return $env:TEST_REVISION_JSON
+  }
+  throw "Unexpected gcloud call."
+}
+
+$result = Get-CloudRunEnvironment -CloudRunService "service" -CloudRunRegion "us-central1" -ProjectId "project"
+[PSCustomObject]@{
+  url = $result.status.url
+  servingRevisionName = $result.status.servingRevisionName
+  servingRevisionReady = $result.status.servingRevisionReady
+  timeoutSeconds = $result.spec.template.spec.timeoutSeconds
+  revisionArgs = @($script:RevisionArgs)
+} | ConvertTo-Json -Compress -Depth 20
+`;
+  const result = spawnSync(process.platform === "win32" ? "pwsh.exe" : "pwsh", [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    powerShell,
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      SCHEDULER_SCRIPT_PATH: scriptPath,
+      TEST_SERVICE_JSON: JSON.stringify({
+        status: {
+          url: "https://service.example.run.app",
+          traffic: [
+            { revisionName: "retired-template", tag: "old-tag" },
+            { revisionName: "serving-release", percent: 100, tag: "release" },
+          ],
+        },
+      }),
+      TEST_REVISION_JSON: JSON.stringify({
+        metadata: { name: "serving-release" },
+        spec: { timeoutSeconds: 900, containers: [{ env: [] }] },
+        status: { conditions: [{ type: "Ready", status: "True" }] },
+      }),
+    },
+  });
+  if (result.status !== 0) {
+    throw new Error(`Cloud Run serving-revision capture failed: ${result.stderr || result.stdout}`);
+  }
+  return JSON.parse(result.stdout.trim()) as {
+    url: string;
+    servingRevisionName: string;
+    servingRevisionReady: boolean;
+    timeoutSeconds: number;
+    revisionArgs: string[];
+  };
+}
+
 function captureSchedulerMutation(existingState: "ABSENT" | "ENABLED" | "PAUSED") {
   const powerShell = String.raw`
 $ErrorActionPreference = "Stop"
@@ -126,7 +211,31 @@ describe("revenue automation scheduler OIDC contract", () => {
     expect(script).toContain('"scheduler", "jobs", "resume"');
     expect(script).toContain("timeoutSeconds -lt 900");
     expect(script).toContain("Cloud Run status URL does not match");
+    expect(script).toContain('"run", "revisions", "describe", $servingRevisionName');
+    expect(script).toContain('$percentProperty = $_.PSObject.Properties["percent"]');
+    expect(script).toContain("[int]$percentProperty.Value -eq 100");
+    expect(script).toContain("servingRevisionReady");
+    expect(script).toContain("The 100-percent-serving Cloud Run revision is not Ready.");
   });
+
+  it("remains compatible with Windows PowerShell 5.1 JSON parsing", () => {
+    expect(script).toContain("return $Json | ConvertFrom-Json");
+    expect(script).not.toContain("ConvertFrom-Json -Depth");
+    expect(script).toContain('$disabledProperty = $account.PSObject.Properties["disabled"]');
+  });
+
+  it("validates the named 100-percent-serving revision instead of an unserved template", () => {
+    const result = captureServingCloudRunRevision();
+
+    expect(result).toMatchObject({
+      url: "https://service.example.run.app",
+      servingRevisionName: "serving-release",
+      servingRevisionReady: true,
+      timeoutSeconds: 900,
+    });
+    expect(result.revisionArgs).toContain("serving-release");
+    expect(result.revisionArgs).not.toContain("retired-template");
+  }, 15_000);
 
   it("uses create-compatible retry flags and does not resume a newly enabled job", () => {
     const calls = captureSchedulerMutation("ABSENT");

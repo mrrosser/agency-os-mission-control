@@ -187,6 +187,34 @@ describe("OpenClaw authenticated heartbeat", () => {
     );
   });
 
+  it("accepts optional Paperclip states and degrades when its bridge is stale", () => {
+    const services = {
+      ...makeEnvelope().services,
+      paperclip_api: "active" as const,
+      paperclip_bridge: "inactive" as const,
+    };
+    const status = deriveOpenClawHeartbeatStatus(
+      {
+        receivedAt: "2026-08-07T16:00:00.000Z",
+        sentAt: "2026-08-07T16:00:00.000Z",
+        sourceCommit: "e".repeat(40),
+        services,
+      },
+      { nowMs: Date.parse("2026-08-07T16:01:00.000Z"), staleAfterSeconds: 900 }
+    );
+
+    expect(status).toEqual(
+      expect.objectContaining({
+        state: "degraded",
+        reason: "service_unhealthy",
+        services: expect.objectContaining({
+          paperclip_api: "active",
+          paperclip_bridge: "inactive",
+        }),
+      })
+    );
+  });
+
   it("records a new receipt with a server timestamp and idempotently ignores replay", async () => {
     const transactionSet = vi.fn();
     const transactionGet = vi

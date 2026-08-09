@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The OpenClaw gateway VM publishes a non-model health receipt every five minutes. Agency OS authenticates the VM with Google OIDC, stores one server-timestamped Firestore document, and presents the receipt as `openclaw_sync` in Agent Nexus.
+The OpenClaw gateway VM publishes a non-model health receipt every five minutes. Agency OS authenticates the VM with Google OIDC, stores one server-timestamped Firestore document, and presents the receipt as `openclaw_sync` in Agent Nexus. The same receipt may include optional `paperclip_api` and `paperclip_bridge` states so the private loopback-only Paperclip runtime can be visible without exposing its URL or credentials.
 
 ## Agency OS configuration
 
@@ -64,9 +64,11 @@ Never copy the metadata identity token into a file, environment variable, comman
 
 ## Expected status
 
-- `operational`: server receipt is fresh and gateway plus all three voice MCP units are active.
+- `operational`: server receipt is fresh and every reported critical unit is active. Legacy publishers may report only the gateway and three voice MCP units; newer publishers also report Paperclip API and bridge freshness.
 - `degraded`: receipt is older than the threshold or a critical unit is not active.
 - `offline`: receipt is missing/invalid or Firestore cannot be read.
+
+When both optional Paperclip states are present and active, the Paperclip System card uses an authenticated `visibility_only` projection. This projection never enables lifecycle actions and does not claim company, agent, or active-run counts. A missing/stale bridge or unhealthy API degrades Paperclip status. A legacy heartbeat with neither optional field remains valid and does not fabricate Paperclip availability.
 
 ## Diagnostics
 

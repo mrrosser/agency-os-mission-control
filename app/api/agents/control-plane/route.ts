@@ -32,13 +32,20 @@ import type {
 import { pullProviderBilling } from "@/lib/billing/provider-costs";
 import type { Logger } from "@/lib/logging";
 import { normalizePaperclipCustomers } from "@/lib/crm/customer-memory";
-import { PaperclipClient, readPaperclipClientConfig } from "@/lib/paperclip/client";
+import {
+  buildPaperclipHeartbeatProjection,
+  PaperclipClient,
+  readPaperclipClientConfig,
+} from "@/lib/paperclip/client";
 import { BUSINESS_UNIT_OPTIONS, OFFER_DEFINITIONS } from "@/lib/revenue/offers";
 import { getPosWorkerStatus } from "@/lib/revenue/pos-worker";
 import { buildRuntimePreflightReport } from "@/lib/runtime/preflight";
 import { getSocialPipelineHealthSummary } from "@/lib/social/onboarding";
 import { resolveCallerBusinessIds } from "@/lib/agents/registry";
-import { readOpenClawHeartbeatStatus } from "@/lib/agents/openclaw-heartbeat";
+import {
+  readOpenClawHeartbeatStatus,
+  type OpenClawHeartbeatStatus,
+} from "@/lib/agents/openclaw-heartbeat";
 import { probeConfiguredMcpConnectors } from "@/lib/mcp/connector-health";
 import knowledgePackV2 from "@/please-review/from-root/config-templates/knowledge-pack.v2.json";
 
@@ -145,9 +152,14 @@ function projectMonthEndUsd(totalUsd: number): number | null {
   return Math.round((totalUsd / day) * daysInMonth * 100) / 100;
 }
 
-async function readPaperclipSummary(log: Logger): Promise<PaperclipControlSnapshot> {
+async function readPaperclipSummary(
+  log: Logger,
+  heartbeat?: OpenClawHeartbeatStatus
+): Promise<PaperclipControlSnapshot> {
   const config = readPaperclipClientConfig();
   if (!config) {
+    const projection = heartbeat ? buildPaperclipHeartbeatProjection(heartbeat) : null;
+    if (projection) return projection;
     return {
       state: "degraded",
       configured: false,
@@ -732,7 +744,6 @@ export const GET = withApiHandler(
       weeklyKpi,
       runtimeChecks,
       openClawSync,
-      paperclip,
       customerProjection,
       connectorProbes,
     ] =
@@ -749,7 +760,6 @@ export const GET = withApiHandler(
         readWeeklyKpiSummary(user.uid),
         Promise.resolve(readRuntimeChecks()),
         readOpenClawHeartbeatStatus(log),
-        readPaperclipSummary(log),
         readCustomerProjection(user.uid, log),
         probeConfiguredMcpConnectors({
           smAutoEndpoint: externalToolConfig.smAutoEndpoint,
@@ -758,6 +768,7 @@ export const GET = withApiHandler(
           log,
         }),
       ]);
+    const paperclip = await readPaperclipSummary(log, openClawSync);
 
     const [quota, alerts] = await Promise.all([
       getLeadRunQuotaSummary(orgId),

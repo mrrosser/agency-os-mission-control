@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildPaperclipHeartbeatProjection,
   PaperclipClient,
   PaperclipClientError,
   readPaperclipClientConfig,
@@ -34,6 +35,50 @@ afterEach(() => {
 });
 
 describe("PaperclipClient", () => {
+  it("builds a visibility-only snapshot from a fresh authenticated VM receipt", () => {
+    const snapshot = buildPaperclipHeartbeatProjection({
+      state: "operational",
+      reason: "fresh",
+      runtimeId: "openclaw-gateway",
+      receivedAt: "2026-08-08T16:00:00.000Z",
+      sentAt: "2026-08-08T15:59:59.000Z",
+      ageSeconds: 30,
+      sourceCommit: "a".repeat(40),
+      services: {
+        openclaw_gateway: "active",
+        paperclip_api: "active",
+        paperclip_bridge: "active",
+      },
+    });
+
+    expect(snapshot).toEqual(
+      expect.objectContaining({
+        state: "operational",
+        configured: true,
+        reachable: true,
+        canProxyActions: false,
+        baseUrl: null,
+        sourceOfTruth: "visibility_only",
+      })
+    );
+    expect(snapshot?.detail).toContain("Authenticated VM projection");
+  });
+
+  it("does not fabricate a Paperclip projection from a legacy heartbeat", () => {
+    const snapshot = buildPaperclipHeartbeatProjection({
+      state: "operational",
+      reason: "fresh",
+      runtimeId: "openclaw-gateway",
+      receivedAt: "2026-08-08T16:00:00.000Z",
+      sentAt: "2026-08-08T15:59:59.000Z",
+      ageSeconds: 30,
+      sourceCommit: "a".repeat(40),
+      services: { openclaw_gateway: "active" },
+    });
+
+    expect(snapshot).toBeNull();
+  });
+
   it("reads config from env", () => {
     process.env.PAPERCLIP_API_BASE_URL = "https://paperclip.example/system";
     process.env.PAPERCLIP_SERVICE_TOKEN = "secret";

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Logger } from "@/lib/logging";
 import type { PaperclipControlSnapshot } from "@/lib/control-plane/autonomous-business";
+import type { OpenClawHeartbeatStatus } from "@/lib/agents/openclaw-heartbeat";
 
 const DEFAULT_TIMEOUT_MS = 8_000;
 
@@ -61,6 +62,48 @@ export interface PaperclipCustomerUpsertInput {
   requestedByUid: string;
   companyId?: string | null;
   payload: Record<string, unknown>;
+}
+
+export function buildPaperclipHeartbeatProjection(
+  heartbeat: OpenClawHeartbeatStatus
+): PaperclipControlSnapshot | null {
+  const apiState = heartbeat.services.paperclip_api;
+  const bridgeState = heartbeat.services.paperclip_bridge;
+  if (apiState === undefined && bridgeState === undefined) return null;
+
+  const receiptFresh = heartbeat.state !== "offline" && heartbeat.reason !== "stale";
+  const apiReady = receiptFresh && apiState === "active";
+  const bridgeReady = receiptFresh && bridgeState === "active";
+  const state = apiReady && bridgeReady ? "operational" : heartbeat.state === "offline" ? "offline" : "degraded";
+  const ageDetail =
+    heartbeat.ageSeconds === null
+      ? "receipt age unavailable"
+      : heartbeat.ageSeconds < 60
+        ? `${heartbeat.ageSeconds}s old`
+        : `${Math.floor(heartbeat.ageSeconds / 60)}m old`;
+
+  return {
+    state,
+    configured: true,
+    reachable: apiReady,
+    canProxyActions: false,
+    baseUrl: null,
+    sourceOfTruth: "visibility_only",
+    companyCount: null,
+    agentCount: null,
+    activeRunCount: null,
+    detail:
+      state === "operational"
+        ? `Authenticated VM projection is fresh (${ageDetail}); Paperclip API and OpenClaw bridge are active.`
+        : `Authenticated VM projection reports Paperclip API ${apiState || "missing"} and bridge ${bridgeState || "missing"} (${heartbeat.reason}, ${ageDetail}).`,
+    capabilities: {
+      lifecycleActions: false,
+      heartbeats: bridgeReady,
+      budgets: false,
+      audit: false,
+      mobile: false,
+    },
+  };
 }
 
 export class PaperclipClientError extends Error {

@@ -647,11 +647,18 @@ function resolveServiceState(
 
   if (id === "paperclip_system") {
     const endpoint = parseConnectorEndpoint(externalTools.paperclipEndpoint);
+    const heartbeatProjection = paperclip?.sourceOfTruth === "visibility_only" && !paperclip.baseUrl;
+    const reachable = Boolean(paperclip?.reachable && (endpoint.origin || heartbeatProjection));
     return {
       id,
       label: "Paperclip System",
-      state: endpoint.origin && paperclip?.reachable ? "operational" : "degraded",
-      detail: endpoint.origin
+      state:
+        reachable && paperclip?.state === "operational"
+          ? "operational"
+          : paperclip?.state || "degraded",
+      detail: heartbeatProjection
+        ? paperclip?.detail || "Authenticated VM Paperclip projection is unavailable."
+        : endpoint.origin
         ? paperclip?.reachable
           ? `Live Paperclip health probe passed via ${endpoint.origin}.`
           : paperclip?.detail || `Endpoint configured at ${endpoint.origin}; live health probe has not passed.`
@@ -1098,7 +1105,12 @@ function buildRecommendations(args: {
 
   const paperclip = serviceById.get("paperclip_system");
   if (paperclip?.state !== "operational") {
-    recommendations.push("Set PAPERCLIP_SYSTEM_URL or PAPERCLIP_MCP_SERVER_URL so Paperclip is visible in Agent Nexus.");
+    const recommendation =
+      args.business.paperclip.sourceOfTruth === "visibility_only"
+        ? "Repair the private Paperclip API and bridge on the OpenClaw VM, then restore a fresh authenticated heartbeat receipt."
+        : "Set PAPERCLIP_SYSTEM_URL or PAPERCLIP_MCP_SERVER_URL so Paperclip is visible in Agent Nexus.";
+    if (args.business.paperclip.sourceOfTruth === "visibility_only") recommendations.unshift(recommendation);
+    else recommendations.push(recommendation);
   }
 
   const openClawSync = serviceById.get("openclaw_sync");
@@ -1107,7 +1119,9 @@ function buildRecommendations(args: {
   }
 
   if (args.business.paperclip.state !== "operational") {
-    recommendations.push("Finish the Paperclip proxy cutover so Agent Nexus reads live company, agent, run, and lifecycle state.");
+    if (args.business.paperclip.sourceOfTruth !== "visibility_only") {
+      recommendations.push("Finish the Paperclip proxy cutover so Agent Nexus reads live company, agent, run, and lifecycle state.");
+    }
   }
 
   if (args.business.budgetGovernor.state !== "operational") {

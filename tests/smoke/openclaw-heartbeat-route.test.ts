@@ -102,6 +102,43 @@ describe("OpenClaw heartbeat route", () => {
     expect(recordMock).not.toHaveBeenCalled();
   });
 
+  it("accepts backward-compatible Paperclip runtime service states", async () => {
+    const body = validBody();
+    const projectedBody = {
+      ...body,
+      services: {
+        ...body.services,
+        paperclip_api: "active",
+        paperclip_bridge: "active",
+      },
+    };
+    const request = new Request("https://agency.example/api/agents/openclaw-heartbeat", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer google-oidc-token",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(projectedBody),
+    });
+
+    const response = await POST(
+      request as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+
+    expect(response.status).toBe(200);
+    expect(recordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          services: expect.objectContaining({
+            paperclip_api: "active",
+            paperclip_bridge: "active",
+          }),
+        }),
+      })
+    );
+  });
+
   it("rejects malformed service state without writing", async () => {
     const body = validBody();
     body.services.voice_mcp_router = "compromised";

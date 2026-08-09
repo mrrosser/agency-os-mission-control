@@ -33,6 +33,8 @@ export const OpenClawHeartbeatEnvelopeSchema = z
         voice_mcp_rt: RuntimeServiceStateSchema,
         voice_mcp_rosser: RuntimeServiceStateSchema,
         voice_mcp_router: RuntimeServiceStateSchema,
+        paperclip_api: RuntimeServiceStateSchema.optional(),
+        paperclip_bridge: RuntimeServiceStateSchema.optional(),
       })
       .strict(),
   })
@@ -358,6 +360,9 @@ export function deriveOpenClawHeartbeatStatus(
     "voice_mcp_rosser",
     "voice_mcp_router",
   ];
+  if ("paperclip_api" in services || "paperclip_bridge" in services) {
+    requiredServiceIds.push("paperclip_api", "paperclip_bridge");
+  }
   if (requiredServiceIds.some((serviceId) => services[serviceId] !== "active")) {
     return {
       state: "degraded",

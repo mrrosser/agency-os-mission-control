@@ -164,6 +164,92 @@ describe("buildControlPlaneSnapshot", () => {
     expect(snapshot.diagnostics.recommendations[0]).toContain("OpenAI API key");
   });
 
+  it("surfaces a healthy visibility-only Paperclip heartbeat without a public endpoint", () => {
+    const input: Parameters<typeof buildControlPlaneSnapshot>[0] = {
+      nowIso: "2026-02-16T18:00:00.000Z",
+      spaces: {},
+      secretStatus: ALL_MISSING,
+      google: { connected: false, drive: false, gmail: false, calendar: false },
+      quota: {
+        orgId: "org-1",
+        windowKey: "2026-02-16",
+        runsUsed: 0,
+        leadsUsed: 0,
+        activeRuns: 0,
+        maxRunsPerDay: 80,
+        maxLeadsPerDay: 1200,
+        maxActiveRuns: 3,
+        runsRemaining: 80,
+        leadsRemaining: 1200,
+        utilization: { runsPct: 0, leadsPct: 0 },
+      },
+      alerts: [],
+      telemetryGroups: [],
+      driveSummary: { lastRunAt: null, staleDays: null, lastResultCount: 0 },
+      skillHealth: {
+        knowledgePackPresent: false,
+        hasAgentTopology: false,
+        hasKnowledgeIngestionPolicy: false,
+        hasVoiceOpsPolicy: false,
+      },
+      externalTools: {
+        ...NO_EXTERNAL_TOOLS,
+        openClawHeartbeatState: "operational",
+        openClawHeartbeatReason: "fresh",
+        openClawHeartbeatAgeSeconds: 30,
+        openClawHeartbeatServices: {
+          openclaw_gateway: "active",
+          paperclip_api: "active",
+          paperclip_bridge: "active",
+        },
+      },
+      posWorker: null,
+      paperclip: {
+        ...DEFAULT_PAPERCLIP,
+        state: "operational",
+        configured: true,
+        reachable: true,
+        sourceOfTruth: "visibility_only",
+        detail: "Authenticated VM projection is fresh; Paperclip API and bridge are active.",
+        capabilities: {
+          ...DEFAULT_PAPERCLIP.capabilities,
+          heartbeats: true,
+        },
+      },
+      governance: DEFAULT_GOVERNANCE,
+      budgetGovernor: DEFAULT_BUDGET,
+      customerMemory: DEFAULT_CUSTOMER_MEMORY,
+      productCatalog: DEFAULT_PRODUCT_CATALOG,
+      adOps: DEFAULT_AD_OPS,
+      mobileOps: DEFAULT_MOBILE_OPS,
+      reliability: DEFAULT_RELIABILITY,
+    };
+    const snapshot = buildControlPlaneSnapshot(input);
+
+    const paperclip = snapshot.services.find((service) => service.id === "paperclip_system");
+    expect(paperclip?.state).toBe("operational");
+    expect(paperclip?.detail).toContain("Authenticated VM projection");
+
+    const degradedSnapshot = buildControlPlaneSnapshot({
+      ...input,
+      paperclip: {
+        ...input.paperclip,
+        state: "degraded",
+        reachable: true,
+        detail: "Authenticated VM projection reports the bridge inactive.",
+      },
+    });
+    expect(
+      degradedSnapshot.services.find((service) => service.id === "paperclip_system")?.state
+    ).toBe("degraded");
+    expect(degradedSnapshot.diagnostics.recommendations).toContain(
+      "Repair the private Paperclip API and bridge on the OpenClaw VM, then restore a fresh authenticated heartbeat receipt."
+    );
+    expect(
+      degradedSnapshot.diagnostics.recommendations.some((item) => item.includes("PAPERCLIP_SYSTEM_URL"))
+    ).toBe(false);
+  });
+
   it("marks agents active/degraded and computes projected cost", () => {
     const snapshot = buildControlPlaneSnapshot({
       nowIso: "2026-02-16T18:00:00.000Z",

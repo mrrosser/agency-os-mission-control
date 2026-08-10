@@ -1,5 +1,21 @@
 # Latest Verification Run
 
+## 2026-08-10 unified Application Desk
+
+- RUN_ID: 20260810-unified-application-desk
+- Scope: native Agency OS Application Desk, exact same-origin adapters to the AI-Hell-Mary review authority, mobile navigation, preparation-only decisions, and RT read-only enforcement
+
+[2026-08-10T20:10:00Z] gate=full-vitest cmd=npm-test result=PASS
+[2026-08-10T20:10:00Z] gate=full-eslint cmd=npm-run-lint result=PASS
+[2026-08-10T20:11:00Z] gate=typescript cmd=tsc-noEmit-incremental-false result=PASS
+[2026-08-10T20:19:00Z] gate=mobile-playwright cmd=application-desk-spec result=PASS tests=1 viewport=412x915 horizontal_overflow_px=0 prod_login_bypass=false
+[2026-08-10T20:25:00Z] gate=full-vitest-final cmd=npm-test result=PASS
+[2026-08-10T20:28:00Z] gate=build-final cmd=npm-run-build result=PASS routes=98 application_desk_route=present
+[2026-08-10T20:28:00Z] gate=full-eslint-final cmd=npm-run-lint result=PASS
+[2026-08-10T20:29:00Z] gate=dependency-audit cmd=npm-audit-high result=PASS high=0 critical=0 moderate=10
+[2026-08-10T20:31:00Z] gate=gitleaks-changed-files result=PASS files=16 leaks=0
+[2026-08-10T20:37:00Z] gate=independent-security-review result=PASS blockers=0 rt_read_only=enforced proxy_paths=exact_allowlist
+
 ## 2026-08-06 CRM UI, agents, and autonomy audit
 
 - RUN_ID: 20260806-crm-ui-agents-full-audit

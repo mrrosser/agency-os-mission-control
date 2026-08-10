@@ -3,6 +3,7 @@ import type { User } from "firebase/auth";
 interface AuthHeaderOptions {
   idempotencyKey?: string;
   correlationId?: string;
+  workspaceId?: string;
 }
 
 export async function buildAuthHeaders(
@@ -16,6 +17,10 @@ export async function buildAuthHeaders(
 
   if (options.idempotencyKey) {
     headers["X-Idempotency-Key"] = options.idempotencyKey;
+  }
+
+  if (options.workspaceId) {
+    headers["X-Workspace-Id"] = options.workspaceId;
   }
 
   if (user) {

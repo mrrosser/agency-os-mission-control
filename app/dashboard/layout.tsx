@@ -19,6 +19,7 @@ const DASHBOARD_LINKS = [
     { href: "/dashboard", label: "Overview", icon: "overview" as AfroGlyphVariant },
     { href: "/dashboard/identity", label: "Identity (The Offer)", icon: "identity" as AfroGlyphVariant },
     { href: "/dashboard/operations", label: "Operations", icon: "operations" as AfroGlyphVariant },
+    { href: "/dashboard/opportunities", label: "Application Desk", icon: "receipt" as AfroGlyphVariant },
     { href: "/dashboard/crm", label: "CRM", icon: "people" as AfroGlyphVariant },
     { href: "/dashboard/competitors", label: "Competitors", icon: "trend" as AfroGlyphVariant },
     { href: "/dashboard/agents", label: "Agent Nexus", icon: "network" as AfroGlyphVariant },

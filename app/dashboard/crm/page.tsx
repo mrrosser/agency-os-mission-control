@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { AlertTriangle, Calendar, CircleCheck, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -27,6 +28,7 @@ import {
   type BusinessUnitId,
   type CrmPipelineStage,
 } from "@/lib/revenue/offers";
+import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 import { toast } from "sonner";
 
 interface Lead {
@@ -191,6 +193,11 @@ export default function CRMPage() {
   const [dailyOutcomes, setDailyOutcomes] = useState<DailyOutcomeResponse | null>(null);
   const [loadingDailyOutcomes, setLoadingDailyOutcomes] = useState(false);
   const [dailyOutcomeError, setDailyOutcomeError] = useState<string | null>(null);
+  const [portfolioRegistry, setPortfolioRegistry] = useState<PortfolioCrmRegistrySummary | null>(
+    null
+  );
+  const [loadingPortfolioRegistry, setLoadingPortfolioRegistry] = useState(false);
+  const [portfolioRegistryError, setPortfolioRegistryError] = useState<string | null>(null);
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [newLeadData, setNewLeadData] = useState({
     companyName: "",
@@ -235,10 +242,38 @@ export default function CRMPage() {
 
   useEffect(() => {
     if (!user) return;
+    void loadPortfolioRegistry();
     void loadCustomers();
     void loadDailyOutcomes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
+
+  async function loadPortfolioRegistry() {
+    if (!user) return;
+    setLoadingPortfolioRegistry(true);
+    setPortfolioRegistryError(null);
+    try {
+      const headers = await buildAuthHeaders(user);
+      const res = await fetch("/api/crm/registry/summary", {
+        method: "GET",
+        headers,
+        cache: "no-store",
+      });
+      const data = await readApiJson<PortfolioCrmRegistrySummary & { error?: string }>(res);
+      if (!res.ok) {
+        const cid = getResponseCorrelationId(res);
+        throw new Error(
+          data.error || `Portfolio registry is unavailable${cid ? ` cid=${cid}` : ""}`
+        );
+      }
+      setPortfolioRegistry(data);
+    } catch (error) {
+      setPortfolioRegistry(null);
+      setPortfolioRegistryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingPortfolioRegistry(false);
+    }
+  }
 
   async function loadDailyOutcomes() {
     if (!user) return;
@@ -467,9 +502,9 @@ export default function CRMPage() {
     <div className="min-h-screen bg-black p-4 sm:p-6 md:p-8">
       <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white">Revenue Pipeline</h1>
+          <h1 className="text-3xl font-bold text-white">CRM &amp; Revenue Pipeline</h1>
           <p className="text-zinc-400">
-            Customer memory source:{" "}
+            Editable lead pipeline source:{" "}
             <span className="text-zinc-200">
               {sourceOfTruth === "paperclip" ? "Paperclip" : "Projected Firestore fallback"}
             </span>
@@ -565,6 +600,12 @@ export default function CRMPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <PortfolioRegistrySummary
+        summary={portfolioRegistry}
+        loading={loadingPortfolioRegistry}
+        error={portfolioRegistryError}
+      />
 
       <section
         aria-labelledby="daily-outcome-heading"

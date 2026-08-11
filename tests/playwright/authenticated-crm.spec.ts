@@ -40,6 +40,55 @@ test.describe("authenticated CRM and autonomy UI", () => {
     // Specific handlers below are registered later and take precedence. Any
     // unexpected CRM request is blocked from touching production test data.
     await page.route("**/api/crm/**", async (route) => route.abort("blockedbyclient"));
+    await page.route("**/api/crm/registry/summary", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "Cache-Control": "private, no-store, max-age=0" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          sourceOfTruth: "firestore_portfolio_registry",
+          dataClassification: "aggregate_only",
+          readOnly: true,
+          registry: { accessRole: "owner" },
+          totals: {
+            people: 12,
+            contactPoints: 14,
+            emailContactPoints: 4,
+            phoneContactPoints: 10,
+            sourceRecords: 15,
+            openConflicts: 0,
+          },
+          brands: { rosser_gallery: 2, rt_solutions: 1, kgclassy: 0, unassigned: 9 },
+          sources: { google_people: 10, google_sheets: 3, blinq_csv: 2, other: 0 },
+          permissions: {
+            contactPointStates: {
+              unknown: 14,
+              opted_in: 0,
+              opted_out: 0,
+              reconfirm_required: 0,
+              transactional_only: 0,
+              other: 0,
+            },
+            sourceRecordsWithNoPermissionBasis: 15,
+            permissionEvents: 0,
+            suppressions: 0,
+          },
+          outreach: {
+            status: "blocked",
+            eligibleContacts: 0,
+            reasons: ["No canonical permission events are recorded."],
+          },
+          freshness: {
+            peopleUpdatedAt: null,
+            contactPointsUpdatedAt: null,
+            sourceRecordsUpdatedAt: null,
+            latestUpdatedAt: null,
+            observedAt: "2026-08-11T15:00:00.000Z",
+          },
+        }),
+      });
+    });
     await page.route("**/api/crm/customers?limit=200", async (route) => {
       await route.fulfill({
         status: 200,
@@ -140,6 +189,8 @@ test.describe("authenticated CRM and autonomy UI", () => {
 
     await signIn(page);
     await page.goto("/dashboard/crm", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("portfolio-crm-registry")).toBeVisible();
+    await expect(page.getByTestId("portfolio-crm-outreach-blocked")).toBeVisible();
     const crmSurface = page.getByTestId(mobile ? "crm-mobile-list" : "crm-desktop-board");
     await expect(crmSurface).toBeVisible();
     await expect(crmSurface.getByText("UI Audit Customer").first()).toBeVisible();

@@ -79,7 +79,49 @@ describe("Application Desk same-origin adapter routes", () => {
 
     expect(response.status).toBe(401);
     expect(payload.error).toBe("Invalid ID token");
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0",
+    );
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    expect(response.headers.get("x-correlation-id")).toBe("corr-route");
     expect(mocks.forward).not.toHaveBeenCalled();
+  });
+
+  it("prevents caching when a wrapped handler returns a 4xx directly", async () => {
+    mocks.forward.mockResolvedValueOnce(
+      NextResponse.json({ error: "Upstream rejected" }, { status: 400 }),
+    );
+
+    const response = await getWorkspaces(
+      request("/api/application-desk/workspaces"),
+      context() as never,
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0",
+    );
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    expect(response.headers.get("x-correlation-id")).toBe("corr-route");
+  });
+
+  it("preserves a successful response cache policy", async () => {
+    mocks.forward.mockResolvedValueOnce(
+      NextResponse.json(
+        { ok: true },
+        { headers: { "cache-control": "public, max-age=60" } },
+      ),
+    );
+
+    const response = await getWorkspaces(
+      request("/api/application-desk/workspaces"),
+      context() as never,
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(response.headers.get("pragma")).toBeNull();
+    expect(response.headers.get("x-correlation-id")).toBe("corr-route");
   });
 
   it("maps the workspace and review list routes to fixed read-only upstream paths", async () => {

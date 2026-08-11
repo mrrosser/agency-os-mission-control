@@ -1,0 +1,4 @@
+# Reviewed 2026-08-11 with Gitleaks 8.30.0. Exact historical non-secret
+# fingerprints only; no rule, path, regex, or value-wide suppression.
+eeee8679fbe94eaf010c57ab05ffa0b8029b3792:tests/smoke/agents-actions-route.test.ts:generic-api-key:60
+66d0fa8614d9f96972f25ddfc8850319f0bfbff6:tests/smoke/telemetry-retention-run-route.test.ts:generic-api-key:55

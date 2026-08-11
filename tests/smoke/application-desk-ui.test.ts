@@ -58,6 +58,22 @@ describe("unified Mission Control Application Desk UI", () => {
     expect(desk).toContain("await loadReviews(\"refresh\")");
   });
 
+  it("uses the server lifecycle for overdue retention and upstream capability for write access", () => {
+    expect(desk).toContain("isApplicationReviewVisibleForStatus");
+    const statusOptions = desk.match(
+      /const statusFilterOptions[\s\S]*?= \[([\s\S]*?)\];/,
+    )?.[1];
+    expect(statusOptions).toContain('{ value: "needs_review", label: "Needs review" }');
+    expect(statusOptions).toContain('{ value: "expired", label: "Expired" }');
+    expect(statusOptions).not.toMatch(/approved_for_preparation|changes_requested|deferred|rejected|stale/);
+    expect(desk).toContain("item.deadlineLifecycle.overdueDays");
+    expect(desk).toContain("Opportunities 6–14 days overdue appear only");
+    expect(desk).toContain("applicationDeskWorkspaceDisplayName");
+    expect(desk).not.toContain(
+      "This workspace is read-only until approval access is reconciled.",
+    );
+  });
+
   it("previews, confirms, then applies only the exact three prepared cases", () => {
     for (const title of [
       "SUNO Nursing Building Interior",

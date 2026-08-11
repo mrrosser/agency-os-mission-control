@@ -5,13 +5,34 @@
 1. Sign in at `https://leadflow-review.web.app/login`.
 2. Open the mobile menu and choose **Application Desk**, or go directly to
    `https://leadflow-review.web.app/dashboard/opportunities`.
-3. Filter by workspace, applicant track, lane, or review status.
+3. Filter by workspace, applicant track, lane, or the simplified **All**,
+   **Needs Review**, and **Expired** status buckets.
 4. Choose **Approve for preparation**, **Request changes**, **Defer**, or
    **Reject**.
 
 Approval authorizes internal drafting and evidence gathering only. It does not
 authorize opening/filling a provider form, final submission, payment,
 signature, attestation, terms acceptance, account changes, or communications.
+
+**Needs Review** groups actionable, stale, and change-requested rows. **All**
+also keeps approved, deferred, and rejected history reachable; the card badges
+and immutable decision receipts retain each exact granular status. **Expired**
+is a lifecycle bucket and does not overwrite those card statuses.
+
+## Overdue Queue Policy
+
+AI-Hell-Mary derives the lifecycle from its server clock. Agency OS uses the
+returned `deadlineLifecycle`; it does not calculate retention from the phone or
+browser clock.
+
+- 1–5 overdue days: visible in **All statuses** and **Expired**.
+- 6–14 overdue days: visible only when **Expired** is selected.
+- 15+ overdue days: soft-archived and omitted from the desk.
+
+Soft archive is a read filter only. Opportunities, review state, and immutable
+decision receipts remain stored. At the read-only 2026-08-11 12:00 CDT baseline,
+this hides 11 of 98 Marcus opportunities and 2 of 27 RT opportunities; one
+additional Marcus item remains available only in Expired.
 
 ## Load the Three Prepared Marcus Cases
 
@@ -39,8 +60,22 @@ explicit confirmation.
 - Workspace IDs, review IDs, idempotency headers, request bodies, response
   bodies, redirects, and response content types fail closed.
 - Tokens and decision notes must never be logged.
-- RT remains read-only until its duplicate workspace/capability configuration
-  is explicitly reconciled.
+- Agency OS does not maintain a workspace-ID deny for review decisions. The
+  upstream authenticated membership and `canApproveActions` capability are the
+  sole authority; AI-Hell-Mary checks both its route and transaction.
+
+The canonical RT topology verified read-only on 2026-08-11 is:
+
+- workspace `ws_ee1735c095774325`, slug `rt-solutions`;
+- Marcus UID `DM5ZZngePXXhNgN85Afi7W4Knoz2`, active membership,
+  `canApproveActions=false`;
+- duplicate workspace `ws_36d5fe8544c643d0`, owned by Marcus but not the
+  canonical Artist Manager workspace.
+
+The Agency adapter forwards canonical RT decisions, but the upstream returns
+read-only until the exact canonical member capability is changed. Leave the
+duplicate untouched. Never infer approval from login, a workspace label, slug,
+or duplicate-workspace ownership.
 
 ## Local Verification
 
@@ -73,3 +108,8 @@ Postdeploy requirements:
 - The exact live Hosting version points to the exact verified Cloud Run tag.
 - The authenticated Marcus workspace loads; no prepared import is applied
   during verification.
+- Friendly display labels read **Marcus Rosser Artist Career** and
+  **RT Solutions** while the underlying IDs/slugs remain unchanged.
+- Before any live RT capability change, verify the canonical RT response still
+  reports `canDecide=false`. A separately reviewed change may merge only
+  `capabilities.canApproveActions=true` into the exact Marcus member document.

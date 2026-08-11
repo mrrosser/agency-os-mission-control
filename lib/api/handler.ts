@@ -43,6 +43,12 @@ function pickClientIp(headers: Headers): string | null {
   return realIp || null;
 }
 
+function preventErrorCaching(response: NextResponse): void {
+  if (response.status < 400) return;
+  response.headers.set("cache-control", "private, no-store, max-age=0");
+  response.headers.set("pragma", "no-cache");
+}
+
 export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
   options?: { route: string }
@@ -66,6 +72,7 @@ export function withApiHandler(
         params,
       });
       response.headers.set("x-correlation-id", correlationId);
+      preventErrorCaching(response);
       log.info("request.completed", { status: response.status, path });
       return response;
     } catch (error) {
@@ -81,6 +88,7 @@ export function withApiHandler(
         { status }
       );
       response.headers.set("x-correlation-id", correlationId);
+      preventErrorCaching(response);
 
       // 4xx responses are expected (validation/auth), so log at warn to avoid noisy error logs.
       const meta = { status, path, error: sanitizeError(error) };

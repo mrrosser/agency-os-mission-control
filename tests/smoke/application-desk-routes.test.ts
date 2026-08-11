@@ -61,7 +61,7 @@ describe("Application Desk same-origin adapter routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireAuth.mockResolvedValue({
-      uid: "marcus-owner",
+      uid: "DM5ZZngePXXhNgN85Afi7W4Knoz2",
       email: "owner@example.com",
     });
     mocks.forward.mockResolvedValue(
@@ -184,9 +184,18 @@ describe("Application Desk same-origin adapter routes", () => {
       (
         await recordDecision(rtDecision, context({ reviewId }) as never)
       ).status,
-    ).toBe(403);
-    expect(mocks.forward).not.toHaveBeenCalled();
+    ).toBe(200);
+    expect(mocks.forward).toHaveBeenLastCalledWith({
+      request: rtDecision,
+      path: `/api/artist-manager/application-reviews/${reviewId}/decision`,
+      method: "POST",
+      correlationId: "corr-route",
+      log: mocks.log,
+      maxRequestBytes: 12 * 1024,
+      requireWorkspace: true,
+    });
 
+    mocks.forward.mockClear();
     const malformed = await recordDecision(
       decisionRequest,
       context({ reviewId: "../../foreign-review" }) as never,

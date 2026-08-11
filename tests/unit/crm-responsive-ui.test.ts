@@ -30,6 +30,22 @@ describe("CRM responsive UI source", () => {
     expect(source).not.toContain(">Rosser NFT Gallery<");
   });
 
+  it("keeps the canonical registry read-only, fail-closed, and separate from leads", () => {
+    const page = readSource("app", "dashboard", "crm", "page.tsx");
+    const panel = readSource("components", "crm", "portfolio-registry-summary.tsx");
+
+    expect(page).toContain('fetch("/api/crm/registry/summary"');
+    expect(page).toContain("<PortfolioRegistrySummary");
+    expect(page).toContain("Editable lead pipeline source:");
+    expect(panel).toContain('data-testid="portfolio-crm-registry"');
+    expect(panel).toContain('data-testid="portfolio-crm-outreach-blocked"');
+    expect(panel).toContain("aggregate only · separate from the editable lead pipeline below");
+    expect(panel).toContain("grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6");
+    expect(panel).toContain("grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4");
+    expect(panel).toContain("No permission basis");
+    expect(panel).toContain("Registry freshness");
+  });
+
   it("constrains dialogs and fixed feedback controls to a phone viewport", () => {
     const dialog = readSource("components", "ui", "dialog.tsx");
     const feedback = readSource("components", "feedback", "BetaFeedback.tsx");
@@ -67,6 +83,7 @@ describe("CRM responsive UI source", () => {
     expect(source).toContain('page.route("**/api/agents/control-plane"');
     expect(source).toContain('page.route("**/api/telemetry/error"');
     expect(source).toContain('page.route("**/api/crm/**"');
+    expect(source).toContain('page.route("**/api/crm/registry/summary"');
     expect(source).not.toContain("route.continue()");
   });
 });

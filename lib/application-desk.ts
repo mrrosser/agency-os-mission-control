@@ -20,6 +20,24 @@ export type ApplicationReviewStatus =
   | "stale"
   | "expired";
 
+export type ApplicationDeadlineLifecycleState =
+  | "undated"
+  | "open"
+  | "recently_overdue"
+  | "expired_filter_only"
+  | "soft_archived";
+
+export interface ApplicationDeadlineLifecycle {
+  state: ApplicationDeadlineLifecycleState;
+  overdueDays: number | null;
+  evaluatedAt: string;
+}
+
+export type ApplicationReviewOperatorStatusFilter =
+  | "all"
+  | "needs_review"
+  | "expired";
+
 export type ArtistOpportunityLane =
   | "artist_call"
   | "grant"
@@ -83,6 +101,7 @@ export interface ApplicationReviewItem {
   artifactFingerprint: string;
   stateRef: string;
   status: ApplicationReviewStatus;
+  deadlineLifecycle: ApplicationDeadlineLifecycle;
   opportunity: ApplicationReviewOpportunity;
   approvalScope: string[];
   excludedScope: string[];
@@ -101,9 +120,8 @@ export const PREPARED_APPLICATION_WORKSPACE_ID = "ws_cd43331c4b1648d0";
 
 export const RT_SOLUTIONS_APPLICATION_WORKSPACE_ID = "ws_ee1735c095774325";
 
-export function canRecordApplicationDeskDecisions(workspaceId: string): boolean {
-  return workspaceId !== RT_SOLUTIONS_APPLICATION_WORKSPACE_ID;
-}
+export const MARCUS_ROSSER_ARTIST_CAREER_WORKSPACE_SLUG =
+  "marcus-rosser-artist-career-autopilot";
 
 export function isApplicationDeskWorkspace(
   workspace: ApplicationDeskWorkspace,
@@ -147,4 +165,56 @@ export function normalizeApplicationDeskWorkspaces(
     workspaces.push({ id, slug, name, status, defaultProfileVersion });
   }
   return workspaces;
+}
+
+/** Display-only labels; canonical IDs, slugs, and upstream names stay unchanged. */
+export function applicationDeskWorkspaceDisplayName(
+  workspace: ApplicationDeskWorkspace,
+): string {
+  if (
+    workspace.id === PREPARED_APPLICATION_WORKSPACE_ID &&
+    workspace.slug === MARCUS_ROSSER_ARTIST_CAREER_WORKSPACE_SLUG
+  ) {
+    return "Marcus Rosser Artist Career";
+  }
+  if (
+    workspace.id === RT_SOLUTIONS_APPLICATION_WORKSPACE_ID &&
+    workspace.slug === "rt-solutions"
+  ) {
+    return "RT Solutions";
+  }
+  return workspace.name;
+}
+
+/**
+ * The upstream server owns all lifecycle timing. Missing metadata from an old
+ * server version hides expired rows from the default queue until both releases
+ * are in sync; the browser never recomputes retention from its own clock.
+ */
+export function isApplicationReviewVisibleForStatus(
+  item: ApplicationReviewItem,
+  statusFilter: ApplicationReviewOperatorStatusFilter,
+): boolean {
+  const lifecycleState = item.deadlineLifecycle?.state;
+  if (lifecycleState === "soft_archived") return false;
+  if (statusFilter === "expired") {
+    if (!lifecycleState) return item.status === "expired";
+    return (
+      lifecycleState === "recently_overdue" ||
+      lifecycleState === "expired_filter_only"
+    );
+  }
+  if (statusFilter === "needs_review") {
+    return (
+      lifecycleState !== "expired_filter_only" &&
+      (item.status === "needs_review" ||
+        item.status === "stale" ||
+        item.status === "changes_requested")
+    );
+  }
+  if (statusFilter === "all") {
+    if (item.status !== "expired") return true;
+    return lifecycleState === "recently_overdue";
+  }
+  return false;
 }

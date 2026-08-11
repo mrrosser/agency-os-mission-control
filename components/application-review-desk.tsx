@@ -28,13 +28,15 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuthHeaders } from "@/lib/api/client";
 import {
-  canRecordApplicationDeskDecisions,
+  applicationDeskWorkspaceDisplayName,
   isApplicationDeskWorkspace,
+  isApplicationReviewVisibleForStatus,
   PREPARED_APPLICATION_WORKSPACE_ID,
 } from "@/lib/application-desk";
 import type {
   ApplicationReviewDecisionKind,
   ApplicationReviewItem,
+  ApplicationReviewOperatorStatusFilter,
   ApplicationReviewStatus,
   ArtistOpportunityLane,
 } from "@/lib/application-desk";
@@ -79,6 +81,14 @@ const statusLabels: Record<ApplicationReviewStatus, string> = {
   stale: "stale",
   expired: "expired",
 };
+
+const statusFilterOptions: Array<{
+  value: Exclude<ApplicationReviewOperatorStatusFilter, "all">;
+  label: string;
+}> = [
+  { value: "needs_review", label: "Needs review" },
+  { value: "expired", label: "Expired" },
+];
 
 interface ApplicationReviewDeskProps {
   /** Increment after current-workspace discovery to reload every workspace lane. */
@@ -139,8 +149,11 @@ function formatDeadline(deadline: string | null): string {
   }).format(parsed);
 }
 
-function dueLabel(deadline: string | null): string | null {
-  const parsed = parseDeadline(deadline);
+function dueLabel(item: ApplicationReviewItem): string | null {
+  if (item.deadlineLifecycle?.overdueDays !== null && item.deadlineLifecycle?.overdueDays !== undefined) {
+    return `${item.deadlineLifecycle.overdueDays}d overdue`;
+  }
+  const parsed = parseDeadline(item.opportunity.deadline);
   if (!parsed) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -218,7 +231,8 @@ export function ApplicationReviewDesk({
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [applicantTrackFilter, setApplicantTrackFilter] = useState("all");
   const [laneFilter, setLaneFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] =
+    useState<ApplicationReviewOperatorStatusFilter>("all");
   const [noteByReviewId, setNoteByReviewId] = useState<Record<string, string>>({});
   const [deferDateByReviewId, setDeferDateByReviewId] = useState<Record<string, string>>({});
   const [savingByReviewId, setSavingByReviewId] = useState<Record<string, boolean>>({});
@@ -258,7 +272,7 @@ export function ApplicationReviewDesk({
           if (!response.ok) {
             const correlationId = response.headers.get("x-correlation-id");
             throw new Error(
-              `${workspace.name}: ${payload.error || `review load failed (${response.status})`}${
+              `${applicationDeskWorkspaceDisplayName(workspace)}: ${payload.error || `review load failed (${response.status})`}${
                 correlationId ? ` · ${correlationId}` : ""
               }`,
             );
@@ -266,9 +280,7 @@ export function ApplicationReviewDesk({
           return {
             workspace,
             items: Array.isArray(payload.items) ? payload.items : [],
-            canDecide:
-              payload.canDecide === true &&
-              canRecordApplicationDeskDecisions(workspace.id),
+            canDecide: payload.canDecide === true,
           };
         }),
       );
@@ -294,7 +306,7 @@ export function ApplicationReviewDesk({
         nextErrors.push(
           result.reason instanceof Error
             ? result.reason.message
-            : `${workspace?.name || "Workspace"}: review load failed`,
+            : `${workspace ? applicationDeskWorkspaceDisplayName(workspace) : "Workspace"}: review load failed`,
         );
       });
 
@@ -337,10 +349,6 @@ export function ApplicationReviewDesk({
       Array.from(new Set(rows.map((row) => row.item.opportunity.lane))).sort() as ArtistOpportunityLane[],
     [rows],
   );
-  const statuses = useMemo(
-    () => Array.from(new Set(rows.map((row) => row.item.status))).sort() as ApplicationReviewStatus[],
-    [rows],
-  );
   const filteredRows = useMemo(
     () =>
       rows.filter(
@@ -348,19 +356,25 @@ export function ApplicationReviewDesk({
           (workspaceFilter === "all" || row.workspace.id === workspaceFilter) &&
           (applicantTrackFilter === "all" || row.item.applicantTrack === applicantTrackFilter) &&
           (laneFilter === "all" || row.item.opportunity.lane === laneFilter) &&
-          (statusFilter === "all" || row.item.status === statusFilter),
+          isApplicationReviewVisibleForStatus(
+            row.item,
+            statusFilter,
+          ),
       ),
     [applicantTrackFilter, laneFilter, rows, statusFilter, workspaceFilter],
   );
 
-  const dueSoonCount = rows.filter((row) => isDueSoon(row.item)).length;
-  const blockedCount = rows.filter(
+  const currentQueueRows = rows.filter((row) =>
+    isApplicationReviewVisibleForStatus(row.item, "all"),
+  );
+  const dueSoonCount = currentQueueRows.filter((row) => isDueSoon(row.item)).length;
+  const blockedCount = currentQueueRows.filter(
     (row) =>
       row.item.applicantTrack === "needs_owner_assignment" ||
       row.item.reviewBlockers.length > 0 ||
       row.item.opportunity.missingRequirementKeys.length > 0,
   ).length;
-  const readyCount = rows.filter(
+  const readyCount = currentQueueRows.filter(
     (row) => row.item.approvalEligible && row.item.applicantTrack !== "needs_owner_assignment",
   ).length;
 
@@ -465,7 +479,7 @@ export function ApplicationReviewDesk({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="All reviews" value={String(rows.length)} />
+        <Metric label="Current queue" value={String(currentQueueRows.length)} />
         <Metric label="Approval eligible" value={String(readyCount)} />
         <Metric label="Due within 14 days" value={String(dueSoonCount)} />
         <Metric label="Needs requirements" value={String(blockedCount)} />
@@ -476,7 +490,10 @@ export function ApplicationReviewDesk({
           label="Workspace"
           value={workspaceFilter}
           onValueChange={setWorkspaceFilter}
-          options={accessibleWorkspaces.map((workspace) => ({ value: workspace.id, label: workspace.name }))}
+          options={accessibleWorkspaces.map((workspace) => ({
+            value: workspace.id,
+            label: applicationDeskWorkspaceDisplayName(workspace),
+          }))}
         />
         <FilterSelect
           label="Applicant track"
@@ -494,8 +511,10 @@ export function ApplicationReviewDesk({
         <FilterSelect
           label="Status"
           value={statusFilter}
-          onValueChange={setStatusFilter}
-          options={statuses.map((status) => ({ value: status, label: humanize(status) }))}
+          onValueChange={(value) =>
+            setStatusFilter(value as ApplicationReviewOperatorStatusFilter)
+          }
+          options={statusFilterOptions}
         />
         <div className="flex items-end">
           <Button
@@ -533,7 +552,8 @@ export function ApplicationReviewDesk({
 
       <p className="text-xs text-slate-400" aria-live="polite">
         Showing {filteredRows.length} of {rows.length} review items across {accessibleWorkspaces.length} accessible
-        workspace{accessibleWorkspaces.length === 1 ? "" : "s"}.
+        workspace{accessibleWorkspaces.length === 1 ? "" : "s"}. Opportunities 6–14 days overdue appear only
+        under the Expired status; older items are soft-archived without deleting history.
       </p>
 
       <div className="space-y-4">
@@ -634,10 +654,9 @@ function ReviewCard({
   onDecision: (decisionKind: ApplicationReviewDecisionKind) => void;
 }) {
   const { item, workspace, canDecide } = row;
-  const workspaceIsReadOnly = !canRecordApplicationDeskDecisions(workspace.id);
   const opportunity = item.opportunity;
   const missing = missingRequirementLabels(item);
-  const due = dueLabel(opportunity.deadline);
+  const due = dueLabel(item);
   const officialListingUrl = safeOfficialListingUrl(item);
   const needsOwnerAssignment = item.applicantTrack === "needs_owner_assignment";
   const approvalDisabled = saving || !canDecide || !item.approvalEligible || needsOwnerAssignment;
@@ -655,7 +674,9 @@ function ReviewCard({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border border-white/15 bg-white/10 text-slate-100">{workspace.name}</Badge>
+              <Badge className="border border-white/15 bg-white/10 text-slate-100">
+                {applicationDeskWorkspaceDisplayName(workspace)}
+              </Badge>
               <Badge className="border border-[#00ffff]/25 bg-[#00ffff]/10 text-[#9af7ff]">
                 {humanize(opportunity.lane)}
               </Badge>
@@ -847,9 +868,7 @@ function ReviewCard({
           )}
           {!canDecide && (
             <p className="text-xs text-slate-400">
-              {workspaceIsReadOnly
-                ? "This workspace is read-only until approval access is reconciled."
-                : "Your workspace role can view but not record decisions."}
+              Your workspace role can view but not record decisions.
             </p>
           )}
           {feedback && (

@@ -69,6 +69,8 @@ describe("unified Mission Control Application Desk UI", () => {
     expect(desk).toContain("item.deadlineLifecycle.overdueDays");
     expect(desk).toContain("Opportunities 6–14 days overdue appear only");
     expect(desk).toContain("applicationDeskWorkspaceDisplayName");
+    expect(desk).toContain('rt_solutions: "RT.Solutions"');
+    expect(clientSurface).not.toContain("Artist Solutions");
     expect(desk).not.toContain(
       "This workspace is read-only until approval access is reconciled.",
     );

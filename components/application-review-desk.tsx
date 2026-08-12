@@ -57,7 +57,7 @@ const decisionLabels: Record<ApplicationReviewDecisionKind, string> = {
 const applicantTrackLabels: Record<ApplicationReviewItem["applicantTrack"], string> = {
   marcus_artist: "Marcus Rosser · Artist",
   rosser_gallery: "Rosser Gallery",
-  rt_solutions: "RT Solutions",
+  rt_solutions: "RT.Solutions",
   marcus_personal_job: "Marcus Rosser · Jobs",
   needs_owner_assignment: "Needs owner assignment",
 };
@@ -857,7 +857,7 @@ function ReviewCard({
           {needsOwnerAssignment && canDecide && (
             <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-100">
               Preparation approval is blocked until this opportunity is assigned to Marcus Rosser,
-              Rosser Gallery, RT Solutions, or Marcus Rosser’s personal job track.
+              Rosser Gallery, RT.Solutions, or Marcus Rosser’s personal job track.
             </p>
           )}
           {!item.approvalEligible && !needsOwnerAssignment && canDecide && (

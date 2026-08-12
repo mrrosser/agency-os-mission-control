@@ -109,7 +109,7 @@ Postdeploy requirements:
 - The authenticated Marcus workspace loads; no prepared import is applied
   during verification.
 - Friendly display labels read **Marcus Rosser Artist Career** and
-  **RT Solutions** while the underlying IDs/slugs remain unchanged.
+  **RT.Solutions** while the underlying IDs/slugs remain unchanged.
 - Before any live RT capability change, verify the canonical RT response still
   reports `canDecide=false`. A separately reviewed change may merge only
   `capabilities.canApproveActions=true` into the exact Marcus member document.

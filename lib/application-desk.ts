@@ -181,7 +181,7 @@ export function applicationDeskWorkspaceDisplayName(
     workspace.id === RT_SOLUTIONS_APPLICATION_WORKSPACE_ID &&
     workspace.slug === "rt-solutions"
   ) {
-    return "RT Solutions";
+    return "RT.Solutions";
   }
   return workspace.name;
 }

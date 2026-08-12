@@ -74,7 +74,7 @@ describe("Application Desk workspace projection", () => {
     expect(applicationDeskWorkspaceDisplayName(marcus)).toBe(
       "Marcus Rosser Artist Career",
     );
-    expect(applicationDeskWorkspaceDisplayName(rt)).toBe("RT Solutions");
+    expect(applicationDeskWorkspaceDisplayName(rt)).toBe("RT.Solutions");
     expect(marcus.name).toBe("Marcus Rosser Artist Career Autopilot");
     expect(rt.name).toBe("RT Solutions Autopilot");
   });

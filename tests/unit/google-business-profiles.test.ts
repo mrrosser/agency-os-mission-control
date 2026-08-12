@@ -1,17 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
   capabilitiesFromGoogleScopes,
+  hasGoogleGmailSendScope,
   resolveGoogleBusinessProfileContext,
 } from "@/lib/google/business-profiles";
 
 describe("Google business profile contract", () => {
+  it("distinguishes Gmail send authority from read-only Gmail access", () => {
+    expect(
+      hasGoogleGmailSendScope(
+        "openid https://www.googleapis.com/auth/gmail.readonly"
+      )
+    ).toBe(false);
+    expect(
+      hasGoogleGmailSendScope(
+        "openid https://www.googleapis.com/auth/gmail.send"
+      )
+    ).toBe(true);
+  });
+
   it("maps canonical businesses to the worker profile ids", () => {
     expect(
       resolveGoogleBusinessProfileContext({ businessId: "rt_solutions" })
     ).toMatchObject({
       businessId: "rt_solutions",
       profileId: "rt_solutions_work",
-      label: "RT Solutions",
+        label: "RT.Solutions",
     });
     expect(
       resolveGoogleBusinessProfileContext({ profileId: "rosser_gallery_work" })

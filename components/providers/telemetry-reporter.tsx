@@ -26,6 +26,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+export function telemetryPageUrl(location: Pick<Location, "origin" | "pathname">): string {
+  return `${location.origin}${location.pathname}`;
+}
+
 function safeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
@@ -99,7 +103,7 @@ export function TelemetryReporter() {
       name: input.name,
       message: input.message,
       stack: input.stack,
-      url: typeof window !== "undefined" ? window.location.href : undefined,
+      url: typeof window !== "undefined" ? telemetryPageUrl(window.location) : undefined,
       route: input.route,
       userAgent: typeof navigator !== "undefined" ? navigator.userAgent : undefined,
       occurredAt: nowIso(),

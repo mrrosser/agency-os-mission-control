@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
+import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 
@@ -113,6 +114,35 @@ describe("warm reconnect campaign UI", () => {
     expect(source).toContain("setWarmReconnectCampaign(null)");
     expect(source).not.toContain('fetch("/api/crm/registry/summary"');
     expect(source).toContain("<WarmReconnectCampaign");
+    expect(source).toContain("<WarmReconnectActivation");
     expect(source).not.toMatch(/warm-reconnect\/send|warm-reconnect\/draft/);
+  });
+
+  it("renders the activation desk fail-closed before an authenticated contract loads", () => {
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(html).toContain("Activation desk · controlled pilot");
+    expect(html).toContain("Permission first. Approval and launch stay separate.");
+    expect(html).toContain("No pilot exists. Approval and launch have zero authority.");
+    expect(html).toContain("Launch is the separate action that authorizes those five Gmail sends.");
+    expect(html).not.toContain("Launch approved pilot");
+  });
+
+  it("keeps Google consent and pilot mutations on exact bounded routes", () => {
+    const source = readFileSync(
+      join(process.cwd(), "components", "crm", "warm-reconnect-activation.tsx"),
+      "utf8"
+    );
+
+    expect(source).toContain('const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation"');
+    expect(source).toContain('scopePreset: "gmail_send"');
+    expect(source).toContain('returnTo: "/dashboard/crm"');
+    expect(source).toContain('authUrl.hostname !== "accounts.google.com"');
+    expect(source).toContain("availableActions.canApprove");
+    expect(source).toContain("availableActions.canLaunch");
+    expect(source).toContain("acknowledgeLaunchAuthorizesExactFiveEmailSend: true");
+    expect(source).toContain("!activation.candidateSummary.truncated");
+    expect(source).toContain("no partial audience can be approved");
+    expect(source).not.toMatch(/console\.(?:log|info|warn|error)/);
   });
 });

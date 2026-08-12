@@ -106,6 +106,32 @@ describe("google connect route", () => {
     expect(idempotencySetMock).toHaveBeenCalledOnce();
   });
 
+  it("accepts the send-only Gmail preset for a bounded campaign connection", async () => {
+    const request = new NextRequest("https://leadflow-review.web.app/api/google/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        returnTo: "/dashboard/crm",
+        scopePreset: "gmail_send",
+        businessId: "rosser_nft_gallery",
+        profileId: "rosser_gallery_work",
+      }),
+    });
+
+    const response = await POST(request, {} as never);
+
+    expect(response.status).toBe(200);
+    expect(getGoogleAuthUrlMock).toHaveBeenCalledWith(expect.any(String), {
+      scopePreset: "gmail_send",
+    });
+    expect(stateSetMock.mock.calls[0]?.[0]).toMatchObject({
+      returnTo: "/dashboard/crm",
+      scopePreset: "gmail_send",
+      businessId: "rosser_nft_gallery",
+      profileId: "rosser_gallery_work",
+    });
+  });
+
   it("preserves the no-context legacy connect response", async () => {
     const request = new NextRequest("https://leadflow-review.web.app/api/google/connect", {
       method: "POST",
@@ -163,6 +189,38 @@ describe("google connect route", () => {
 
     const response = await POST(request, {} as never);
     expect(response.status).toBe(400);
+    expect(stateSetMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects query parameters, non-JSON, and oversized bodies before state creation", async () => {
+    const queryResponse = await POST(
+      new NextRequest("https://leadflow-review.web.app/api/google/connect?scope=gmail", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }),
+      {} as never
+    );
+    const typeResponse = await POST(
+      new NextRequest("https://leadflow-review.web.app/api/google/connect", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "{}",
+      }),
+      {} as never
+    );
+    const largeResponse = await POST(
+      new NextRequest("https://leadflow-review.web.app/api/google/connect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ returnTo: `/${"a".repeat(5_000)}` }),
+      }),
+      {} as never
+    );
+
+    expect(queryResponse.status).toBe(400);
+    expect(typeResponse.status).toBe(415);
+    expect(largeResponse.status).toBe(413);
     expect(stateSetMock).not.toHaveBeenCalled();
   });
 });

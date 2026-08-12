@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
+import { readBoundedRequestBody } from "@/lib/api/bounded-body";
 import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
-import { parseJson } from "@/lib/api/validation";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
@@ -31,7 +31,9 @@ const bodySchema = z
         }
       )
       .optional(),
-    scopePreset: z.enum(["core", "drive", "calendar", "gmail", "full"]).optional(),
+    scopePreset: z
+      .enum(["core", "drive", "calendar", "gmail", "gmail_send", "full"])
+      .optional(),
     workspaceId: z
       .string()
       .trim()
@@ -46,9 +48,31 @@ const bodySchema = z
   })
   .strict();
 
+const GOOGLE_CONNECT_BODY_MAX_BYTES = 4_096;
+
+async function parseBoundedConnectBody(request: Request) {
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim();
+  if (contentType !== "application/json") {
+    throw new ApiError(415, "Content-Type must be application/json.");
+  }
+  const raw = await readBoundedRequestBody(request, GOOGLE_CONNECT_BODY_MAX_BYTES);
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    throw new ApiError(400, "Invalid JSON body.");
+  }
+  const parsed = bodySchema.safeParse(decoded);
+  if (!parsed.success) throw new ApiError(400, "Invalid request body.");
+  return parsed.data;
+}
+
 export const POST = withApiHandler(async ({ request, correlationId: requestCorrelationId, log }) => {
-  const body = await parseJson(request, bodySchema);
   const user = await requireFirebaseAuth(request, log);
+  if ([...request.nextUrl.searchParams.keys()].length > 0) {
+    throw new ApiError(400, "Query parameters are not supported.");
+  }
+  const body = await parseBoundedConnectBody(request);
   const returnTo = body.returnTo || "/dashboard/integrations";
   const resolvedOrigin = resolveMissionControlOrigin(undefined, request.nextUrl.origin);
   const origin = resolvedOrigin.origin;

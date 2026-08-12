@@ -226,6 +226,121 @@ const campaignReview = {
   },
 };
 
+const activationRecipients = Array.from({ length: 5 }, (_, index) => ({
+  recipientId: `recipient-${index + 1}`,
+  personId: `person-${index + 1}`,
+  contactPointId: `contact-${index + 1}`,
+  displayName: `Review Person ${index + 1}`,
+  email: `review.person.${index + 1}@example.test`,
+  emailKey: `sha256:${String(index + 1).repeat(64)}`,
+  candidateFingerprint: `sha256:${String(index + 5).repeat(64)}`,
+  sourceEvidence: [{
+    evidenceRef: `crm_source_records/source-${index + 1}`,
+    sourceSystem: "google_people",
+    permissionBasis: "none",
+    observedAt: "2026-07-21T23:04:03.000Z",
+  }],
+  decision: {
+    status: "pending_review",
+    decisionId: null,
+    decidedAt: null,
+    relationshipAttested: false,
+    permissionState: "unknown",
+    sourceEvidenceRefs: [`crm_source_records/source-${index + 1}`],
+    note: null,
+  },
+}));
+
+const activationReview = {
+  schemaVersion: "crm.warm-reconnect-activation.v1",
+  dataClassification: "authenticated_contact_review",
+  providerActions: "none",
+  workspace: { accessRole: "owner" },
+  googleProfiles: [
+    {
+      businessId: "rosser_nft_gallery",
+      profileId: "rosser_gallery_work",
+      label: "Rosser Gallery",
+      state: "not_connected",
+      connected: false,
+      gmailCapable: false,
+    },
+    {
+      businessId: "rt_solutions",
+      profileId: "rt_solutions_work",
+      label: "RT.Solutions",
+      state: "reconnect_required",
+      connected: false,
+      gmailCapable: false,
+    },
+  ],
+  candidateSummary: { eligibleForReview: 5, excluded: 398, returned: 5, truncated: false },
+  candidates: [],
+  pilots: [{
+    schemaVersion: "crm.warm-reconnect-pilot.v1",
+    pilotId: "pilot-playwright-1",
+    workspaceId: "workspace-playwright",
+    ownerUid: "playwright-warm-reconnect",
+    status: "needs_recipient_review",
+    tranche: "initial_5",
+    recipientCap: 5,
+    campaignPreviewFingerprint: campaignReview.campaign.review.previewFingerprint,
+    sender: {
+      senderName: "Marcus Rosser",
+      legalEntity: "Rosser Gallery",
+      replyTo: "reply@example.test",
+      physicalPostalAddress: "Verified address held by server",
+      businessId: "rosser_nft_gallery",
+      profileId: "rosser_gallery_work",
+    },
+    artworkEmailApproval: { attested: true, evidenceNote: "Synthetic Playwright approval" },
+    preferenceContract: {
+      origin: "http://localhost:3000",
+      path: "/preferences",
+      version: "warm-reconnect-preferences.v1",
+      tokenVersion: "warm-reconnect-preference-token.v1",
+    },
+    fingerprints: {
+      artifactFingerprint: `sha256:${"a".repeat(64)}`,
+      audienceFingerprint: `sha256:${"b".repeat(64)}`,
+      actionFingerprint: `sha256:${"c".repeat(64)}`,
+    },
+    recipients: activationRecipients,
+    gates: [
+      ["sender_legal_identity", "Sender legal identity"],
+      ["physical_postal_address", "Physical postal address"],
+      ["preferences_unsubscribe_endpoint", "Preferences and unsubscribe endpoint"],
+      ["suppression_ledger", "Suppression ledger"],
+      ["spf_dkim_dmarc", "SPF, DKIM, and DMARC"],
+      ["monitored_reply_to", "Monitored reply-to"],
+      ["audience_provenance", "Audience provenance"],
+      ["artwork_email_channel_approval", "Artwork email approval"],
+      ["google_profile_connection", "Google profile connection"],
+    ].map(([id, label]) => ({ id, label, status: "missing", reason: `${label} is not verified.` })),
+    approval: null,
+    availableActions: {
+      canReviewRecipients: true,
+      canApprove: false,
+      canLaunch: false,
+      canStop: true,
+      launchAuthorizesExactProviderExecution: true,
+    },
+    createdAt: "2026-08-12T15:00:00.000Z",
+    updatedAt: "2026-08-12T15:00:00.000Z",
+    launchRequestedAt: null,
+    stoppedAt: null,
+    stopReason: null,
+  }],
+  constraints: {
+    initialPilotSize: 5,
+    expandedPilotRange: [6, 10],
+    expandedPilotRequiresNewApproval: true,
+    approvalTtlHours: 24,
+    launchAuthorizesExactProviderExecution: true,
+    providerExecutionEnabled: false,
+  },
+};
+
 function localOnlyIdToken(): string {
   const encode = (value: Record<string, unknown>) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -392,6 +507,17 @@ test.describe("local mocked warm reconnect review", () => {
           body: JSON.stringify(campaignReview),
         });
       });
+      await page.route("**/api/crm/warm-reconnect/activation", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          headers: {
+            "Cache-Control": "private, no-store, max-age=0",
+            "x-correlation-id": "playwright-warm-activation",
+          },
+          body: JSON.stringify(activationReview),
+        }),
+      );
 
       page.on("request", (request) => {
         const url = new URL(request.url());
@@ -419,7 +545,7 @@ test.describe("local mocked warm reconnect review", () => {
         loadingReview.getByRole("heading", {
           name: "Building the read-only campaign preview…",
         }),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 30_000 });
       releaseReviewResponse();
 
       const review = page.getByTestId("warm-reconnect-campaign");
@@ -432,6 +558,33 @@ test.describe("local mocked warm reconnect review", () => {
       await expect(review.getByText("Activation blocked", { exact: true })).toBeVisible();
       await expect(review.getByText("Eligible recipients")).toBeVisible();
       await expect(review.getByText("0", { exact: true })).toBeVisible();
+
+      const activation = page.getByTestId("warm-reconnect-activation");
+      await expect(activation).toBeVisible();
+      await expect(
+        activation.getByRole("heading", {
+          name: "Permission first. Approval and launch stay separate.",
+        }),
+      ).toBeVisible();
+      await expect(activation.getByText("Review Person 1", { exact: true })).toBeVisible();
+      await expect(
+        activation.getByText("review.person.1@example.test", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        activation.getByRole("button", { name: "Connect Rosser Gallery" }),
+      ).toBeVisible();
+      await expect(
+        activation.getByRole("button", { name: "Connect RT.Solutions" }),
+      ).toBeVisible();
+      await expect(
+        activation.getByRole("button", { name: "Approve exact pilot" }),
+      ).toBeDisabled();
+      await expect(
+        activation.getByRole("button", { name: "Authorize exact five-email launch · provider currently disabled" }),
+      ).toBeDisabled();
+      await expect(
+        activation.getByText("Launch is the separate action that authorizes those five Gmail sends."),
+      ).toBeVisible();
 
       await expect(review.getByText(copy.subject, { exact: true })).toBeVisible();
       await expect(review.getByText(copy.preheader, { exact: true })).toBeVisible();

@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import type { Logger } from "@/lib/logging";
+import { callGoogleAPI } from "@/lib/google/tokens";
 import {
   persistGoogleAccountProfileTokens,
   persistGoogleAccountTokenFailure,
@@ -15,9 +16,30 @@ import {
 
 const TOKEN_COLLECTION = "google_oauth_tokens";
 const ACCESS_TOKEN_REUSE_WINDOW_MS = 60_000;
+const GOOGLE_USERINFO_ENDPOINT =
+  "https://openidconnect.googleapis.com/v1/userinfo";
+const GOOGLE_ACCOUNT_EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
 export interface GoogleAccessTokenOptions {
   profileId?: string | null;
+}
+
+export async function fetchGoogleAccountEmail(
+  accessToken: string,
+  log?: Logger
+): Promise<string> {
+  const token = String(accessToken || "").trim();
+  if (!token) throw new ApiError(400, "Google did not return an access token");
+  const profile = await callGoogleAPI<{
+    email?: unknown;
+    email_verified?: unknown;
+  }>(GOOGLE_USERINFO_ENDPOINT, token, {}, log);
+  const email =
+    typeof profile.email === "string" ? profile.email.trim().toLowerCase() : "";
+  if (profile.email_verified !== true || !GOOGLE_ACCOUNT_EMAIL_PATTERN.test(email)) {
+    throw new ApiError(400, "Google did not return a verified account email");
+  }
+  return email;
 }
 
 function describeAccountTokenResolutionError(error: unknown): {
@@ -84,7 +106,13 @@ export const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
 
-export type GoogleScopePreset = "core" | "drive" | "calendar" | "gmail" | "full";
+export type GoogleScopePreset =
+  | "core"
+  | "drive"
+  | "calendar"
+  | "gmail"
+  | "gmail_send"
+  | "full";
 
 const GOOGLE_SCOPE_GROUPS = {
   identity: [
@@ -97,6 +125,8 @@ const GOOGLE_SCOPE_GROUPS = {
     "https://www.googleapis.com/auth/calendar.events",
   ],
   gmail: ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"],
+  gmailSend: ["https://www.googleapis.com/auth/gmail.send"],
+  emailIdentity: ["https://www.googleapis.com/auth/userinfo.email"],
 } as const;
 
 function getMissionControlPublicOrigin(): string | null {
@@ -143,6 +173,12 @@ export function scopesForPreset(preset: GoogleScopePreset): string[] {
   }
   if (preset === "gmail") {
     return uniqueScopes([...GOOGLE_SCOPE_GROUPS.identity, ...GOOGLE_SCOPE_GROUPS.gmail]);
+  }
+  if (preset === "gmail_send") {
+    return uniqueScopes([
+      ...GOOGLE_SCOPE_GROUPS.emailIdentity,
+      ...GOOGLE_SCOPE_GROUPS.gmailSend,
+    ]);
   }
   if (preset === "core") {
     return uniqueScopes([
@@ -209,16 +245,57 @@ export function getOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
+export function googleAuthUrlOptionsForPreset(preset: GoogleScopePreset) {
+  return {
+    access_type: "offline",
+    prompt: "consent",
+    // The warm-reconnect sender grant must remain capability-specific. Reusing
+    // prior grants here could silently attach Drive, Calendar, or Gmail-read
+    // authority to a send-only campaign profile.
+    include_granted_scopes: preset === "gmail_send" ? false : true,
+    scope: scopesForPreset(preset),
+  } as const;
+}
+
 export function getGoogleAuthUrl(state: string, options?: { scopePreset?: GoogleScopePreset }) {
   const client = getOAuthClient();
   const preset = options?.scopePreset ?? "full";
   return client.generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: true,
-    scope: scopesForPreset(preset),
+    ...googleAuthUrlOptionsForPreset(preset),
     state,
   });
+}
+
+export function assertGoogleTokenScopeForPreset(
+  preset: GoogleScopePreset,
+  grantedScope: string | null | undefined
+): void {
+  if (preset !== "gmail_send") return;
+  if (!isGoogleTokenScopeExactForPreset(preset, grantedScope)) {
+    throw new ApiError(
+      400,
+      "Google returned a broader or incomplete grant than the Gmail-send profile allows"
+    );
+  }
+}
+
+export function isGoogleTokenScopeExactForPreset(
+  preset: GoogleScopePreset,
+  grantedScope: string | null | undefined
+): boolean {
+  if (preset !== "gmail_send") return true;
+  const granted = new Set(
+    String(grantedScope || "")
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean)
+  );
+  const allowed = new Set(scopesForPreset("gmail_send"));
+  return (
+    granted.size === allowed.size &&
+    [...allowed].every((scope) => granted.has(scope)) &&
+    [...granted].every((scope) => allowed.has(scope))
+  );
 }
 
 export async function storeGoogleTokens(
@@ -267,6 +344,7 @@ export async function storeGoogleProfileTokens(
     expiry_date?: number | null;
     scope?: string | null;
     token_type?: string | null;
+    account_email?: string | null;
   },
   log?: Logger
 ) {
@@ -277,6 +355,7 @@ export async function storeGoogleProfileTokens(
       expiryDate: tokens.expiry_date,
       scope: tokens.scope,
       tokenType: tokens.token_type,
+      accountEmail: tokens.account_email,
     });
     log?.info("oauth.profile_tokens.saved", {
       uid,
@@ -470,6 +549,7 @@ export async function getAccessTokenForUser(
         expiryDate: updatedTokens.expiry_date || tokens.expiryDate || null,
         scope: updatedTokens.scope || tokens.scope || null,
         tokenType: updatedTokens.token_type || tokens.tokenType || null,
+        accountEmail: tokens.accountEmail || null,
       });
     } else {
       await storeGoogleTokens(

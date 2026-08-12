@@ -58,6 +58,8 @@ describe("portfolio registry summary UI", () => {
     expect(html).toContain("1,830");
     expect(html).toContain("2,097");
     expect(html).toContain("Google People");
+    expect(html).toContain("RT.Solutions");
+    expect(html).not.toContain(">RT Solutions<");
     expect(html).toContain("grid-cols-2");
     expect(html).toContain('data-testid="portfolio-crm-outreach-blocked"');
     expect(html).not.toContain("workspace_default_owner-1");

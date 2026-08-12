@@ -5,6 +5,7 @@ import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-p
 import { AlertTriangle, Calendar, CircleCheck, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
+import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -29,6 +30,10 @@ import {
   type CrmPipelineStage,
 } from "@/lib/revenue/offers";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
+import type {
+  WarmReconnectCampaignDraft,
+  WarmReconnectReviewResponse,
+} from "@/lib/crm/warm-reconnect-types";
 import { toast } from "sonner";
 
 interface Lead {
@@ -156,7 +161,7 @@ function formatTimelineDate(value: string | null | undefined): string {
 
 function formatBusinessUnitLabel(value: BusinessUnitId): string {
   if (value === "rosser_nft_gallery") return "Rosser Gallery";
-  if (value === "rt_solutions") return "RT Solutions";
+  if (value === "rt_solutions") return "RT.Solutions";
   return "AI CoFoundry";
 }
 
@@ -198,6 +203,10 @@ export default function CRMPage() {
   );
   const [loadingPortfolioRegistry, setLoadingPortfolioRegistry] = useState(false);
   const [portfolioRegistryError, setPortfolioRegistryError] = useState<string | null>(null);
+  const [warmReconnectCampaign, setWarmReconnectCampaign] = useState<WarmReconnectCampaignDraft | null>(null);
+  const [loadingWarmReconnectCampaign, setLoadingWarmReconnectCampaign] = useState(false);
+  const [warmReconnectCampaignError, setWarmReconnectCampaignError] = useState<string | null>(null);
+  const warmReconnectAbortRef = useRef<AbortController | null>(null);
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [newLeadData, setNewLeadData] = useState({
     companyName: "",
@@ -241,37 +250,60 @@ export default function CRMPage() {
   }, [newLeadData.offerCode, offerOptions]);
 
   useEffect(() => {
-    if (!user) return;
-    void loadPortfolioRegistry();
+    if (!user) {
+      warmReconnectAbortRef.current?.abort();
+      setPortfolioRegistry(null);
+      setWarmReconnectCampaign(null);
+      return;
+    }
+    void loadWarmReconnectCampaign();
     void loadCustomers();
     void loadDailyOutcomes();
+    return () => warmReconnectAbortRef.current?.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
-  async function loadPortfolioRegistry() {
+  async function loadWarmReconnectCampaign() {
     if (!user) return;
+    warmReconnectAbortRef.current?.abort();
+    const controller = new AbortController();
+    warmReconnectAbortRef.current = controller;
     setLoadingPortfolioRegistry(true);
+    setPortfolioRegistry(null);
     setPortfolioRegistryError(null);
+    setLoadingWarmReconnectCampaign(true);
+    setWarmReconnectCampaign(null);
+    setWarmReconnectCampaignError(null);
     try {
       const headers = await buildAuthHeaders(user);
-      const res = await fetch("/api/crm/registry/summary", {
+      const res = await fetch("/api/crm/warm-reconnect/review", {
         method: "GET",
         headers,
         cache: "no-store",
+        signal: controller.signal,
       });
-      const data = await readApiJson<PortfolioCrmRegistrySummary & { error?: string }>(res);
+      const data = await readApiJson<WarmReconnectReviewResponse & { error?: string }>(res);
+      if (controller.signal.aborted || warmReconnectAbortRef.current !== controller) return;
       if (!res.ok) {
         const cid = getResponseCorrelationId(res);
-        throw new Error(
-          data.error || `Portfolio registry is unavailable${cid ? ` cid=${cid}` : ""}`
-        );
+        throw new Error(data.error || `Reconnect preview is unavailable${cid ? ` cid=${cid}` : ""}`);
       }
-      setPortfolioRegistry(data);
+      setPortfolioRegistry(data.registrySummary);
+      setWarmReconnectCampaign(data.campaign);
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      if (warmReconnectAbortRef.current !== controller) return;
+      const message = error instanceof Error ? error.message : String(error);
       setPortfolioRegistry(null);
-      setPortfolioRegistryError(error instanceof Error ? error.message : String(error));
+      setPortfolioRegistryError(message);
+      setWarmReconnectCampaign(null);
+      setWarmReconnectCampaignError(message);
     } finally {
-      setLoadingPortfolioRegistry(false);
+      if (warmReconnectAbortRef.current === controller) {
+        warmReconnectAbortRef.current = null;
+        setLoadingPortfolioRegistry(false);
+        setLoadingWarmReconnectCampaign(false);
+      }
     }
   }
 
@@ -569,7 +601,7 @@ export default function CRMPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                    <SelectItem value="rt_solutions">RT Solutions</SelectItem>
+                    <SelectItem value="rt_solutions">RT.Solutions</SelectItem>
                     <SelectItem value="rosser_nft_gallery">Rosser Gallery</SelectItem>
                     <SelectItem value="ai_cofoundry">AI CoFoundry</SelectItem>
                   </SelectContent>
@@ -605,6 +637,12 @@ export default function CRMPage() {
         summary={portfolioRegistry}
         loading={loadingPortfolioRegistry}
         error={portfolioRegistryError}
+      />
+
+      <WarmReconnectCampaign
+        campaign={warmReconnectCampaign}
+        loading={loadingWarmReconnectCampaign}
+        error={warmReconnectCampaignError}
       />
 
       <section

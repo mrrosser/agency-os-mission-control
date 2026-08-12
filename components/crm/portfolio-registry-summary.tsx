@@ -122,7 +122,7 @@ export function PortfolioRegistrySummary({ summary, loading, error }: Props) {
           </div>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
             <div><dt className="text-zinc-500">Rosser Gallery</dt><dd className="tabular-nums text-zinc-200">{number(summary.brands.rosser_gallery)}</dd></div>
-            <div><dt className="text-zinc-500">RT Solutions</dt><dd className="tabular-nums text-zinc-200">{number(summary.brands.rt_solutions)}</dd></div>
+            <div><dt className="text-zinc-500">RT.Solutions</dt><dd className="tabular-nums text-zinc-200">{number(summary.brands.rt_solutions)}</dd></div>
             <div><dt className="text-zinc-500">KGClassy</dt><dd className="tabular-nums text-zinc-200">{number(summary.brands.kgclassy)}</dd></div>
             <div><dt className="text-zinc-500">Unassigned</dt><dd className="tabular-nums text-amber-200">{number(summary.brands.unassigned)}</dd></div>
           </dl>

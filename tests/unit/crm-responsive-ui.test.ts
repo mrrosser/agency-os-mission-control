@@ -27,6 +27,8 @@ describe("CRM responsive UI source", () => {
     expect(source).toContain("void updateLeadStage(lead.id");
     expect(source).toContain("<DragDropContext onDragEnd={onDragEnd}>");
     expect(source).toContain('if (value === "rosser_nft_gallery") return "Rosser Gallery";');
+    expect(source).toContain('if (value === "rt_solutions") return "RT.Solutions";');
+    expect(source).toContain('<SelectItem value="rt_solutions">RT.Solutions</SelectItem>');
     expect(source).not.toContain(">Rosser NFT Gallery<");
   });
 
@@ -34,7 +36,8 @@ describe("CRM responsive UI source", () => {
     const page = readSource("app", "dashboard", "crm", "page.tsx");
     const panel = readSource("components", "crm", "portfolio-registry-summary.tsx");
 
-    expect(page).toContain('fetch("/api/crm/registry/summary"');
+    expect(page).toContain('fetch("/api/crm/warm-reconnect/review"');
+    expect(page).not.toContain('fetch("/api/crm/registry/summary"');
     expect(page).toContain("<PortfolioRegistrySummary");
     expect(page).toContain("Editable lead pipeline source:");
     expect(panel).toContain('data-testid="portfolio-crm-registry"');
@@ -44,6 +47,8 @@ describe("CRM responsive UI source", () => {
     expect(panel).toContain("grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4");
     expect(panel).toContain("No permission basis");
     expect(panel).toContain("Registry freshness");
+    expect(panel).toContain("RT.Solutions");
+    expect(panel).not.toContain(">RT Solutions<");
   });
 
   it("constrains dialogs and fixed feedback controls to a phone viewport", () => {

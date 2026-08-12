@@ -51,7 +51,7 @@ function preventErrorCaching(response: NextResponse): void {
 
 export function withApiHandler(
   handler: (context: ApiHandlerContext) => Promise<NextResponse>,
-  options?: { route: string }
+  options?: { route: string; persistServerErrors?: boolean }
 ) {
   // Next.js route handlers are typed to always receive a 2nd "context" argument.
   // Keep runtime defensive (optional chaining), but type the param as required
@@ -102,6 +102,7 @@ export function withApiHandler(
       // Guard against recursion for telemetry endpoints.
       if (
         status >= 500 &&
+        options?.persistServerErrors !== false &&
         process.env.TELEMETRY_ENABLED !== "false" &&
         process.env.TELEMETRY_SERVER_ERRORS === "true" &&
         !(path.startsWith("/api/telemetry/") || options?.route === "telemetry.error")

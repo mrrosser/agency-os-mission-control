@@ -74,6 +74,7 @@ describe("Google account token store", () => {
       expiryDate: 123456,
       scope: "gmail calendar drive",
       tokenType: "Bearer",
+      accountEmail: "sender@example.com",
     }));
     accountSetMock.mockResolvedValue(undefined);
     registrySetMock.mockResolvedValue(undefined);
@@ -93,6 +94,7 @@ describe("Google account token store", () => {
         tokens: {
           accessToken: "access-token",
           refreshToken: "refresh-token",
+          accountEmail: "sender@example.com",
         },
       },
     });
@@ -122,6 +124,7 @@ describe("Google account token store", () => {
       expiryDate: 999999,
       scope: "gmail calendar drive",
       tokenType: "Bearer",
+      accountEmail: "sender@example.com",
     });
 
     expect(setUserSecretMock).toHaveBeenCalledOnce();
@@ -148,7 +151,8 @@ describe("Google account token store", () => {
         refreshToken: null,
         expiryDate: 999999,
         scope: "gmail calendar drive",
-        tokenType: "Bearer",
+      tokenType: "Bearer",
+      accountEmail: "sender@example.com",
       }
     );
 
@@ -165,6 +169,7 @@ describe("Google account token store", () => {
     expect(stored).toMatchObject({
       accessToken: "new-access-token",
       refreshToken: "refresh-token",
+      accountEmail: "sender@example.com",
     });
     expect(bindingSetMock).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: "rt-account" }),
@@ -177,6 +182,23 @@ describe("Google account token store", () => {
       }),
       { merge: true }
     );
+  });
+
+  it("never reuses another Google account's refresh token on a cross-account reconnect", async () => {
+    await expect(
+      persistGoogleAccountProfileTokens("uid-1", "rt_solutions_work", {
+        accessToken: "new-account-access-token",
+        refreshToken: null,
+        expiryDate: 999999,
+        scope: "https://www.googleapis.com/auth/gmail.send",
+        tokenType: "Bearer",
+        accountEmail: "different-sender@example.com",
+      })
+    ).rejects.toThrow("Missing refresh token from Google");
+
+    expect(setUserSecretMock).not.toHaveBeenCalled();
+    expect(bindingSetMock).not.toHaveBeenCalled();
+    expect(accountSetMock).not.toHaveBeenCalled();
   });
 
   it("creates an idempotent profile-derived account when a canonical profile is not bound", async () => {

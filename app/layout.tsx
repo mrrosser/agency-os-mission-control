@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { AuthProvider } from "@/components/providers/auth-provider";
-import ErrorBoundary from "@/components/providers/error-boundary";
-import { TelemetryReporter } from "@/components/providers/telemetry-reporter";
-import { Toaster } from "sonner";
+import { RootProviders } from "@/components/providers/root-providers";
 import { buildFirebaseClientConfigScript } from "@/lib/firebase-client-config";
 
 const geistSans = Geist({
@@ -24,8 +21,6 @@ export const metadata: Metadata = {
     ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
     : undefined,
 };
-
-import { BetaFeedback } from "@/components/feedback/BetaFeedback";
 
 export default function RootLayout({
   children,
@@ -58,14 +53,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-black text-foreground bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]`}
       >
-        <AuthProvider>
-          <TelemetryReporter />
-          <ErrorBoundary>
-            {children}
-            <Toaster position="top-right" theme="dark" />
-            <BetaFeedback />
-          </ErrorBoundary>
-        </AuthProvider>
+        <RootProviders>{children}</RootProviders>
       </body>
     </html>
   );

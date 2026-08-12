@@ -2,7 +2,7 @@ export const GOOGLE_BUSINESS_PROFILES = [
   {
     businessId: "rt_solutions",
     profileId: "rt_solutions_work",
-    label: "RT Solutions",
+    label: "RT.Solutions",
   },
   {
     businessId: "rosser_nft_gallery",
@@ -82,4 +82,14 @@ export function capabilitiesFromGoogleScopes(scopeString: string | null | undefi
     gmail: scopes.some((scope) => scope.includes("/auth/gmail")),
     calendar: scopes.some((scope) => scope.includes("/auth/calendar")),
   };
+}
+
+export function hasGoogleGmailSendScope(
+  scopeString: string | null | undefined
+): boolean {
+  return String(scopeString || "")
+    .split(/\s+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .includes("https://www.googleapis.com/auth/gmail.send");
 }

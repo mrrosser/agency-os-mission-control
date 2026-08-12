@@ -6,6 +6,7 @@ import { AlertTriangle, Calendar, CircleCheck, Plus } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
+import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -644,6 +645,8 @@ export default function CRMPage() {
         loading={loadingWarmReconnectCampaign}
         error={warmReconnectCampaignError}
       />
+
+      <WarmReconnectActivation campaign={warmReconnectCampaign} />
 
       <section
         aria-labelledby="daily-outcome-heading"

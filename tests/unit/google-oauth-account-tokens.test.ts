@@ -79,6 +79,7 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
         tokens: {
           accessToken: "stored-access-token",
           refreshToken: "stored-refresh-token",
+          accountEmail: "sender@example.com",
           expiryDate: Date.now() + 3_600_000,
         },
       },
@@ -124,6 +125,7 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
           expiryDate: Date.now() - 1,
           scope: "gmail calendar drive",
           tokenType: "Bearer",
+          accountEmail: "sender@example.com",
         },
       },
     });
@@ -142,6 +144,7 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
       expect.objectContaining({
         accessToken: "refreshed-access-token",
         refreshToken: "stored-refresh-token",
+        accountEmail: "sender@example.com",
       })
     );
     expect(getAdminDbMock).not.toHaveBeenCalled();

@@ -15,6 +15,7 @@ export interface StoredGoogleAccountTokens {
   expiryDate?: number | null;
   scope?: string | null;
   tokenType?: string | null;
+  accountEmail?: string | null;
 }
 
 export interface GoogleAccountTokenRecord {
@@ -61,6 +62,13 @@ function normalizeAccountId(value: string | null | undefined): string | null {
   return accountId;
 }
 
+function normalizedAccountEmail(value: string | null | undefined): string | null {
+  const email = String(value || "").trim().toLowerCase();
+  return email && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)
+    ? email
+    : null;
+}
+
 function parseStoredTokens(raw: string | undefined): StoredGoogleAccountTokens | null {
   if (!raw) return null;
 
@@ -77,6 +85,8 @@ function parseStoredTokens(raw: string | undefined): StoredGoogleAccountTokens |
     expiryDate: typeof parsed.expiryDate === "number" ? parsed.expiryDate : null,
     scope: typeof parsed.scope === "string" ? parsed.scope : null,
     tokenType: typeof parsed.tokenType === "string" ? parsed.tokenType : null,
+    accountEmail:
+      typeof parsed.accountEmail === "string" ? parsed.accountEmail : null,
   };
 }
 
@@ -87,6 +97,7 @@ function serializeStoredTokens(tokens: StoredGoogleAccountTokens): string {
     expiryDate: tokens.expiryDate || null,
     scope: tokens.scope || null,
     tokenType: tokens.tokenType || null,
+    accountEmail: tokens.accountEmail || null,
   });
 }
 
@@ -205,12 +216,24 @@ export async function persistGoogleAccountProfileTokens(
     );
   }
 
+  const incomingAccountEmail = normalizedAccountEmail(tokens.accountEmail);
+  const existingAccountEmail = normalizedAccountEmail(existingTokens?.accountEmail);
+  const mayReuseExistingRefreshToken = Boolean(
+    existingTokens?.refreshToken &&
+      incomingAccountEmail &&
+      existingAccountEmail &&
+      incomingAccountEmail === existingAccountEmail
+  );
+
   const mergedTokens: StoredGoogleAccountTokens = {
     accessToken: tokens.accessToken ?? existingTokens?.accessToken ?? null,
-    refreshToken: tokens.refreshToken ?? existingTokens?.refreshToken ?? null,
+    refreshToken:
+      tokens.refreshToken ??
+      (mayReuseExistingRefreshToken ? existingTokens?.refreshToken : null),
     expiryDate: tokens.expiryDate ?? existingTokens?.expiryDate ?? null,
     scope: tokens.scope ?? existingTokens?.scope ?? null,
     tokenType: tokens.tokenType ?? existingTokens?.tokenType ?? null,
+    accountEmail: incomingAccountEmail ?? existingAccountEmail ?? null,
   };
   if (!mergedTokens.refreshToken) {
     throw new Error("Missing refresh token from Google");

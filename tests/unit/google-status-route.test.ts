@@ -69,7 +69,7 @@ describe("google status route", () => {
       expect.objectContaining({
         businessId: "rt_solutions",
         profileId: "rt_solutions_work",
-        label: "RT Solutions",
+          label: "RT.Solutions",
         connected: true,
         state: "connected",
       }),

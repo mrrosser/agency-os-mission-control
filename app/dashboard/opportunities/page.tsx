@@ -129,7 +129,7 @@ function ApplicationDeskPageContent() {
                 Application Desk
               </h1>
               <p className="text-sm leading-6 text-zinc-400 sm:text-base">
-                Review art calls, gallery opportunities, RT Solutions work, and Marcus job leads from one place.
+                Review art calls, gallery opportunities, RT.Solutions work, and Marcus job leads from one place.
                 Approvals here authorize internal preparation only—not browser entry or final submission.
               </p>
             </div>

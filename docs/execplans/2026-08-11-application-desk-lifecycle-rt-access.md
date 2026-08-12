@@ -18,7 +18,7 @@ decision authority.
 - Show server-retained days 6–14 only in the Expired filter.
 - Never show a `soft_archived` row, and never compute archive age from the
   browser clock.
-- Render **Marcus Rosser Artist Career** and **RT Solutions** only as display
+- Render **Marcus Rosser Artist Career** and **RT.Solutions** only as display
   projections; do not change canonical IDs, slugs, or upstream names.
 - Forward the fixed, bounded decision route for canonical RT exactly as for any
   other workspace. AI-Hell-Mary resolves and enforces the authenticated member

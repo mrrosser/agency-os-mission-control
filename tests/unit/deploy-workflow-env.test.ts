@@ -149,10 +149,21 @@ describe("Firebase deployment environment propagation", () => {
         );
         expect(candidateTag).toBeGreaterThan(revisionVerification);
       } else {
-        expect(source).toContain("status.latestReadyRevisionName");
+        expect(source).toContain("status.latestCreatedRevisionName");
+        expect(source).not.toContain("status.latestReadyRevisionName");
+        expect(source).toContain(
+          'PREVIEW_RUNTIME_SUFFIX="pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"'
+        );
+        expect(source).toContain('--image "$PREVIEW_DEPLOY_IMAGE"');
+        expect(source).toContain("--no-traffic");
+        expect(source).toContain('--revision-suffix "$PREVIEW_RUNTIME_SUFFIX"');
         expect(source).toContain(
           'gcloud run revisions describe "$PREVIEW_RUNTIME_REVISION"'
         );
+        expect(source).toContain(
+          'PREVIEW_RUNTIME_IMAGE" != "$PREVIEW_DEPLOY_IMAGE"'
+        );
+        expect(source).toContain('PREVIEW_RUNTIME_READY" != "True"');
       }
     }
   );

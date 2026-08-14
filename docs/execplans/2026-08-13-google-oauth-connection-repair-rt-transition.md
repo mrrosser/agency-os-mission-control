@@ -77,11 +77,13 @@ RT.Solutions profile and automation.
   backward-compatible
   reads for existing credentials.
 - [x] Pin and candidate-verify the canonical public origin in both deployment
-  workflows.
+  workflows. The first PR run exposed that a zero-traffic preview revision is
+  not `latestReadyRevisionName`; the repaired workflow now creates and checks a
+  uniquely named, no-traffic revision derived from the Firebase-deployed image.
 - [x] Transition active AICF / AI Co-Foundry scheduler and user-facing runtime
   configuration to RT.Solutions without duplicating jobs.
-- [ ] Add unit, smoke, and browser tests with Google and Secret Manager mocked.
-- [ ] Pass TypeScript, lint, full unit/smoke, production build, dependency audit,
+- [x] Add unit, smoke, and browser tests with Google and Secret Manager mocked.
+- [x] Pass TypeScript, lint, full unit/smoke, production build, dependency audit,
   Gitleaks, diff checks, and independent security review.
 - [ ] Merge through protected exact-head CI, deploy with the current workflow,
   and verify live success/error redirects plus RT.Solutions runtime ownership.

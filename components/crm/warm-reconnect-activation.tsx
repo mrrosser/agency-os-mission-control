@@ -54,7 +54,7 @@ type Props = {
   campaign: WarmReconnectCampaignDraft | null;
 };
 
-type SenderForm = {
+export type WarmReconnectSenderForm = {
   senderName: string;
   legalEntity: string;
   replyTo: string;
@@ -64,19 +64,59 @@ type SenderForm = {
   artworkApproved: boolean;
 };
 
+export const ROSSER_GALLERY_SENDER_PRESET = {
+  senderName: "Marcus Rosser",
+  legalEntity: "Marcus Rosser",
+  physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
+  profileId: "rosser_gallery_work",
+} as const;
+
 const EMPTY_CONFIRMATIONS = Object.fromEntries(
   APPROVAL_CONFIRMATIONS.map(([key]) => [key, false]),
 ) as Record<ConfirmationKey, boolean>;
 
-const INITIAL_SENDER_FORM: SenderForm = {
-  senderName: "Marcus Rosser",
-  legalEntity: "",
+export const INITIAL_SENDER_FORM: WarmReconnectSenderForm = {
+  senderName: ROSSER_GALLERY_SENDER_PRESET.senderName,
+  legalEntity: ROSSER_GALLERY_SENDER_PRESET.legalEntity,
   replyTo: "",
-  physicalPostalAddress: "",
-  profileId: "rosser_gallery_work",
+  physicalPostalAddress: ROSSER_GALLERY_SENDER_PRESET.physicalPostalAddress,
+  profileId: ROSSER_GALLERY_SENDER_PRESET.profileId,
   artworkEvidenceNote: "",
   artworkApproved: false,
 };
+
+export function senderFormForGoogleProfile(
+  current: WarmReconnectSenderForm,
+  profileId: WarmReconnectSenderForm["profileId"],
+): WarmReconnectSenderForm {
+  if (profileId === current.profileId) return current;
+
+  if (profileId === ROSSER_GALLERY_SENDER_PRESET.profileId) {
+    return {
+      ...current,
+      profileId,
+      senderName: ROSSER_GALLERY_SENDER_PRESET.senderName,
+      legalEntity: ROSSER_GALLERY_SENDER_PRESET.legalEntity,
+      replyTo: "",
+      physicalPostalAddress: ROSSER_GALLERY_SENDER_PRESET.physicalPostalAddress,
+      artworkEvidenceNote: "",
+      artworkApproved: false,
+    };
+  }
+
+  return {
+    ...current,
+    profileId,
+    // Fail closed when leaving Rosser Gallery: its confirmed identity/address
+    // must not silently carry into a different business profile.
+    senderName: "",
+    legalEntity: "",
+    replyTo: "",
+    physicalPostalAddress: "",
+    artworkEvidenceNote: "",
+    artworkApproved: false,
+  };
+}
 
 function isActivationResponse(value: unknown): value is WarmReconnectActivationResponse {
   if (!value || typeof value !== "object") return false;
@@ -124,7 +164,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
-  const [sender, setSender] = useState<SenderForm>(INITIAL_SENDER_FORM);
+  const [sender, setSender] = useState<WarmReconnectSenderForm>(INITIAL_SENDER_FORM);
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [confirmations, setConfirmations] = useState<Record<ConfirmationKey, boolean>>({
     ...EMPTY_CONFIRMATIONS,
@@ -578,9 +618,14 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     <input aria-label="Legal entity" value={sender.legalEntity} onChange={(event) => setSender((current) => ({ ...current, legalEntity: event.target.value }))} placeholder="Legal sender entity" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <input aria-label="Reply-to email" type="email" value={sender.replyTo} onChange={(event) => setSender((current) => ({ ...current, replyTo: event.target.value }))} placeholder="Monitored reply-to email" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <textarea aria-label="Physical postal address" value={sender.physicalPostalAddress} onChange={(event) => setSender((current) => ({ ...current, physicalPostalAddress: event.target.value }))} placeholder="Physical postal address shown in email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
-                    <select aria-label="Sending Google profile" value={sender.profileId} onChange={(event) => setSender((current) => ({ ...current, profileId: event.target.value as SenderForm["profileId"] }))} className="w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
+                    <select aria-label="Sending Google profile" value={sender.profileId} onChange={(event) => setSender((current) => senderFormForGoogleProfile(current, event.target.value as WarmReconnectSenderForm["profileId"]))} className="w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
                       {(activation?.googleProfiles || []).map((profile) => <option key={profile.profileId} value={profile.profileId}>{profile.label}</option>)}
                     </select>
+                    <p className="text-[11px] leading-5 text-zinc-500">
+                      {sender.profileId === "rosser_gallery_work"
+                        ? "Rosser Gallery preset loaded. Confirm the legal identity and postal address again during exact-pilot approval."
+                        : "RT.Solutions requires its sender identity and postal address to be entered and verified separately; the Rosser Gallery preset is not reused."}
+                    </p>
                     <textarea aria-label="Artwork approval evidence" value={sender.artworkEvidenceNote} onChange={(event) => setSender((current) => ({ ...current, artworkEvidenceNote: event.target.value }))} placeholder="Why this artwork is approved for this exact email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <label className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
                       <input type="checkbox" checked={sender.artworkApproved} onChange={(event) => setSender((current) => ({ ...current, artworkApproved: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" />

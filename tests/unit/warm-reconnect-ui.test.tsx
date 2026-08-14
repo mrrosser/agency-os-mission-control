@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
-import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
+import {
+  INITIAL_SENDER_FORM,
+  ROSSER_GALLERY_SENDER_PRESET,
+  WarmReconnectActivation,
+  senderFormForGoogleProfile,
+} from "@/components/crm/warm-reconnect-activation";
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 
@@ -147,5 +152,69 @@ describe("warm reconnect campaign UI", () => {
     expect(source).toContain("!activation.candidateSummary.truncated");
     expect(source).toContain("no partial audience can be approved");
     expect(source).not.toMatch(/console\.(?:log|info|warn|error)/);
+  });
+
+  it("prefills only the confirmed Rosser Gallery sender identity and stays fail-closed", () => {
+    expect(INITIAL_SENDER_FORM).toMatchObject({
+      ...ROSSER_GALLERY_SENDER_PRESET,
+      replyTo: "",
+      artworkEvidenceNote: "",
+      artworkApproved: false,
+    });
+
+    const rtSender = senderFormForGoogleProfile(
+      {
+        ...INITIAL_SENDER_FORM,
+        replyTo: "monitored@example.test",
+        artworkEvidenceNote: "Previously reviewed artwork",
+        artworkApproved: true,
+      },
+      "rt_solutions_work",
+    );
+    expect(rtSender).toMatchObject({
+      profileId: "rt_solutions_work",
+      senderName: "",
+      legalEntity: "",
+      physicalPostalAddress: "",
+      replyTo: "",
+      artworkEvidenceNote: "",
+      artworkApproved: false,
+    });
+
+    expect(
+      senderFormForGoogleProfile(
+        {
+          ...rtSender,
+          senderName: "RT sender",
+          legalEntity: "RT legal entity",
+          replyTo: "rt@example.test",
+          physicalPostalAddress: "RT verified postal address",
+          artworkEvidenceNote: "RT artwork",
+          artworkApproved: true,
+        },
+        "rosser_gallery_work",
+      ),
+    ).toMatchObject({
+      ...ROSSER_GALLERY_SENDER_PRESET,
+      replyTo: "",
+      artworkEvidenceNote: "",
+      artworkApproved: false,
+    });
+  });
+
+  it("does not overwrite explicitly entered fields when the profile did not change", () => {
+    const explicitGallerySender = {
+      ...INITIAL_SENDER_FORM,
+      senderName: "Explicit sender",
+      legalEntity: "Explicit legal entity",
+      replyTo: "monitored@example.test",
+      physicalPostalAddress: "Explicit verified postal address",
+      artworkEvidenceNote: "Explicit artwork evidence",
+      artworkApproved: true,
+    };
+
+    expect(
+      senderFormForGoogleProfile(explicitGallerySender, "rosser_gallery_work"),
+    ).toBe(explicitGallerySender);
   });
 });

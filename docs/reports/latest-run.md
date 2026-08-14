@@ -1,5 +1,30 @@
 # Latest Verification Run
 
+## 2026-08-14 AICF Firestore operational retirement
+
+- RUN_ID: `20260814-002740-236467`
+- Scope: exact production retirement of four AICF lead templates and nine
+  pending AICF social drafts; restricted rollback receipt; no provider action
+- Production project: `leadflow-review`
+
+[2026-08-14T00:29:39-05:00] RUN_ID=20260814-002740-236467 gate=adc-read result=BLOCKED_INVALID_RAPT writes=0
+[2026-08-14T00:30:01-05:00] RUN_ID=20260814-002740-236467 gate=noninteractive-gcloud-token result=PASS token_printed=false
+[2026-08-14T00:32:43-05:00] RUN_ID=20260814-002740-236467 gate=initial-live-aggregate result=PASS templates=4 pending_drafts=9 approved_dispatched=3 rejected=3 excluded=0 aggregate_hash=sha256:4c657a9fae5a02e19dc5b5711df9a8ddcd9527fa3dc5826678bf49978e089c67
+[2026-08-14T00:36:53-05:00] RUN_ID=20260814-002740-236467 gate=focused-unit cmd=npx-vitest-run-aicf-firestore-retirement result=PASS tests=4
+[2026-08-14T00:37:11-05:00] RUN_ID=20260814-002740-236467 gate=scoped-eslint-and-diff-check result=PASS
+[2026-08-14T00:37:53-05:00] RUN_ID=20260814-002740-236467 gate=typescript cmd=tsc-noEmit-incremental-false result=PASS
+[2026-08-14T00:38:07-05:00] RUN_ID=20260814-002740-236467 gate=npm-argument-forwarding result=FAIL_NO_WRITES remediation=direct-node-invocation
+[2026-08-14T00:38:23-05:00] RUN_ID=20260814-002740-236467 gate=production-dry-run result=PASS targets=13 protected=6 writes_proposed=27 plan_hash=sha256:0428c8c20450b3f52d687df6bd5eaf973ce811d933f749fdfaa925a41ed18081 pre_hash=sha256:5581df3947cefd7b3ddb3f8c34b6eb4b08aac3e11cba9e82d1b740c1ccc68c8f
+[2026-08-14T00:38:59-05:00] RUN_ID=20260814-002740-236467 gate=production-transaction result=PASS correlation_id=a59f98b6-ad32-4c1a-88d8-45ac595cc499 target_updates=13 rollback_snapshots=13 receipt=1 external_actions=0 post_hash=sha256:fc89bd20e20698daa837826cfa502348185aa1a6b41f2bf706a520e29efd2ac2
+[2026-08-14T00:39:14-05:00] RUN_ID=20260814-002740-236467 gate=idempotent-postverify result=PASS receipt_verified=true target_hashes=13 writes=0 external_actions=0
+[2026-08-14T00:39:57-05:00] RUN_ID=20260814-002740-236467 gate=npm-equals-argument-forwarding result=FAIL_NO_WRITES remediation=package-alias-removed
+
+Artifacts:
+
+- `tmp/artifacts/aicf-firestore-retirement-dry-run-20260814-002740-236467.jsonl`
+- `tmp/artifacts/aicf-firestore-retirement-apply-20260814-002740-236467.jsonl`
+- `tmp/artifacts/aicf-firestore-retirement-postverify-20260814-002740-236467.jsonl`
+
 ## 2026-08-10 unified Application Desk
 
 - RUN_ID: 20260810-unified-application-desk

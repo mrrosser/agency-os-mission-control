@@ -19,8 +19,8 @@ export default function GoogleOAuthHelpPage() {
             <h1 className="text-3xl font-semibold tracking-tight">Google OAuth Verification</h1>
           </div>
           <p className="text-sm text-zinc-400">
-            Drive / Calendar / Gmail access can be blocked for external users until your OAuth consent screen is verified
-            and your app is hosted on a domain you control (not <span className="text-zinc-200">web.app</span>).
+            Google connections are isolated by organization and permission set. External users may also need to be
+            allowed by the OAuth app&apos;s Audience and publishing status before consent can complete.
           </p>
         </header>
 
@@ -31,7 +31,7 @@ export default function GoogleOAuthHelpPage() {
               In Google Auth Platform -&gt; Audience, add the user emails under <span className="text-zinc-100">Test users</span>.
             </li>
             <li>
-              Have those users connect via Integrations -&gt; <span className="text-zinc-100">Connect Google (Drive + Calendar)</span>.
+              Have those users connect from the exact RT.Solutions or Rosser Gallery card in Integrations.
             </li>
             <li>
               Run the product while you complete the full verification + custom domain steps below.
@@ -42,10 +42,10 @@ export default function GoogleOAuthHelpPage() {
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950 p-6">
           <h2 className="text-lg font-semibold">Full verification checklist</h2>
           <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-zinc-300">
-            <li>Buy a domain you control.</li>
-            <li>Attach it as a Firebase Hosting custom domain and complete DNS verification.</li>
+            <li>Confirm the OAuth app audience, publishing status, and test-user list in Google Auth Platform.</li>
+            <li>Confirm every app domain Google requests is authorized and ownership-verified.</li>
             <li>
-              Ensure these pages are live on that domain:
+              Ensure these pages are live on the canonical public origin:
               <div className="mt-2 flex flex-wrap gap-2">
                 <Link href="/privacy">
                   <Button size="sm" variant="outline" className="border-zinc-700 bg-zinc-950 text-zinc-200 hover:text-white">
@@ -60,7 +60,7 @@ export default function GoogleOAuthHelpPage() {
               </div>
             </li>
             <li>
-              Update the OAuth consent screen (Branding) to use your custom domain for:
+              Update the OAuth consent screen (Branding) with the exact production URLs for:
               <span className="block mt-1 text-zinc-400">App home page, Privacy Policy URL, Terms URL, Authorized domains.</span>
             </li>
             <li>
@@ -69,7 +69,7 @@ export default function GoogleOAuthHelpPage() {
                 Authorized origins + redirect URI <code className="text-zinc-200">/api/google/callback</code>.
               </span>
             </li>
-            <li>Submit verification for the sensitive scopes you request (Drive/Calendar/Gmail).</li>
+            <li>Submit verification for sensitive or restricted scopes when Google requires it for external users.</li>
           </ol>
           <p className="mt-4 text-xs text-zinc-500">
             This page is a condensed checklist. The repo source of truth is <code className="text-zinc-300">docs/compliance/google-oauth-verification.md</code>.

@@ -111,6 +111,52 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain('LIVE_CHANNEL_NAME" = "$EXPECTED_LIVE_CHANNEL"');
   });
 
+  it.each(workflows)(
+    "pins and verifies the canonical Mission Control public origin in %s",
+    (path) => {
+      const source = readFileSync(join(process.cwd(), path), "utf8");
+      const canonicalDeclaration = source.indexOf(
+        "MISSION_CONTROL_PUBLIC_ORIGIN: https://leadflow-review.web.app"
+      );
+      const canonicalGuard = source.indexOf(
+        '[ "$MISSION_CONTROL_PUBLIC_ORIGIN" != "https://leadflow-review.web.app" ]'
+      );
+      const runtimeUpdate = source.indexOf(
+        'append_env_update "MISSION_CONTROL_PUBLIC_ORIGIN" "$MISSION_CONTROL_PUBLIC_ORIGIN"'
+      );
+      const revisionUpdate = source.indexOf(
+        'gcloud run services update "$FIREBASE_SSR_SERVICE"'
+      );
+      const revisionVerification = source.indexOf(
+        'select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")'
+      );
+
+      expect(canonicalDeclaration).toBeGreaterThan(-1);
+      expect(canonicalGuard).toBeGreaterThan(canonicalDeclaration);
+      expect(runtimeUpdate).toBeGreaterThan(canonicalGuard);
+      expect(revisionUpdate).toBeGreaterThan(runtimeUpdate);
+      expect(revisionVerification).toBeGreaterThan(revisionUpdate);
+      expect(source).toContain(
+        '!= "$MISSION_CONTROL_PUBLIC_ORIGIN" ]; then'
+      );
+      expect(source).toContain(
+        "exact canonical Mission Control public origin."
+      );
+
+      if (path.endsWith("firebase-hosting-merge.yml")) {
+        const candidateTag = source.indexOf(
+          '--update-tags="$RELEASE_TAG=$RUNTIME_REVISION"'
+        );
+        expect(candidateTag).toBeGreaterThan(revisionVerification);
+      } else {
+        expect(source).toContain("status.latestReadyRevisionName");
+        expect(source).toContain(
+          'gcloud run revisions describe "$PREVIEW_RUNTIME_REVISION"'
+        );
+      }
+    }
+  );
+
   it("persists the OpenClaw OIDC heartbeat configuration on every production revision", () => {
     const source = readFileSync(
       join(process.cwd(), ".github/workflows/firebase-hosting-merge.yml"),

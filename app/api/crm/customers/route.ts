@@ -25,7 +25,7 @@ const bodySchema = z.object({
   email: z.string().trim().email().max(160).optional().or(z.literal("")),
   phone: z.string().trim().max(40).optional(),
   sourceLabel: z.string().trim().max(120).optional(),
-  businessUnit: z.string().trim().max(80).optional(),
+  businessUnit: z.enum(["rosser_nft_gallery", "rt_solutions"]).default("rt_solutions"),
   offerCode: z.string().trim().max(80).optional(),
   pipelineStage: z.string().trim().max(80).optional(),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),

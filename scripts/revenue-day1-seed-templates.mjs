@@ -83,35 +83,6 @@ const templates = [
       draftFirst: true,
     },
   },
-  {
-    templateId: "aicf-south-day1",
-    name: "AI CoFoundry South Automation Discovery",
-    clientName: "AI CoFoundry",
-    params: {
-      query:
-        "small and midsize teams seeking AI workflow automation, training, and implementation support",
-      industry: "professional services and operations teams",
-      location: "New Orleans, Louisiana",
-      limit: 20,
-      minScore: 45,
-      sources: ["googlePlaces", "firestore"],
-      includeEnrichment: true,
-      businessUnit: "ai_cofoundry",
-      offerCode: "AICF-DISCOVERY",
-      budget: {
-        maxCostUsd: 3,
-        maxPages: 6,
-        maxRuntimeSec: 75,
-      },
-    },
-    outreach: {
-      businessKey: "aicf",
-      useSMS: false,
-      useAvatar: false,
-      useOutboundCall: false,
-      draftFirst: true,
-    },
-  },
 ];
 
 for (const template of templates) {

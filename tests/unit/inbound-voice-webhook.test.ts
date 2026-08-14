@@ -62,6 +62,60 @@ describe("inbound voice webhook helpers", () => {
     expect(planned.responseText).toContain("queued");
   });
 
+  it("routes a legacy AICF inbound number into RT.Solutions without loading its old profile", () => {
+    const context = extractVoiceKnowledgeContext({
+      globalPolicies: {
+        voiceOpsPolicy: {
+          enabled: true,
+          requireBusinessContextBeforeWrite: true,
+          allowActions: ["gmail.createDraft"],
+          callerRouting: [
+            { phoneNumber: "+15045550100", defaultBusinessId: "ai_cofoundry" },
+          ],
+        },
+      },
+      businesses: [
+        {
+          id: "ai_cofoundry",
+          name: "Historical AI Co-Foundry",
+          serviceCatalog: ["Legacy service"],
+        },
+        {
+          id: "rt_solutions",
+          name: "RT.Solutions",
+          serviceCatalog: ["Automation delivery"],
+        },
+      ],
+    });
+
+    const businessId = resolveBusinessIdForCall(context, "+15045550100", "+15045550999");
+    const planned = planVoiceTurn({
+      context,
+      transcript: "Draft an email follow up",
+      inferredBusinessId: businessId,
+    });
+
+    expect(context.businesses.map((business) => business.id)).toEqual(["rt_solutions"]);
+    expect(businessId).toBe("rt_solutions");
+    expect(planned.businessId).toBe("rt_solutions");
+    expect(planned.queuedAction?.action).toBe("gmail.createDraft");
+    expect(planned.responseText).toContain("RT.Solutions");
+  });
+
+  it("fails closed for unknown inbound business routes", () => {
+    const context = extractVoiceKnowledgeContext({
+      globalPolicies: {
+        voiceOpsPolicy: {
+          callerRouting: [
+            { phoneNumber: "+15045550101", defaultBusinessId: "unknown-business" },
+          ],
+        },
+      },
+    });
+
+    expect(resolveBusinessIdForCall(context, "+15045550101", "+15045550999")).toBeNull();
+  });
+
   it("asks for business context before write actions when missing", () => {
     const context = extractVoiceKnowledgeContext(knowledgePayload);
     const planned = planVoiceTurn({

@@ -56,7 +56,7 @@ import {
 } from "@/lib/crm/warm-reconnect-dedupe";
 import { assertPortfolioRegistryAccess } from "@/lib/crm/portfolio-registry";
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
-import { isGoogleTokenScopeExactForPreset } from "@/lib/google/oauth";
+import { isGoogleTokenScopeBoundedForPreset } from "@/lib/google/oauth";
 import {
   WARM_RECONNECT_CAMPAIGN_ID,
   WARM_RECONNECT_CAMPAIGN_VERSION,
@@ -177,11 +177,12 @@ async function loadGoogleProfileStates(uid: string): Promise<GoogleProfileState[
         const resolution = await resolveGoogleAccountTokens(uid, profile.profileId);
         const tokens = resolution.record?.tokens || null;
         const connected = Boolean(tokens?.refreshToken || tokens?.accessToken);
-        const gmailCapable = isGoogleTokenScopeExactForPreset(
+        const gmailCapable = isGoogleTokenScopeBoundedForPreset(
           "gmail_send",
           tokens?.scope
         );
         const accountEmail = normalizeWarmReconnectEmail(tokens?.accountEmail || "");
+        const accountId = resolution.record?.accountId || null;
         const ready = Boolean(connected && gmailCapable && accountEmail);
         return {
           ...profile,
@@ -193,6 +194,7 @@ async function loadGoogleProfileStates(uid: string): Promise<GoogleProfileState[
           connected,
           gmailCapable,
           accountEmail,
+          accountId,
         };
       } catch {
         return {
@@ -201,6 +203,7 @@ async function loadGoogleProfileStates(uid: string): Promise<GoogleProfileState[
           connected: false,
           gmailCapable: false,
           accountEmail: null,
+          accountId: null,
         };
       }
     })
@@ -220,7 +223,8 @@ function googleReady(
     profile?.connected &&
       profile.gmailCapable &&
       profile.accountEmail &&
-      profile.accountEmail === pilot.sender.fromEmail
+      profile.accountEmail === pilot.sender.fromEmail &&
+      profile.accountId === pilot.sender.accountId
   );
 }
 
@@ -775,6 +779,14 @@ export async function createWarmReconnectPilotForUid(input: {
         throw new ApiError(
           409,
           "Reconnect the selected Google profile so its verified sending address can be bound."
+        );
+      })(),
+    accountId:
+      senderProfile?.accountId ||
+      (() => {
+        throw new ApiError(
+          409,
+          "Reconnect the selected Google profile so its exact account binding can be reviewed."
         );
       })(),
     preferenceOrigin: preferenceOriginFromEnv(),

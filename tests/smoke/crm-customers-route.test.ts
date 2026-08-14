@@ -167,6 +167,24 @@ describe("crm customer routes", () => {
     expect(data.customer.companyName).toBe("Alpha Dental");
   });
 
+  it("rejects the retired AICF business unit on current CRM writes", async () => {
+    const response = await upsertCustomer(
+      new Request("http://localhost/api/crm/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: "Historical Account",
+          businessUnit: "ai_cofoundry",
+          offerCode: "AICF-DISCOVERY",
+        }),
+      }) as never,
+      routeContext() as never
+    );
+
+    expect(response.status).toBe(400);
+    expect(upsertProjectedCustomerMock).not.toHaveBeenCalled();
+  });
+
   it("keeps submitted business, offer, and stage in the Paperclip fallback projection", async () => {
     readPaperclipClientConfigMock.mockReturnValue({
       baseUrl: "https://paperclip.example/system",

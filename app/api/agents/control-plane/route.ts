@@ -444,7 +444,6 @@ function buildMobileOpsInput(paperclip: PaperclipControlSnapshot): MobileOpsInpu
     "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL",
     "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS",
     "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG",
-    "SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF",
   ].some((name) => Boolean(asString(process.env[name])));
 
   return {

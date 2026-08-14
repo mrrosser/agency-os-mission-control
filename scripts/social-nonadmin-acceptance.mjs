@@ -108,8 +108,8 @@ if (!uid) {
     "Missing SOCIAL_ACCEPTANCE_UID (or SOCIAL_DRAFT_UID/REVENUE_AUTOMATION_UID fallback)."
   );
 }
-if (!["aicf", "rng", "rts"].includes(businessKey)) {
-  throw new Error("Invalid SOCIAL_ACCEPTANCE_BUSINESS_KEY; expected one of aicf|rng|rts.");
+if (!["rng", "rts"].includes(businessKey)) {
+  throw new Error("Invalid SOCIAL_ACCEPTANCE_BUSINESS_KEY; expected one of rng|rts.");
 }
 if (!channels.length) {
   throw new Error(

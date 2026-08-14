@@ -58,7 +58,7 @@ import { resolveGoogleBusinessProfileContext } from "@/lib/google/business-profi
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import {
   getAccessTokenForUser,
-  isGoogleTokenScopeExactForPreset,
+  isGoogleTokenScopeBoundedForPreset,
 } from "@/lib/google/oauth";
 import { sendWarmReconnectCampaignEmail } from "@/lib/google/gmail-campaign-sender";
 import {
@@ -1257,7 +1257,7 @@ export function isWarmReconnectProviderSendEnabled(
 export function isWarmReconnectGmailSendScopeExact(
   grantedScope: string | null | undefined
 ): boolean {
-  return isGoogleTokenScopeExactForPreset("gmail_send", grantedScope);
+  return isGoogleTokenScopeBoundedForPreset("gmail_send", grantedScope);
 }
 
 export async function claimNextWarmReconnectRecipient(input: {
@@ -1877,6 +1877,7 @@ export async function resolveWarmReconnectGmailAccessToken(input: {
       !resolution.profileMapped ||
       !resolution.record ||
       resolution.record.profileId !== input.pilot.sender.profileId ||
+      resolution.record.accountId !== input.pilot.sender.accountId ||
       !tokens?.refreshToken ||
       !isWarmReconnectGmailSendScopeExact(tokens.scope) ||
       !accountEmail ||

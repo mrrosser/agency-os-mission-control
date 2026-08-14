@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "crypto";
 import { SecretManagerServiceClient } from "@google-cloud/secret-manager";
 
 const client = new SecretManagerServiceClient();
@@ -24,11 +25,26 @@ function normalizeSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9-_]/g, "_");
 }
 
-function getSecretId(uid: string, key: string): string {
+function getLegacySecretId(uid: string, key: string): string {
   const prefix = process.env.MISSION_CONTROL_SECRET_PREFIX || "mission-control";
   const safeUid = normalizeSegment(uid);
   const safeKey = normalizeSegment(key);
   return `${prefix}-${safeUid}-${safeKey}`;
+}
+
+function canReadLegacySecretId(uid: string, key: string): boolean {
+  return normalizeSegment(uid) === uid && normalizeSegment(key) === key;
+}
+
+export function getUserSecretId(uid: string, key: string): string {
+  const prefix = normalizeSegment(
+    process.env.MISSION_CONTROL_SECRET_PREFIX || "mission-control"
+  ).slice(0, 64);
+  const digest = createHash("sha256")
+    .update(`${uid.length}:${uid}:${key.length}:${key}`, "utf8")
+    .digest("hex")
+    .slice(0, 48);
+  return `${prefix}-v2-${digest}`;
 }
 
 function getErrorCode(error: unknown): number | null {
@@ -58,23 +74,27 @@ async function ensureSecret(projectId: string, secretId: string): Promise<void> 
 
 export async function accessUserSecret(uid: string, key: string): Promise<string | undefined> {
   const projectId = getProjectId();
-  const secretId = getSecretId(uid, key);
-  const name = `projects/${projectId}/secrets/${secretId}/versions/latest`;
-  try {
-    const [version] = await client.accessSecretVersion({ name });
-    const data = version.payload?.data?.toString("utf-8");
-    return data && data.length > 0 ? data : undefined;
-  } catch (error: unknown) {
-    if (getErrorCode(error) === 5) {
-      return undefined;
+  const secretIds = [
+    getUserSecretId(uid, key),
+    ...(canReadLegacySecretId(uid, key) ? [getLegacySecretId(uid, key)] : []),
+  ];
+  for (const secretId of secretIds) {
+    const name = `projects/${projectId}/secrets/${secretId}/versions/latest`;
+    try {
+      const [version] = await client.accessSecretVersion({ name });
+      const data = version.payload?.data?.toString("utf-8");
+      return data && data.length > 0 ? data : undefined;
+    } catch (error: unknown) {
+      if (getErrorCode(error) === 5) continue;
+      throw error;
     }
-    throw error;
   }
+  return undefined;
 }
 
 export async function setUserSecret(uid: string, key: string, value: string): Promise<void> {
   const projectId = getProjectId();
-  const secretId = getSecretId(uid, key);
+  const secretId = getUserSecretId(uid, key);
 
   await ensureSecret(projectId, secretId);
 
@@ -82,4 +102,31 @@ export async function setUserSecret(uid: string, key: string, value: string): Pr
     parent: `projects/${projectId}/secrets/${secretId}`,
     payload: { data: Buffer.from(value, "utf-8") },
   });
+
+  if (canReadLegacySecretId(uid, key)) {
+    try {
+      await client.deleteSecret({
+        name: `projects/${projectId}/secrets/${getLegacySecretId(uid, key)}`,
+      });
+    } catch (error: unknown) {
+      if (getErrorCode(error) !== 5) throw error;
+    }
+  }
+}
+
+export async function deleteUserSecret(uid: string, key: string): Promise<void> {
+  const projectId = getProjectId();
+  const secretIds = [
+    getUserSecretId(uid, key),
+    ...(canReadLegacySecretId(uid, key) ? [getLegacySecretId(uid, key)] : []),
+  ];
+  for (const secretId of secretIds) {
+    try {
+      await client.deleteSecret({
+        name: `projects/${projectId}/secrets/${secretId}`,
+      });
+    } catch (error: unknown) {
+      if (getErrorCode(error) !== 5) throw error;
+    }
+  }
 }

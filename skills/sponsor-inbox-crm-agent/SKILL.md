@@ -1,12 +1,12 @@
 ---
 name: sponsor-inbox-crm-agent
-description: Operate an inbound opportunity inbox agent for RT/RNG/AICF services (sponsor-like requests optional) with scoring rubric, low-confidence escalation, context-aware drafting, CRM sync, and approval-safe outbound handling.
+description: Operate an inbound opportunity inbox agent for RT.Solutions and Rosser Gallery services (sponsor-like requests optional) with scoring rubric, low-confidence escalation, context-aware drafting, CRM sync, and approval-safe outbound handling.
 ---
 
 # Sponsor Inbox CRM Agent
 
 ## Purpose
-Run inbound opportunity and SMB lead email triage for RT/RNG/AICF with deterministic safety gates:
+Run inbound opportunity and SMB lead email triage for RT.Solutions and Rosser Gallery with deterministic safety gates:
 
 1) classify + score inbound threads for your service offers  
 2) route to action buckets (`exceptional`, `high`, `medium`, `low`, `spam`)  
@@ -30,7 +30,7 @@ Run inbound opportunity and SMB lead email triage for RT/RNG/AICF with determini
 - Close likelihood
 
 ## Routing defaults
-- Primary use case: service inquiries for RT/RNG/AICF.
+- Primary use case: service inquiries for RT.Solutions and Rosser Gallery.
 - Optional use case: external sponsorship/partnership inquiries.
 - `exceptional`: notify immediately in operator channel, no auto-reply.
 - `high`: queue priority review + optional qualification draft.

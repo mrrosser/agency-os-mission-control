@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveOfferCodeForBusinessUnit } from "@/lib/revenue/offers";
+import {
+  BUSINESS_UNIT_OPTIONS,
+  findOfferByCode,
+  normalizeBusinessUnit,
+  resolveOfferCodeForBusinessUnit,
+} from "@/lib/revenue/offers";
 
 describe("revenue offer normalization", () => {
   it("keeps a valid offer code for the selected business unit", () => {
@@ -14,6 +19,24 @@ describe("revenue offer normalization", () => {
     expect(result.offerCode).toBe("RTS-QUICK-WEBSITE-SPRINT");
     expect(result.adjusted).toBe(true);
     expect(result.requestedCode).toBe("RNG-COMMISSION-SCULPTURE");
+  });
+
+  it("keeps retired identifiers readable but off active business options", () => {
+    expect(BUSINESS_UNIT_OPTIONS.map((option) => option.id)).toEqual([
+      "rosser_nft_gallery",
+      "rt_solutions",
+    ]);
+    expect(normalizeBusinessUnit("aicf")).toBe("ai_cofoundry");
+    expect(findOfferByCode("AICF-DISCOVERY")).toMatchObject({
+      businessUnit: "ai_cofoundry",
+      code: "AICF-DISCOVERY",
+    });
+  });
+
+  it("rejects unknown non-empty business identifiers", () => {
+    expect(() => normalizeBusinessUnit("unknown-business")).toThrow(
+      "Unsupported business unit 'unknown-business'"
+    );
   });
 });
 

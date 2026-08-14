@@ -4,10 +4,14 @@ import { NextRequest } from "next/server";
 const {
   requireFirebaseAuthMock,
   getStoredGoogleTokensMock,
+  getGoogleAccountRegistryModeMock,
+  getGoogleDefaultProfileIdMock,
   resolveGoogleAccountTokensMock,
 } = vi.hoisted(() => ({
   requireFirebaseAuthMock: vi.fn(),
   getStoredGoogleTokensMock: vi.fn(),
+  getGoogleAccountRegistryModeMock: vi.fn(),
+  getGoogleDefaultProfileIdMock: vi.fn(),
   resolveGoogleAccountTokensMock: vi.fn(),
 }));
 
@@ -20,6 +24,8 @@ vi.mock("@/lib/google/oauth", () => ({
 }));
 
 vi.mock("@/lib/google/account-token-store", () => ({
+  getGoogleAccountRegistryMode: getGoogleAccountRegistryModeMock,
+  getGoogleDefaultProfileId: getGoogleDefaultProfileIdMock,
   resolveGoogleAccountTokens: resolveGoogleAccountTokensMock,
 }));
 
@@ -30,6 +36,8 @@ describe("google status route", () => {
     vi.clearAllMocks();
     requireFirebaseAuthMock.mockResolvedValue({ uid: "uid-123" });
     getStoredGoogleTokensMock.mockResolvedValue(null);
+    getGoogleAccountRegistryModeMock.mockResolvedValue("schema_v2");
+    getGoogleDefaultProfileIdMock.mockResolvedValue("rt_solutions_work");
     resolveGoogleAccountTokensMock.mockImplementation(
       async (_uid: string, profileId: string) => {
         if (profileId === "rt_solutions_work") {
@@ -64,6 +72,12 @@ describe("google status route", () => {
     expect(response.status).toBe(200);
     expect(payload.connected).toBe(true);
     expect(payload.storageMode).toBe("schema_v2");
+    expect(payload.defaultProfileId).toBe("rt_solutions_work");
+    expect(payload.profile).toMatchObject({
+      businessId: "rt_solutions",
+      profileId: "rt_solutions_work",
+      connected: true,
+    });
     expect(payload.capabilities).toEqual({ drive: true, gmail: true, calendar: true });
     expect(payload.profiles).toEqual([
       expect.objectContaining({
@@ -83,6 +97,62 @@ describe("google status route", () => {
     ]);
   });
 
+  it("does not borrow legacy credentials when schema v2 is connected but has no default", async () => {
+    getGoogleDefaultProfileIdMock.mockResolvedValue(null);
+    getStoredGoogleTokensMock.mockResolvedValue({
+      refreshToken: "legacy-refresh-token",
+      scope: "https://www.googleapis.com/auth/gmail.send",
+    });
+
+    const response = await GET(
+      new NextRequest("https://leadflow-review.web.app/api/google/status"),
+      {} as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.connected).toBe(false);
+    expect(payload.defaultProfileId).toBeNull();
+    expect(payload.profile).toBeNull();
+    expect(payload.storageMode).toBe("schema_v2_needs_default");
+    expect(payload.capabilities).toEqual({
+      drive: false,
+      gmail: false,
+      calendar: false,
+    });
+    expect(payload.legacy.connected).toBe(false);
+  });
+
+  it("does not report legacy access when schema v2 has no healthy bindings or default", async () => {
+    getGoogleDefaultProfileIdMock.mockResolvedValue(null);
+    getGoogleAccountRegistryModeMock.mockResolvedValue("schema_v2");
+    getStoredGoogleTokensMock.mockResolvedValue({
+      refreshToken: "legacy-refresh-token",
+      scope: "https://www.googleapis.com/auth/gmail.send",
+    });
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: false,
+      record: null,
+    });
+
+    const response = await GET(
+      new NextRequest("https://leadflow-review.web.app/api/google/status"),
+      {} as never
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.connected).toBe(false);
+    expect(payload.storageMode).toBe("schema_v2_needs_default");
+    expect(payload.capabilities).toEqual({
+      drive: false,
+      gmail: false,
+      calendar: false,
+    });
+    expect(payload.legacy.connected).toBe(false);
+  });
+
   it("does not fall back to a legacy account for a selected profile", async () => {
     getStoredGoogleTokensMock.mockResolvedValue({
       refreshToken: "legacy-refresh-token",
@@ -97,7 +167,7 @@ describe("google status route", () => {
     expect(response.status).toBe(200);
     expect(payload.connected).toBe(false);
     expect(payload.storageMode).toBe("none");
-    expect(payload.legacy.connected).toBe(true);
+    expect(payload.legacy.connected).toBe(false);
     expect(payload.profile).toMatchObject({
       businessId: "rosser_nft_gallery",
       profileId: "rosser_gallery_work",

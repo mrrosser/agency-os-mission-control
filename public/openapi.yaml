@@ -210,7 +210,7 @@ components:
   schemas:
     BusinessId:
       type: string
-      enum: [ai_cofoundry, rosser_nft_gallery, rt_solutions]
+      enum: [rosser_nft_gallery, rt_solutions]
     AgentTrustLevel:
       type: string
       enum: [read_only, bounded_internal, consequential_executor]
@@ -218,7 +218,6 @@ components:
       type: string
       enum:
         - orchestration
-        - business:ai_cofoundry
         - business:rosser_nft_gallery
         - business:rt_solutions
         - marketing

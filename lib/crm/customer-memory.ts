@@ -6,6 +6,7 @@ import type { Logger } from "@/lib/logging";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import {
+  assertActiveBusinessUnit,
   DEFAULT_OFFER_CODE_BY_BUSINESS,
   formatCrmPipelineStageLabel,
   legacyStatusFromPipelineStage,
@@ -461,7 +462,8 @@ export async function upsertProjectedCustomer(
   uid: string,
   input: CustomerUpsertInput
 ): Promise<CustomerRecord> {
-  const businessUnit = normalizeBusinessUnit(input.businessUnit);
+  const businessUnit = normalizeBusinessUnit(input.businessUnit || "rt_solutions");
+  assertActiveBusinessUnit(businessUnit);
   const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, input.offerCode);
   const pipelineStage = normalizeCrmPipelineStage(input.pipelineStage);
   const payload = stripUndefined({

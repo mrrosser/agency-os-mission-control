@@ -22,7 +22,7 @@ const mediaSchema = z.object({
 
 const bodySchema = z.object({
   uid: z.string().trim().min(1).max(128).optional(),
-  businessKey: z.enum(["aicf", "rng", "rts", "all"]).default("rng"),
+  businessKey: z.enum(["rng", "rts", "all"]).default("rng"),
   channels: z.array(channelSchema).min(1).max(6).optional(),
   caption: z.string().trim().min(1).max(5000).optional(),
   media: z.array(mediaSchema).max(8).default([]),
@@ -83,7 +83,7 @@ function toIsoWeekKey(value: Date): string {
   return `${weekYear}-W${String(week).padStart(2, "0")}`;
 }
 
-function resolveTimeZone(businessKey: "aicf" | "rng" | "rts"): string {
+function resolveTimeZone(businessKey: "rng" | "rts"): string {
   const upper = businessKey.toUpperCase();
   const perBusiness = String(process.env[`SOCIAL_DRAFT_${upper}_WEEKLY_TIMEZONE`] || "").trim();
   if (perBusiness) return perBusiness;
@@ -94,18 +94,18 @@ function resolveTimeZone(businessKey: "aicf" | "rng" | "rts"): string {
   return "America/Chicago";
 }
 
-function resolveWeekKey(businessKey: "aicf" | "rng" | "rts", override?: string): string {
+function resolveWeekKey(businessKey: "rng" | "rts", override?: string): string {
   const direct = String(override || "").trim();
   if (direct) return direct;
   const zonedDate = getDateInTimeZone(resolveTimeZone(businessKey));
   return toIsoWeekKey(zonedDate);
 }
 
-function defaultChannelsForBusiness(_businessKey: "aicf" | "rng" | "rts") {
+function defaultChannelsForBusiness(_businessKey: "rng" | "rts") {
   return ["instagram_post", "facebook_post"] as const;
 }
 
-function defaultCaptionForWeek(businessKey: "aicf" | "rng" | "rts", weekKey: string): string {
+function defaultCaptionForWeek(businessKey: "rng" | "rts", weekKey: string): string {
   if (businessKey === "rng") {
     return [
       `RNG Weekly Spotlight (${weekKey})`,
@@ -122,12 +122,7 @@ function defaultCaptionForWeek(businessKey: "aicf" | "rng" | "rts", weekKey: str
       "Close with a clear booking CTA.",
     ].join(" ");
   }
-  return [
-    `AICF Weekly Operator Tip (${weekKey})`,
-    "Share one implementation win from this week and the system behind it.",
-    "Ask followers which bottleneck they want solved next.",
-    "Close with a call-to-action for an implementation consult.",
-  ].join(" ");
+  throw new ApiError(400, "Unsupported social business key");
 }
 
 export const POST = withApiHandler(
@@ -149,7 +144,7 @@ export const POST = withApiHandler(
     const requestedBusinessKey = body.businessKey;
     const businessKeys =
       requestedBusinessKey === "all"
-        ? (["aicf", "rng", "rts"] as const)
+        ? (["rng", "rts"] as const)
         : ([requestedBusinessKey] as const);
     const approvalBaseUrl = resolveApprovalBaseUrl(request);
     const routeMetadata = {

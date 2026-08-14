@@ -268,8 +268,8 @@ describe("twilio routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: "+15551239999",
-        text: "Hello from AI CoFoundry",
-        businessKey: "aicf",
+        text: "Hello from RT.Solutions",
+        businessKey: "rts",
         voiceId: "voice-test",
         modelId: "model-test",
       }),
@@ -291,6 +291,27 @@ describe("twilio routes", () => {
         twiml: "<Response><Play>https://example.com/clip-123.mp3</Play></Response>",
       })
     );
+  });
+
+  it("make-call rejects the retired AICF voice lane before synthesis", async () => {
+    const req = new Request("http://localhost/api/twilio/make-call", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: "+15551239999",
+        text: "Retired lane",
+        businessKey: "aicf",
+      }),
+    });
+
+    const res = await makeCallPost(
+      req as unknown as Parameters<typeof makeCallPost>[0],
+      createContext() as unknown as Parameters<typeof makeCallPost>[1]
+    );
+
+    expect(res.status).toBe(400);
+    expect(createHostedCallAudioMock).not.toHaveBeenCalled();
+    expect(twilioMocks.callsCreate).not.toHaveBeenCalled();
   });
 
   it("send-sms blocks when the budget governor hard-stops Twilio", async () => {

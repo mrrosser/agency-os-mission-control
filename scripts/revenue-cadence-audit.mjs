@@ -128,21 +128,6 @@ export const JOB_SPECS = [
     },
   },
   {
-    name: "revenue-automation-aicf",
-    endpointPath: "/api/revenue/automation/daily/worker-task",
-    scheduleEnv: "REVENUE_AUTOMATION_AICF_CRON",
-    defaultSchedule: "35 5 * * *",
-    payload: {
-      uid: true,
-      businessKey: "aicf",
-      dueOnly: true,
-      dryRun: false,
-      requireApprovalGates: true,
-      runWeeklyKpi: false,
-      runStagesIncludes: "day30",
-    },
-  },
-  {
     name: "revenue-weekly-brain",
     endpointPath: "/api/revenue/day30/worker-task",
     scheduleEnv: "REVENUE_WEEKLY_BRAIN_CRON",

@@ -1,5 +1,9 @@
 import "server-only";
 
+import { isIP } from "node:net";
+import { ApiError } from "@/lib/api/handler";
+import { resolveMissionControlOrigin } from "@/lib/google/oauth";
+
 export type VerificationCheckStatus = "pass" | "warn" | "fail";
 
 export interface VerificationCheck {
@@ -17,7 +21,12 @@ export interface VerificationReadinessReport {
 }
 
 async function fetchText(url: string): Promise<{ ok: boolean; status: number; text: string }> {
-  const response = await fetch(url, { method: "GET", cache: "no-store" });
+  const response = await fetch(url, {
+    method: "GET",
+    cache: "no-store",
+    // A redirect could otherwise turn a trusted first hop into an SSRF target.
+    redirect: "manual",
+  });
   return {
     ok: response.ok,
     status: response.status,
@@ -25,8 +34,68 @@ async function fetchText(url: string): Promise<{ ok: boolean; status: number; te
   };
 }
 
-export async function buildVerificationReadinessReport(baseUrlInput: string): Promise<VerificationReadinessReport> {
-  const baseUrl = baseUrlInput.replace(/\/+$/, "");
+function isPublicDnsHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
+  if (!normalized || isIP(normalized) !== 0) return false;
+  if (!normalized.includes(".")) return false;
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized === "metadata.google.internal" ||
+    normalized.endsWith(".internal") ||
+    normalized.endsWith(".local")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function resolveVerificationReadinessOrigin(): string {
+  const configuredOrigin = process.env.MISSION_CONTROL_PUBLIC_ORIGIN?.trim();
+  if (!configuredOrigin) {
+    throw new ApiError(
+      503,
+      "Google verification readiness requires a configured public origin"
+    );
+  }
+
+  let configuredUrl: URL;
+  try {
+    configuredUrl = new URL(configuredOrigin);
+  } catch {
+    throw new ApiError(
+      500,
+      "MISSION_CONTROL_PUBLIC_ORIGIN must be an exact public HTTPS origin"
+    );
+  }
+
+  if (
+    configuredUrl.protocol !== "https:" ||
+    configuredOrigin !== configuredUrl.origin ||
+    !isPublicDnsHostname(configuredUrl.hostname)
+  ) {
+    throw new ApiError(
+      500,
+      "MISSION_CONTROL_PUBLIC_ORIGIN must be an exact public HTTPS origin"
+    );
+  }
+
+  // Reuse the OAuth origin resolver so readiness and the connection flow share
+  // the same environment-backed source of truth. The equality check makes the
+  // pin fail closed if that resolver ever selects a different origin.
+  const resolved = resolveMissionControlOrigin(undefined, configuredUrl.origin);
+  if (resolved.origin !== configuredUrl.origin || resolved.redirected) {
+    throw new ApiError(
+      500,
+      "MISSION_CONTROL_PUBLIC_ORIGIN must be an exact public HTTPS origin"
+    );
+  }
+
+  return resolved.origin;
+}
+
+export async function buildVerificationReadinessReport(): Promise<VerificationReadinessReport> {
+  const baseUrl = resolveVerificationReadinessOrigin();
   const loginUrl = `${baseUrl}/login`;
   const privacyUrl = `${baseUrl}/privacy`;
   const termsUrl = `${baseUrl}/terms`;

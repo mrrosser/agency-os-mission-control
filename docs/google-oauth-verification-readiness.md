@@ -1,6 +1,6 @@
 # Google OAuth Verification Readiness
 
-Last updated: 2026-02-21
+Last updated: 2026-08-13
 
 ## Goal
 Keep the app continuously ready for Google OAuth branding/scopes verification with repeatable checks.
@@ -14,9 +14,11 @@ Keep the app continuously ready for Google OAuth branding/scopes verification wi
 1. Public page check (no auth):
    - `npm run check:oauth-readiness -- https://leadflow-review.web.app`
 2. Authenticated API report:
-   - `GET /api/google/verification-readiness?baseUrl=https://leadflow-review.web.app`
+   - `GET /api/google/verification-readiness`
 3. Runtime config baseline:
    - `GET /api/runtime/preflight`
+
+The authenticated API does not accept query parameters or a caller-provided origin. It checks only the exact public HTTPS origin pinned in `MISSION_CONTROL_PUBLIC_ORIGIN`; localhost, IP literals, metadata/internal hostnames, paths, credentials, query strings, and fragments are rejected as configuration errors. Page-check redirects are not followed. Successful and error responses are private/no-store and carry the request correlation ID.
 
 ## Verification checklist
 - **Branding**

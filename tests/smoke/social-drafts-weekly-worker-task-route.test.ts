@@ -136,8 +136,11 @@ describe("social drafts weekly worker-task route", () => {
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.job_name).toBe("social-drafts-weekly-all");
-    expect(data.results).toHaveLength(3);
-    expect(withIdempotencyMock).toHaveBeenCalledTimes(3);
-    expect(createDraftMock).toHaveBeenCalledTimes(3);
+    expect(data.results).toHaveLength(2);
+    expect(withIdempotencyMock).toHaveBeenCalledTimes(2);
+    expect(createDraftMock).toHaveBeenCalledTimes(2);
+    expect(
+      createDraftMock.mock.calls.map(([input]) => input.businessKey).sort()
+    ).toEqual(["rng", "rts"]);
   });
 });

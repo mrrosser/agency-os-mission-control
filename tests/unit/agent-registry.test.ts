@@ -55,6 +55,7 @@ describe("canonical agent registry", () => {
     expect(resolveAgentDefinition("coding")?.id).toBe("orchestrator");
     expect(resolveAgentDefinition("opportunity_scout")?.id).toBe("opportunity-scout");
     expect(resolveAgentDefinition("made-up-agent")).toBeNull();
+    expect(resolveAgentDefinition("biz-aicf")).toBeNull();
   });
 
   it("authorizes a fresh heartbeat in the caller org context", () => {
@@ -96,7 +97,6 @@ describe("canonical agent registry", () => {
 
   it("uses explicit business claims fail-closed and preserves the org-wide default", () => {
     expect(resolveCallerBusinessIds({})).toEqual([
-      "ai_cofoundry",
       "rosser_nft_gallery",
       "rt_solutions",
     ]);
@@ -104,5 +104,6 @@ describe("canonical agent registry", () => {
       "rt_solutions",
     ]);
     expect(resolveCallerBusinessIds({ business_ids: "unknown" })).toEqual([]);
+    expect(resolveCallerBusinessIds({ business_ids: "ai_cofoundry" })).toEqual([]);
   });
 });

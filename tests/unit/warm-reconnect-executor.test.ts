@@ -109,6 +109,7 @@ function launchedPilot(
     candidates: [1, 2, 3, 4, 5].map(candidate),
     googleReady: true,
     fromEmail: "marcus@example.com",
+    accountId: "google-account-1",
     preferenceOrigin: "https://leadflow-review.web.app",
     now: START,
   });

@@ -33,8 +33,26 @@ describe("lead templates routes", () => {
           data: () => ({
             name: "Austin HVAC",
             clientName: "Acme",
-            params: { query: "HVAC contractors", limit: 10, minScore: 55 },
+            params: {
+              query: "HVAC contractors",
+              limit: 10,
+              minScore: 55,
+              businessUnit: "rt_solutions",
+              offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+            },
             outreach: { useSMS: true, draftFirst: true },
+          }),
+        },
+        {
+          id: "t-retired",
+          data: () => ({
+            name: "Historical AI Co-Foundry",
+            params: {
+              query: "legacy business outreach",
+              businessUnit: "ai_cofoundry",
+              offerCode: "AICF-DISCOVERY",
+            },
+            outreach: { businessKey: "aicf", draftFirst: true },
           }),
         },
       ],
@@ -71,6 +89,50 @@ describe("lead templates routes", () => {
     expect(data.templates).toHaveLength(1);
     expect(data.templates[0].templateId).toBe("t1");
     expect(data.templates[0].name).toBe("Austin HVAC");
+
+    const historicalReq = new Request(
+      "http://localhost/api/leads/templates?includeRetired=1",
+      { method: "GET" }
+    );
+    const historicalRes = await GET(
+      historicalReq as unknown as Parameters<typeof GET>[0],
+      createContext() as unknown as Parameters<typeof GET>[1]
+    );
+    const historicalData = await historicalRes.json();
+
+    expect(historicalRes.status).toBe(200);
+    expect(historicalData.templates).toHaveLength(2);
+    expect(historicalData.templates[1]).toEqual(
+      expect.objectContaining({
+        templateId: "t-retired",
+        retired: true,
+      })
+    );
+  });
+
+  it("rejects new AI Co-Foundry templates", async () => {
+    const req = new Request("http://localhost/api/leads/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        templateId: "t-new-aicf",
+        name: "New AI Co-Foundry template",
+        params: {
+          query: "legacy lane",
+          businessUnit: "ai_cofoundry",
+          offerCode: "AICF-DISCOVERY",
+        },
+        outreach: { businessKey: "aicf", draftFirst: true },
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+
+    expect(res.status).toBe(400);
+    expect(getAdminDbMock).not.toHaveBeenCalled();
   });
 
   it("upserts a template", async () => {

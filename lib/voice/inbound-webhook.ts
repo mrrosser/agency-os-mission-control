@@ -74,6 +74,22 @@ function normalizePhone(value: string): string {
   return digits.replace(/[^\d]/g, "");
 }
 
+function normalizeActiveVoiceBusinessId(value: unknown): string | null {
+  const normalized = asString(value).trim().toLowerCase();
+  if (normalized === "rt" || normalized === "rts" || normalized === "rt_solutions") {
+    return "rt_solutions";
+  }
+  if (normalized === "rng" || normalized === "rosser_nft_gallery") {
+    return "rosser_nft_gallery";
+  }
+  // Old inbound numbers remain useful entry points, but current work belongs
+  // to RT.Solutions. The stored route identifier stays unchanged as history.
+  if (normalized === "aicf" || normalized === "ai_cofoundry" || normalized === "ai-cofoundry") {
+    return "rt_solutions";
+  }
+  return null;
+}
+
 export function extractVoiceKnowledgeContext(payload: unknown): VoiceKnowledgeContext {
   const root = asObject(payload) || {};
   const policyRoot = asObject(asObject(root.globalPolicies)?.voiceOpsPolicy) || {};
@@ -130,7 +146,12 @@ export function extractVoiceKnowledgeContext(payload: unknown): VoiceKnowledgeCo
           null,
       } satisfies VoiceBusinessProfile;
     })
-    .filter((business) => business.id && business.name);
+    .filter(
+      (business) =>
+        business.id &&
+        business.name &&
+        normalizeActiveVoiceBusinessId(business.id) === business.id
+    );
 
   return { policy, businesses };
 }
@@ -145,7 +166,7 @@ export function resolveBusinessIdForCall(
 
   for (const route of context.policy.callerRouting) {
     if (route.phoneNumber === normalizedTo || route.phoneNumber === normalizedFrom) {
-      return route.defaultBusinessId;
+      return normalizeActiveVoiceBusinessId(route.defaultBusinessId);
     }
   }
   return null;
@@ -178,7 +199,7 @@ function trimForVoice(value: string, maxChars: number = 260): string {
 
 function fallbackBusinessPrompt(context: VoiceKnowledgeContext): string {
   if (context.businesses.length === 0) {
-    return "Please tell me which business this is for: AI CoFoundry, Rosser NFT Gallery, or RT Solutions.";
+    return "Please tell me which business this is for: Rosser Gallery or RT.Solutions.";
   }
   const names = context.businesses.map((business) => business.name).join(", ");
   return `Please tell me which business this is for: ${names}.`;
@@ -206,7 +227,7 @@ export function planVoiceTurn(args: {
   inferredBusinessId: string | null;
 }): PlannedVoiceTurn {
   const transcript = args.transcript.trim();
-  const businessId = args.inferredBusinessId;
+  const businessId = normalizeActiveVoiceBusinessId(args.inferredBusinessId);
 
   if (!transcript) {
     return {

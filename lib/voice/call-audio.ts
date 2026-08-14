@@ -12,7 +12,6 @@ const MAX_CALL_SCRIPT_CHARS = Number.parseInt(process.env.ELEVENLABS_CALL_MAX_CH
 const MAX_EMBEDDED_AUDIO_BYTES = Number.parseInt(process.env.ELEVENLABS_CALL_MAX_AUDIO_BYTES || "700000", 10);
 
 const BUSINESS_VOICE_ENV: Record<string, string> = {
-  aicf: "ELEVENLABS_VOICE_ID_AICF",
   rng: "ELEVENLABS_VOICE_ID_RNG",
   rts: "ELEVENLABS_VOICE_ID_RTS",
   rt: "ELEVENLABS_VOICE_ID_RTS",
@@ -74,6 +73,9 @@ export function resolveVoiceProfile(input: {
   modelId?: string;
 }): VoiceProfile {
   const businessKey = normalizeBusinessKey(input.businessKey);
+  if (businessKey === "aicf" || businessKey === "ai_cofoundry" || businessKey === "ai-cofoundry") {
+    throw new ApiError(410, "The AICF voice lane is retired");
+  }
   const configuredVoice = envVoiceForBusiness(businessKey);
   return {
     businessKey,

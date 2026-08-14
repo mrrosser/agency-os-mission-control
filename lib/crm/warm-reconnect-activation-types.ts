@@ -159,11 +159,12 @@ export interface WarmReconnectPilotSenderConfiguration {
   physicalPostalAddress: string;
   businessId: WarmReconnectBusinessId;
   profileId: WarmReconnectGoogleProfileId;
+  accountId: string;
 }
 
 export type WarmReconnectPilotSenderInput = Omit<
   WarmReconnectPilotSenderConfiguration,
-  "fromEmail"
+  "fromEmail" | "accountId"
 >;
 
 export interface WarmReconnectPilotApproval {
@@ -254,6 +255,7 @@ export interface WarmReconnectActivationResponse {
     connected: boolean;
     gmailCapable: boolean;
     accountEmail: string | null;
+    accountId: string | null;
   }>;
   candidateSummary: {
     eligibleForReview: number;

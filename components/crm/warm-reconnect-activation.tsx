@@ -228,7 +228,6 @@ export function WarmReconnectActivation({ campaign }: Props) {
           scopePreset: "gmail_send",
           businessId: profile.businessId,
           profileId: profile.profileId,
-          idempotencyKey,
         }),
       });
       const body = await readApiJson<unknown>(response);

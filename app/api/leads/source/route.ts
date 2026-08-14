@@ -26,7 +26,7 @@ const bodySchema = z.object({
   minScore: z.number().int().min(0).max(100).optional(),
   sources: z.array(z.enum(["googlePlaces", "firestore", "apifyMaps"])).optional(),
   includeEnrichment: z.boolean().optional(),
-  businessUnit: z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional(),
+  businessUnit: z.enum(["rosser_nft_gallery", "rt_solutions"]).default("rt_solutions"),
   offerCode: z
     .string()
     .trim()
@@ -103,7 +103,7 @@ export const POST = withApiHandler(
       offerCode: body.offerCode,
       budget: body.budget,
     };
-    const businessUnit = normalizeBusinessUnit(requestPayload.businessUnit);
+    const businessUnit = normalizeBusinessUnit(requestPayload.businessUnit || "rt_solutions");
     const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, requestPayload.offerCode);
     const offerCode = offerResolution.offerCode;
 

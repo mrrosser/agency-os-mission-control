@@ -1,13 +1,26 @@
 import "server-only";
 
+import { createHash, randomUUID } from "crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { accessUserSecret, setUserSecret } from "@/lib/secret-manager";
+import {
+  accessUserSecret,
+  deleteUserSecret,
+  setUserSecret,
+} from "@/lib/secret-manager";
 
 const TOKEN_COLLECTION = "google_oauth_tokens";
 const ACCOUNT_SUBCOLLECTION = "accounts";
 const PROFILE_BINDING_SUBCOLLECTION = "profile_bindings";
 const ACCOUNT_SECRET_PREFIX = "google-oauth-account";
+
+export type GoogleAccountScopePreset =
+  | "core"
+  | "drive"
+  | "calendar"
+  | "gmail"
+  | "gmail_send"
+  | "full";
 
 export interface StoredGoogleAccountTokens {
   accessToken?: string | null;
@@ -16,6 +29,8 @@ export interface StoredGoogleAccountTokens {
   scope?: string | null;
   tokenType?: string | null;
   accountEmail?: string | null;
+  accountSubject?: string | null;
+  scopePreset?: GoogleAccountScopePreset | null;
 }
 
 export interface GoogleAccountTokenRecord {
@@ -69,6 +84,153 @@ function normalizedAccountEmail(value: string | null | undefined): string | null
     : null;
 }
 
+export interface GoogleAccountProfileDisconnect {
+  profileId: string;
+  accountId: string | null;
+  operationId: string | null;
+  localCredentialDeletionRequired: boolean;
+}
+
+export class GoogleAccountProfileConflictError extends Error {
+  readonly code = "google_account_already_connected";
+
+  constructor() {
+    super("This Google account is already connected to another organization profile");
+    this.name = "GoogleAccountProfileConflictError";
+  }
+}
+
+export class GoogleAccountProfileReplacementRequiresDisconnectError extends Error {
+  readonly code = "google_profile_replacement_requires_disconnect";
+
+  constructor() {
+    super(
+      "Disconnect this organization profile before connecting a different Google account"
+    );
+    this.name = "GoogleAccountProfileReplacementRequiresDisconnectError";
+  }
+}
+
+const GOOGLE_IDENTITY_SCOPE_ALIASES = new Set([
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "openid",
+  "email",
+  "profile",
+]);
+
+const GOOGLE_DATA_SCOPES_BY_PRESET: Readonly<
+  Record<GoogleAccountScopePreset, readonly string[]>
+> = {
+  core: [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+  ],
+  drive: [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+  ],
+  calendar: [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+  ],
+  gmail: [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+  ],
+  gmail_send: ["https://www.googleapis.com/auth/gmail.send"],
+  full: [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+  ],
+};
+
+function normalizeScopePreset(value: unknown): GoogleAccountScopePreset | null {
+  const preset = String(value || "").trim().toLowerCase();
+  return preset === "core" ||
+    preset === "drive" ||
+    preset === "calendar" ||
+    preset === "gmail" ||
+    preset === "gmail_send" ||
+    preset === "full"
+    ? preset
+    : null;
+}
+
+function normalizedScopeSet(value: string | null | undefined): string[] {
+  return [
+    ...new Set(
+      String(value || "")
+        .split(/\s+/)
+        .map((scope) => scope.trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+}
+
+function isBoundedScopeForPreset(
+  preset: GoogleAccountScopePreset,
+  value: string | null | undefined
+): boolean {
+  const granted = new Set(normalizedScopeSet(value));
+  const requiredDataScopes = GOOGLE_DATA_SCOPES_BY_PRESET[preset];
+  const hasEmailIdentity =
+    granted.has("https://www.googleapis.com/auth/userinfo.email") ||
+    (granted.has("openid") && granted.has("email"));
+  if (!hasEmailIdentity || requiredDataScopes.some((scope) => !granted.has(scope))) {
+    return false;
+  }
+  const allowed = new Set([
+    ...requiredDataScopes,
+    ...GOOGLE_IDENTITY_SCOPE_ALIASES,
+  ]);
+  return [...granted].every((scope) => allowed.has(scope));
+}
+
+function scopeSetsMatch(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  const leftScopes = normalizedScopeSet(left);
+  const rightScopes = normalizedScopeSet(right);
+  return (
+    leftScopes.length === rightScopes.length &&
+    leftScopes.every((scope, index) => scope === rightScopes[index])
+  );
+}
+
+function normalizedAccountSubject(value: string | null | undefined): string | null {
+  const subject = String(value || "").trim();
+  return subject && /^[A-Za-z0-9._~-]{1,255}$/.test(subject) ? subject : null;
+}
+
+function googleAccountIdForSubject(uid: string, subject: string): string {
+  const digest = createHash("sha256")
+    .update(`${uid.length}:${uid}:${subject.length}:${subject}`, "utf8")
+    .digest("hex")
+    .slice(0, 48);
+  return `google-${digest}`;
+}
+
+function operationId(value: unknown): string | null {
+  const normalized = String(value || "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    normalized
+  )
+    ? normalized
+    : null;
+}
+
+function isSchemaV2Registry(value: Record<string, unknown>): boolean {
+  return Number(value.schemaVersion) === 2;
+}
+
 function parseStoredTokens(raw: string | undefined): StoredGoogleAccountTokens | null {
   if (!raw) return null;
 
@@ -87,6 +249,9 @@ function parseStoredTokens(raw: string | undefined): StoredGoogleAccountTokens |
     tokenType: typeof parsed.tokenType === "string" ? parsed.tokenType : null,
     accountEmail:
       typeof parsed.accountEmail === "string" ? parsed.accountEmail : null,
+    accountSubject:
+      typeof parsed.accountSubject === "string" ? parsed.accountSubject : null,
+    scopePreset: normalizeScopePreset(parsed.scopePreset),
   };
 }
 
@@ -98,6 +263,8 @@ function serializeStoredTokens(tokens: StoredGoogleAccountTokens): string {
     scope: tokens.scope || null,
     tokenType: tokens.tokenType || null,
     accountEmail: tokens.accountEmail || null,
+    accountSubject: tokens.accountSubject || null,
+    scopePreset: normalizeScopePreset(tokens.scopePreset),
   });
 }
 
@@ -105,7 +272,7 @@ export async function resolveGoogleAccountTokens(
   uid: string,
   profileIdInput?: string | null
 ): Promise<GoogleAccountTokenResolution> {
-  const profileId = normalizeProfileId(profileIdInput);
+  const requestedProfileId = normalizeProfileId(profileIdInput);
   const registryRef = getAdminDb().collection(TOKEN_COLLECTION).doc(uid);
   const registrySnap = await registryRef.get();
   if (!registrySnap.exists) {
@@ -113,29 +280,32 @@ export async function resolveGoogleAccountTokens(
   }
 
   const registry = registrySnap.data() || {};
-  let accountId = "";
-
-  if (profileId) {
-    const bindingSnap = await registryRef
-      .collection(PROFILE_BINDING_SUBCOLLECTION)
-      .doc(profileId)
-      .get();
-    accountId = bindingSnap.exists
-      ? String(bindingSnap.data()?.accountId || "").trim()
-      : "";
-    if (!accountId) {
-      return { registryFound: true, profileMapped: false, record: null };
-    }
-  } else {
-    accountId = String(registry.defaultAccountId || "").trim();
-    if (!accountId) {
-      return { registryFound: true, profileMapped: false, record: null };
-    }
+  if (!requestedProfileId && !isSchemaV2Registry(registry)) {
+    return { registryFound: false, profileMapped: false, record: null };
+  }
+  const profileId =
+    requestedProfileId || normalizeProfileId(registry.defaultProfileId);
+  if (!profileId) {
+    return { registryFound: true, profileMapped: false, record: null };
+  }
+  const bindingSnap = await registryRef
+    .collection(PROFILE_BINDING_SUBCOLLECTION)
+    .doc(profileId)
+    .get();
+  const accountId = bindingSnap.exists
+    ? String(bindingSnap.data()?.accountId || "").trim()
+    : "";
+  if (!accountId) {
+    return { registryFound: true, profileMapped: false, record: null };
   }
 
   const accountRef = registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId);
   const accountSnap = await accountRef.get();
-  if (!accountSnap.exists || accountSnap.data()?.pendingRevocation === true) {
+  if (
+    !accountSnap.exists ||
+    accountSnap.data()?.pendingRevocation === true ||
+    operationId(accountSnap.data()?.credentialWriteOperationId)
+  ) {
     return {
       registryFound: true,
       profileMapped: Boolean(profileId),
@@ -148,9 +318,71 @@ export async function resolveGoogleAccountTokens(
   );
   return {
     registryFound: true,
-    profileMapped: Boolean(profileId),
+    profileMapped: true,
     record: { accountId, profileId, tokens },
   };
+}
+
+export async function getGoogleDefaultProfileId(uid: string): Promise<string | null> {
+  const snapshot = await getAdminDb().collection(TOKEN_COLLECTION).doc(uid).get();
+  if (!snapshot.exists) return null;
+  const data = snapshot.data() || {};
+  return isSchemaV2Registry(data)
+    ? normalizeProfileId(data.defaultProfileId)
+    : null;
+}
+
+export async function getGoogleAccountRegistryMode(
+  uid: string
+): Promise<"missing" | "legacy" | "schema_v2"> {
+  const snapshot = await getAdminDb().collection(TOKEN_COLLECTION).doc(uid).get();
+  if (!snapshot.exists) return "missing";
+  return isSchemaV2Registry(snapshot.data() || {}) ? "schema_v2" : "legacy";
+}
+
+export async function setGoogleDefaultProfileId(
+  uid: string,
+  profileIdInput: string
+): Promise<string> {
+  const profileId = normalizeProfileId(profileIdInput);
+  if (!profileId) throw new Error("Google account profile id is required");
+  const db = getAdminDb();
+  const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
+  const bindingRef = registryRef
+    .collection(PROFILE_BINDING_SUBCOLLECTION)
+    .doc(profileId);
+  await db.runTransaction(async (transaction) => {
+    const [registrySnapshot, bindingSnapshot] = await Promise.all([
+      transaction.get(registryRef),
+      transaction.get(bindingRef),
+    ]);
+    const registry = registrySnapshot.exists ? registrySnapshot.data() || {} : {};
+    if (!isSchemaV2Registry(registry) || !bindingSnapshot.exists) {
+      throw new Error("Google account profile is not connected");
+    }
+    const accountId = normalizeAccountId(bindingSnapshot.data()?.accountId);
+    if (!accountId) throw new Error("Google account binding is invalid");
+    const accountRef = registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId);
+    const accountSnapshot = await transaction.get(accountRef);
+    const account = accountSnapshot.exists ? accountSnapshot.data() || {} : {};
+    if (
+      !accountSnapshot.exists ||
+      account.pendingRevocation === true ||
+      operationId(account.credentialWriteOperationId)
+    ) {
+      throw new Error("Google account profile needs to be reconnected");
+    }
+    transaction.set(
+      registryRef,
+      {
+        defaultProfileId: profileId,
+        defaultAccountId: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+  return profileId;
 }
 
 export async function persistGoogleAccountTokens(
@@ -158,17 +390,73 @@ export async function persistGoogleAccountTokens(
   accountId: string,
   tokens: StoredGoogleAccountTokens
 ): Promise<void> {
-  const refreshedAt = new Date().toISOString();
-  await setUserSecret(uid, accountSecretKey(accountId), serializeStoredTokens(tokens));
-  await getAdminDb()
+  const db = getAdminDb();
+  const accountRef = db
     .collection(TOKEN_COLLECTION)
     .doc(uid)
     .collection(ACCOUNT_SUBCOLLECTION)
-    .doc(accountId)
-    .set(
+    .doc(accountId);
+  const credentialWriteOperationId = randomUUID();
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(accountRef);
+    const data = snapshot.exists ? snapshot.data() || {} : {};
+    if (
+      !snapshot.exists ||
+      data.pendingRevocation === true ||
+      operationId(data.credentialWriteOperationId)
+    ) {
+      throw new Error("Google account credential update is not available");
+    }
+    transaction.set(
+      accountRef,
+      {
+        credentialWriteOperationId,
+        oauthHealthStatus: "refreshing",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+
+  const refreshedAt = new Date().toISOString();
+  try {
+    await setUserSecret(uid, accountSecretKey(accountId), serializeStoredTokens(tokens));
+  } catch (error) {
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(accountRef);
+      if (
+        operationId(snapshot.data()?.credentialWriteOperationId) ===
+        credentialWriteOperationId
+      ) {
+        transaction.set(
+          accountRef,
+          {
+            credentialWriteOperationId: null,
+            oauthHealthStatus: "refresh_due",
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    });
+    throw error;
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(accountRef);
+    const data = snapshot.exists ? snapshot.data() || {} : {};
+    if (
+      data.pendingRevocation === true ||
+      operationId(data.credentialWriteOperationId) !== credentialWriteOperationId
+    ) {
+      throw new Error("Google account credential update lost its lock");
+    }
+    transaction.set(
+      accountRef,
       {
         expiryDate: tokens.expiryDate || null,
         scope: tokens.scope || null,
+        scopePreset: normalizeScopePreset(tokens.scopePreset),
         tokenType: tokens.tokenType || null,
         oauthHealthStatus: "healthy",
         lastRefreshStatus: "ok",
@@ -177,93 +465,245 @@ export async function persistGoogleAccountTokens(
         lastRefreshErrorCode: null,
         lastRefreshErrorMessage: null,
         lastRefreshErrorAt: null,
+        credentialWriteOperationId: null,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
+  });
 }
 
-/**
- * Stores a completed OAuth grant in the existing schema-v2 profile registry.
- * Credentials remain in Secret Manager; Firestore receives only binding and
- * health metadata. The profile-derived fallback account id makes callback
- * retries idempotent without adding Google identity data to Firestore.
- */
+/** Stores a completed, stable-subject-bound OAuth grant in schema v2. */
 export async function persistGoogleAccountProfileTokens(
   uid: string,
   profileIdInput: string,
-  tokens: StoredGoogleAccountTokens
+  tokens: StoredGoogleAccountTokens,
+  scopePresetInput: GoogleAccountScopePreset
 ): Promise<PersistedGoogleAccountProfile> {
   const profileId = normalizeProfileId(profileIdInput);
-  if (!profileId) {
-    throw new Error("Google account profile id is required");
+  if (!profileId) throw new Error("Google account profile id is required");
+  const scopePreset = normalizeScopePreset(scopePresetInput);
+  if (!scopePreset || !isBoundedScopeForPreset(scopePreset, tokens.scope)) {
+    throw new Error("Google account grant scope is invalid");
+  }
+  const incomingAccountEmail = normalizedAccountEmail(tokens.accountEmail);
+  const incomingAccountSubject = normalizedAccountSubject(tokens.accountSubject);
+  if (!incomingAccountEmail || !incomingAccountSubject) {
+    throw new Error("Google account identity is required");
   }
 
-  const registryRef = getAdminDb().collection(TOKEN_COLLECTION).doc(uid);
-  const [registrySnap, bindingSnap] = await Promise.all([
-    registryRef.get(),
-    registryRef.collection(PROFILE_BINDING_SUBCOLLECTION).doc(profileId).get(),
-  ]);
-  const existingAccountId = bindingSnap.exists
-    ? normalizeAccountId(bindingSnap.data()?.accountId)
-    : null;
-  const accountId = existingAccountId || `profile-${profileId}`;
+  const db = getAdminDb();
+  const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
+  const bindingRef = registryRef
+    .collection(PROFILE_BINDING_SUBCOLLECTION)
+    .doc(profileId);
+  const accountId = googleAccountIdForSubject(uid, incomingAccountSubject);
+  const accountRef = registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId);
+  const credentialWriteOperationId = randomUUID();
+
+  const reservation = await db.runTransaction(async (transaction) => {
+    const bindingSnapshot = await transaction.get(bindingRef);
+    const existingAccountId = bindingSnapshot.exists
+      ? normalizeAccountId(bindingSnapshot.data()?.accountId)
+      : null;
+    if (existingAccountId && existingAccountId !== accountId) {
+      throw new GoogleAccountProfileReplacementRequiresDisconnectError();
+    }
+    const [accountSnapshot, destinationBindings] = await Promise.all([
+      transaction.get(accountRef),
+      transaction.get(
+        registryRef
+          .collection(PROFILE_BINDING_SUBCOLLECTION)
+          .where("accountId", "==", accountId)
+          .limit(3)
+      ),
+    ]);
+    if (destinationBindings.docs.some((document) => document.id !== profileId)) {
+      throw new GoogleAccountProfileConflictError();
+    }
+    const accountData = accountSnapshot.exists ? accountSnapshot.data() || {} : {};
+    if (
+      accountData.pendingRevocation === true ||
+      operationId(accountData.credentialWriteOperationId)
+    ) {
+      throw new Error("Google account connection is already changing");
+    }
+
+    transaction.set(
+      accountRef,
+      {
+        credentialWriteOperationId,
+        oauthHealthStatus: "connecting",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    transaction.set(
+      bindingRef,
+      {
+        accountId,
+        credentialWriteOperationId,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return {
+      bindingExisted: bindingSnapshot.exists,
+      existingAccountId,
+      destinationAccountExisted: accountSnapshot.exists,
+    };
+  });
+
+  const abortReservation = async () => {
+    await db.runTransaction(async (transaction) => {
+      const bindingSnapshot = await transaction.get(bindingRef);
+      const destinationSnapshot = await transaction.get(accountRef);
+      if (
+        operationId(bindingSnapshot.data()?.credentialWriteOperationId) ===
+        credentialWriteOperationId
+      ) {
+        if (reservation.bindingExisted && reservation.existingAccountId) {
+          transaction.set(
+            bindingRef,
+            {
+              accountId: reservation.existingAccountId,
+              credentialWriteOperationId: null,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } else {
+          transaction.delete(bindingRef);
+        }
+      }
+      if (
+        operationId(destinationSnapshot.data()?.credentialWriteOperationId) ===
+        credentialWriteOperationId
+      ) {
+        if (reservation.destinationAccountExisted) {
+          transaction.set(
+            accountRef,
+            {
+              credentialWriteOperationId: null,
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } else {
+          transaction.delete(accountRef);
+        }
+      }
+    });
+  };
 
   let existingTokens: StoredGoogleAccountTokens | null = null;
-  if (existingAccountId) {
-    existingTokens = parseStoredTokens(
-      await accessUserSecret(uid, accountSecretKey(existingAccountId))
-    );
+  try {
+    existingTokens =
+      reservation.existingAccountId || reservation.destinationAccountExisted
+      ? parseStoredTokens(await accessUserSecret(uid, accountSecretKey(accountId)))
+      : null;
+  } catch (error) {
+    await abortReservation();
+    throw error;
   }
-
-  const incomingAccountEmail = normalizedAccountEmail(tokens.accountEmail);
-  const existingAccountEmail = normalizedAccountEmail(existingTokens?.accountEmail);
-  const mayReuseExistingRefreshToken = Boolean(
-    existingTokens?.refreshToken &&
-      incomingAccountEmail &&
-      existingAccountEmail &&
-      incomingAccountEmail === existingAccountEmail
+  const sameSubjectExisting =
+    normalizedAccountSubject(existingTokens?.accountSubject) === incomingAccountSubject
+      ? existingTokens
+      : null;
+  const mayReuseRefreshToken = Boolean(
+    sameSubjectExisting?.refreshToken &&
+      normalizeScopePreset(sameSubjectExisting.scopePreset) === scopePreset &&
+      isBoundedScopeForPreset(scopePreset, sameSubjectExisting.scope) &&
+      scopeSetsMatch(sameSubjectExisting.scope, tokens.scope)
   );
 
   const mergedTokens: StoredGoogleAccountTokens = {
-    accessToken: tokens.accessToken ?? existingTokens?.accessToken ?? null,
+    accessToken:
+      tokens.accessToken ??
+      sameSubjectExisting?.accessToken ??
+      null,
     refreshToken:
       tokens.refreshToken ??
-      (mayReuseExistingRefreshToken ? existingTokens?.refreshToken : null),
-    expiryDate: tokens.expiryDate ?? existingTokens?.expiryDate ?? null,
-    scope: tokens.scope ?? existingTokens?.scope ?? null,
-    tokenType: tokens.tokenType ?? existingTokens?.tokenType ?? null,
-    accountEmail: incomingAccountEmail ?? existingAccountEmail ?? null,
+      (mayReuseRefreshToken ? sameSubjectExisting?.refreshToken : null) ??
+      null,
+    expiryDate:
+      tokens.expiryDate ??
+      sameSubjectExisting?.expiryDate ??
+      null,
+    scope: tokens.scope ?? null,
+    tokenType:
+      tokens.tokenType ??
+      sameSubjectExisting?.tokenType ??
+      null,
+    accountEmail: incomingAccountEmail,
+    accountSubject: incomingAccountSubject,
+    scopePreset,
   };
   if (!mergedTokens.refreshToken) {
+    await abortReservation();
     throw new Error("Missing refresh token from Google");
   }
 
   const refreshedAt = new Date().toISOString();
-  await setUserSecret(uid, accountSecretKey(accountId), serializeStoredTokens(mergedTokens));
-
-  const registryData = registrySnap.exists ? registrySnap.data() || {} : {};
-  const registryUpdate: Record<string, unknown> = {
-    schemaVersion: 2,
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (!String(registryData.defaultAccountId || "").trim()) {
-    registryUpdate.defaultAccountId = accountId;
+  try {
+    await setUserSecret(
+      uid,
+      accountSecretKey(accountId),
+      serializeStoredTokens(mergedTokens)
+    );
+  } catch (error) {
+    await abortReservation();
+    throw error;
   }
 
-  await Promise.all([
-    registryRef.set(registryUpdate, { merge: true }),
-    registryRef.collection(PROFILE_BINDING_SUBCOLLECTION).doc(profileId).set(
+  await db.runTransaction(async (transaction) => {
+    const [bindingSnapshot, accountSnapshot] = await Promise.all([
+      transaction.get(bindingRef),
+      transaction.get(accountRef),
+    ]);
+    if (
+      !bindingSnapshot.exists ||
+      bindingSnapshot.data()?.accountId !== accountId ||
+      operationId(bindingSnapshot.data()?.credentialWriteOperationId) !==
+        credentialWriteOperationId ||
+      !accountSnapshot.exists ||
+      accountSnapshot.data()?.pendingRevocation === true ||
+      operationId(accountSnapshot.data()?.credentialWriteOperationId) !==
+        credentialWriteOperationId
+    ) {
+      throw new Error("Google account connection lost its lock");
+    }
+
+    transaction.set(
+      registryRef,
       {
-        accountId,
+        schemaVersion: 2,
+        defaultAccountId: FieldValue.delete(),
+        accessToken: FieldValue.delete(),
+        refreshToken: FieldValue.delete(),
+        expiryDate: FieldValue.delete(),
+        scope: FieldValue.delete(),
+        scopePreset: FieldValue.delete(),
+        tokenType: FieldValue.delete(),
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
-    ),
-    registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId).set(
+    );
+    transaction.set(
+      bindingRef,
+      {
+        accountId,
+        credentialWriteOperationId: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    transaction.set(
+      accountRef,
       {
         expiryDate: mergedTokens.expiryDate || null,
         scope: mergedTokens.scope || null,
+        scopePreset,
         tokenType: mergedTokens.tokenType || null,
         oauthHealthStatus: "healthy",
         lastRefreshStatus: "ok",
@@ -273,11 +713,13 @@ export async function persistGoogleAccountProfileTokens(
         lastRefreshErrorMessage: null,
         lastRefreshErrorAt: null,
         pendingRevocation: false,
+        pendingRevocationOperationId: null,
+        credentialWriteOperationId: null,
         updatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
-    ),
-  ]);
+    );
+  });
 
   return { accountId, profileId };
 }
@@ -315,4 +757,179 @@ export async function persistGoogleAccountTokenFailure(
       },
       { merge: true }
     );
+}
+
+export async function beginGoogleAccountProfileDisconnect(
+  uid: string,
+  profileIdInput: string
+): Promise<GoogleAccountProfileDisconnect> {
+  const profileId = normalizeProfileId(profileIdInput);
+  if (!profileId) throw new Error("Google account profile id is required");
+
+  const db = getAdminDb();
+  const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
+  const bindingRef = registryRef
+    .collection(PROFILE_BINDING_SUBCOLLECTION)
+    .doc(profileId);
+  const newOperationId = randomUUID();
+
+  const result = await db.runTransaction(async (transaction) => {
+    const [registrySnapshot, bindingSnapshot] = await Promise.all([
+      transaction.get(registryRef),
+      transaction.get(bindingRef),
+    ]);
+    if (!bindingSnapshot.exists) {
+      return {
+        accountId: null,
+        operationId: null,
+        localCredentialDeletionRequired: false,
+      };
+    }
+    const accountId = normalizeAccountId(bindingSnapshot.data()?.accountId);
+    if (!accountId) throw new Error("Google account binding is invalid");
+
+    const accountRef = registryRef
+      .collection(ACCOUNT_SUBCOLLECTION)
+      .doc(accountId);
+    const sharedBindingsQuery = registryRef
+      .collection(PROFILE_BINDING_SUBCOLLECTION)
+      .where("accountId", "==", accountId)
+      .limit(3);
+    const [accountSnapshot, sharedBindingsSnapshot] = await Promise.all([
+      transaction.get(accountRef),
+      transaction.get(sharedBindingsQuery),
+    ]);
+    const account = accountSnapshot.exists ? accountSnapshot.data() || {} : {};
+    if (!accountSnapshot.exists) {
+      throw new Error("Google account binding is unavailable");
+    }
+    if (operationId(account.credentialWriteOperationId)) {
+      throw new Error("Google account connection is already changing");
+    }
+    const otherBindingExists = sharedBindingsSnapshot.docs.some(
+      (document) => document.id !== profileId
+    );
+    if (otherBindingExists) {
+      transaction.delete(bindingRef);
+      if (registrySnapshot.data()?.defaultProfileId === profileId) {
+        transaction.set(
+          registryRef,
+          {
+            defaultProfileId: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+      return {
+        accountId,
+        operationId: null,
+        localCredentialDeletionRequired: false,
+      };
+    }
+
+    const existingOperationId = operationId(account.pendingRevocationOperationId);
+    if (account.pendingRevocation === true && !existingOperationId) {
+      throw new Error("Google account disconnect state is invalid");
+    }
+    const pendingOperationId = existingOperationId || newOperationId;
+    transaction.set(
+      accountRef,
+      {
+        pendingRevocation: true,
+        pendingRevocationOperationId: pendingOperationId,
+        oauthHealthStatus: "disconnecting",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return {
+      accountId,
+      operationId: pendingOperationId,
+      localCredentialDeletionRequired: true,
+    };
+  });
+  return { profileId, ...result };
+}
+
+export async function finishGoogleAccountProfileDisconnect(
+  uid: string,
+  profileIdInput: string,
+  accountIdInput: string,
+  operationIdInput: string
+): Promise<void> {
+  const profileId = normalizeProfileId(profileIdInput);
+  const accountId = normalizeAccountId(accountIdInput);
+  const expectedOperationId = operationId(operationIdInput);
+  if (!profileId || !accountId || !expectedOperationId) {
+    throw new Error("Invalid Google disconnect binding");
+  }
+  const db = getAdminDb();
+  const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
+  const bindingRef = registryRef
+    .collection(PROFILE_BINDING_SUBCOLLECTION)
+    .doc(profileId);
+  const accountRef = registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId);
+
+  const assertOperation = async () =>
+    db.runTransaction(async (transaction) => {
+      const [bindingSnapshot, accountSnapshot, sharedBindingsSnapshot] =
+        await Promise.all([
+          transaction.get(bindingRef),
+          transaction.get(accountRef),
+          transaction.get(
+            registryRef
+              .collection(PROFILE_BINDING_SUBCOLLECTION)
+              .where("accountId", "==", accountId)
+              .limit(3)
+          ),
+        ]);
+      if (
+        !bindingSnapshot.exists ||
+        normalizeAccountId(bindingSnapshot.data()?.accountId) !== accountId ||
+        !accountSnapshot.exists ||
+        accountSnapshot.data()?.pendingRevocation !== true ||
+        operationId(accountSnapshot.data()?.pendingRevocationOperationId) !==
+          expectedOperationId ||
+        operationId(accountSnapshot.data()?.credentialWriteOperationId) ||
+        sharedBindingsSnapshot.docs.some((document) => document.id !== profileId)
+      ) {
+        throw new Error("Google disconnect operation changed");
+      }
+    });
+
+  await assertOperation();
+  await deleteUserSecret(uid, accountSecretKey(accountId));
+
+  await db.runTransaction(async (transaction) => {
+    const [registrySnapshot, bindingSnapshot, accountSnapshot] = await Promise.all([
+      transaction.get(registryRef),
+      transaction.get(bindingRef),
+      transaction.get(accountRef),
+    ]);
+    if (
+      !bindingSnapshot.exists ||
+      normalizeAccountId(bindingSnapshot.data()?.accountId) !== accountId ||
+      !accountSnapshot.exists ||
+      accountSnapshot.data()?.pendingRevocation !== true ||
+      operationId(accountSnapshot.data()?.pendingRevocationOperationId) !==
+        expectedOperationId ||
+      operationId(accountSnapshot.data()?.credentialWriteOperationId)
+    ) {
+      throw new Error("Google disconnect operation changed");
+    }
+    transaction.delete(bindingRef);
+    transaction.delete(accountRef);
+    if (registrySnapshot.data()?.defaultProfileId === profileId) {
+      transaction.set(
+        registryRef,
+        {
+          defaultProfileId: FieldValue.delete(),
+          defaultAccountId: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+  });
 }

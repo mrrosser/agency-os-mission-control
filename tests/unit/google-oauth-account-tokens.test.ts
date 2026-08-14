@@ -62,6 +62,11 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
     getAccessTokenMock.mockResolvedValue({ token: "refreshed-access-token" });
     persistGoogleAccountTokensMock.mockResolvedValue(undefined);
     persistGoogleAccountTokenFailureMock.mockResolvedValue(undefined);
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: false,
+      profileMapped: false,
+      record: null,
+    });
     getAdminDbMock.mockReturnValue({
       collection: vi.fn(() => ({
         doc: vi.fn(() => ({ get: legacyGetMock })),
@@ -95,7 +100,7 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
     expect(persistGoogleAccountTokensMock).not.toHaveBeenCalled();
   });
 
-  it("leaves no-profile callers on the legacy token path", async () => {
+  it("keeps only genuinely pre-v2 no-profile callers on the transitional legacy path", async () => {
     legacyGetMock.mockResolvedValue({
       exists: true,
       data: () => ({
@@ -108,8 +113,83 @@ describe("getAccessTokenForUser with schema-v2 Google accounts", () => {
     const token = await getAccessTokenForUser("uid-1");
 
     expect(token).toBe("legacy-access-token");
-    expect(resolveGoogleAccountTokensMock).not.toHaveBeenCalled();
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledWith("uid-1", null);
     expect(getAdminDbMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses the exact explicit schema-v2 default for a no-profile caller", async () => {
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: true,
+      record: {
+        accountId: "rosser-account",
+        profileId: "rosser_gallery_work",
+        tokens: {
+          accessToken: "rosser-default-access-token",
+          refreshToken: "rosser-default-refresh-token",
+          expiryDate: Date.now() + 3_600_000,
+        },
+      },
+    });
+    legacyGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        accessToken: "legacy-access-token",
+        refreshToken: "legacy-refresh-token",
+        expiryDate: Date.now() + 3_600_000,
+      }),
+    });
+
+    await expect(getAccessTokenForUser("uid-1")).resolves.toBe(
+      "rosser-default-access-token"
+    );
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledWith("uid-1", null);
+    expect(getAdminDbMock).not.toHaveBeenCalled();
+  });
+
+  it("never falls back to valid legacy credentials when schema v2 has no default", async () => {
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: false,
+      record: null,
+    });
+    legacyGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        accessToken: "legacy-access-token",
+        refreshToken: "legacy-refresh-token",
+        expiryDate: Date.now() + 3_600_000,
+      }),
+    });
+
+    await expect(getAccessTokenForUser("uid-1")).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining("default Google organization profile"),
+    });
+    expect(getAdminDbMock).not.toHaveBeenCalled();
+    expect(oauthClientMock).not.toHaveBeenCalled();
+  });
+
+  it("never falls back to legacy credentials when the explicit default needs reconnecting", async () => {
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: true,
+      record: null,
+    });
+    legacyGetMock.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        accessToken: "legacy-access-token",
+        refreshToken: "legacy-refresh-token",
+        expiryDate: Date.now() + 3_600_000,
+      }),
+    });
+
+    await expect(getAccessTokenForUser("uid-1")).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining("default Google organization profile"),
+    });
+    expect(getAdminDbMock).not.toHaveBeenCalled();
   });
 
   it("refreshes an expired profile token back into Secret Manager storage", async () => {

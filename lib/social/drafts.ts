@@ -23,6 +23,9 @@ export type SocialDraftChannel =
   | "facebook_story"
   | "facebook_post";
 
+export type SocialDraftBusinessKey = "aicf" | "rng" | "rts";
+export type ActiveSocialDraftBusinessKey = Exclude<SocialDraftBusinessKey, "aicf">;
+
 export interface SocialDraftMediaAsset {
   type: "image" | "video";
   url: string;
@@ -33,7 +36,7 @@ export interface SocialDraftMediaAsset {
 export interface SocialDraftRecord {
   draftId: string;
   uid: string;
-  businessKey: "aicf" | "rng" | "rts";
+  businessKey: SocialDraftBusinessKey;
   channels: SocialDraftChannel[];
   caption: string;
   media: SocialDraftMediaAsset[];
@@ -61,7 +64,7 @@ export interface SocialDraftRecord {
 
 export interface CreateSocialDraftInput {
   uid: string;
-  businessKey: "aicf" | "rng" | "rts";
+  businessKey: ActiveSocialDraftBusinessKey;
   channels: SocialDraftChannel[];
   caption: string;
   media: SocialDraftMediaAsset[];
@@ -87,7 +90,7 @@ export interface SocialDraftExecutionQueuePayload {
   queueId: string;
   uid: string;
   draftId: string;
-  businessKey: "aicf" | "rng" | "rts";
+  businessKey: SocialDraftBusinessKey;
   channels: SocialDraftChannel[];
   caption: string;
   media: SocialDraftMediaAsset[];
@@ -160,7 +163,7 @@ function asTimestampIso(value: unknown): string | null {
   return null;
 }
 
-function normalizeBusinessKey(value: unknown): "aicf" | "rng" | "rts" {
+function normalizeBusinessKey(value: unknown): SocialDraftBusinessKey {
   const normalized = asString(value).toLowerCase();
   if (normalized === "aicf" || normalized === "rng" || normalized === "rts") return normalized;
   return "aicf";
@@ -445,11 +448,12 @@ export function buildGoogleChatSocialDraftCard(args: {
   };
 }
 
-function resolveBusinessWebhookEnvKey(businessKey: "aicf" | "rng" | "rts"): string {
+function resolveBusinessWebhookEnvKey(businessKey: ActiveSocialDraftBusinessKey): string {
   return `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_${businessKey.toUpperCase()}`;
 }
 
-export function resolveSocialDraftWebhookUrl(businessKey: "aicf" | "rng" | "rts"): string | null {
+export function resolveSocialDraftWebhookUrl(businessKey: SocialDraftBusinessKey): string | null {
+  if (businessKey === "aicf") return null;
   const businessSpecific = asString(process.env[resolveBusinessWebhookEnvKey(businessKey)]);
   if (businessSpecific) return businessSpecific;
   const defaultWebhook = asString(process.env.SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL);
@@ -462,6 +466,9 @@ export function buildSocialDispatchQueuePayload(args: {
   correlationId: string;
   queuedAt: string;
 }): SocialDraftExecutionQueuePayload {
+  if (args.draft.businessKey === "aicf") {
+    throw new ApiError(410, "This social draft belongs to a retired business lane");
+  }
   return {
     queueId: socialDispatchQueueDocId(args.draft.draftId),
     uid: args.draft.uid,
@@ -479,6 +486,9 @@ export function buildSocialDispatchQueuePayload(args: {
 }
 
 export async function createSocialDraft(args: CreateSocialDraftInput): Promise<CreateSocialDraftResult> {
+  if ((args.businessKey as SocialDraftBusinessKey) === "aicf") {
+    throw new ApiError(410, "The AICF social draft lane is retired");
+  }
   const now = new Date();
   const approvalTtlHours = Math.max(1, Math.min(24 * 14, args.approvalTtlHours ?? 168));
   const expiresAt = new Date(now.getTime() + approvalTtlHours * 60 * 60 * 1000);
@@ -773,6 +783,15 @@ export async function decideSocialDraftWithToken(args: {
 
     const status: SocialDraftStatus = args.decision === "approve" ? "approved" : "rejected";
     const draftRecord = toSocialDraftRecord(args.draftId, data as SocialDraftDoc);
+    if (args.decision === "approve" && draftRecord.businessKey === "aicf") {
+      args.log.warn("social.draft.retired_business_approval_blocked", {
+        uid: args.uid,
+        draftId: args.draftId,
+        businessKey: draftRecord.businessKey,
+        correlationId: args.correlationId,
+      });
+      throw new ApiError(410, "This social draft belongs to a retired business lane");
+    }
     let queueDocId: string | null = null;
     let queuedForExternalDispatch = false;
 

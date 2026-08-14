@@ -109,14 +109,12 @@ export function buildRuntimePreflightReport(): RuntimePreflightReport {
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL") ||
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS") ||
     hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RNG") ||
-    hasEnv("SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_AICF") ||
     hasEnv("GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL");
   const dispatchStatusNotifyEnabled = parseBoolean(process.env.SOCIAL_DISPATCH_STATUS_NOTIFY, true);
   const hasDispatchStatusWebhook =
     hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL") ||
     hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS") ||
     hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RNG") ||
-    hasEnv("SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_AICF") ||
     hasSocialDraftWebhook;
 
   const budgetCost = parsePositiveNumber(process.env.LEAD_SOURCE_BUDGET_MAX_COST_USD);

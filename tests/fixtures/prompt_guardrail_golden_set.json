@@ -19,7 +19,7 @@
     "name": "multi_option_question",
     "raw_prompt": "Should I reply with a quick call option or keep it async?",
     "inputs": [
-      { "name": "routeKey", "value": "ai_cofoundry" },
+      { "name": "routeKey", "value": "rt_solutions" },
       { "name": "replyEmail", "value": "ops@example.com" },
       { "name": "subject", "value": "pilot scope" },
       { "name": "threadContext", "value": "present" }

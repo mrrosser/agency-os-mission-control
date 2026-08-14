@@ -121,45 +121,41 @@ describe("follow-up Google work-profile routing", () => {
     );
   });
 
-  it("keeps AICF on the existing no-profile token path", async () => {
+  it("fails closed for a retired AICF follow-up job", async () => {
     loadLeadRunJobMock.mockResolvedValue({
       config: { businessKey: "aicf" },
     });
 
-    await processDueFollowupDraftTasks({
-      runId: "run-aicf",
-      orgId: "org-1",
-      uid: "uid-1",
-      maxTasks: 5,
-      dryRun: false,
-    });
+    await expect(
+      processDueFollowupDraftTasks({
+        runId: "run-aicf",
+        orgId: "org-1",
+        uid: "uid-1",
+        maxTasks: 5,
+        dryRun: false,
+      })
+    ).rejects.toMatchObject({ status: 409, message: "The AICF lead-run lane is retired" });
 
-    expect(getAccessTokenForUserMock).toHaveBeenCalledWith(
-      "uid-1",
-      undefined,
-      { profileId: null }
-    );
+    expect(getAccessTokenForUserMock).not.toHaveBeenCalled();
   });
 
-  it("uses an explicit AICF profile override without borrowing another lane", async () => {
+  it("does not let an old AICF profile override reactivate the retired lane", async () => {
     process.env.LEAD_RUNS_GOOGLE_PROFILE_AICF = "aicf_work";
     loadLeadRunJobMock.mockResolvedValue({
       config: { businessKey: "aicf" },
     });
 
-    await processDueFollowupDraftTasks({
-      runId: "run-aicf-override",
-      orgId: "org-1",
-      uid: "uid-1",
-      maxTasks: 5,
-      dryRun: false,
-    });
+    await expect(
+      processDueFollowupDraftTasks({
+        runId: "run-aicf-override",
+        orgId: "org-1",
+        uid: "uid-1",
+        maxTasks: 5,
+        dryRun: false,
+      })
+    ).rejects.toMatchObject({ status: 409, message: "The AICF lead-run lane is retired" });
 
-    expect(getAccessTokenForUserMock).toHaveBeenCalledWith(
-      "uid-1",
-      undefined,
-      { profileId: "aicf_work" }
-    );
+    expect(getAccessTokenForUserMock).not.toHaveBeenCalled();
   });
 
   it.each([

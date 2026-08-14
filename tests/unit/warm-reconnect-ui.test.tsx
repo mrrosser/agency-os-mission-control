@@ -137,6 +137,9 @@ describe("warm reconnect campaign UI", () => {
     expect(source).toContain('const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation"');
     expect(source).toContain('scopePreset: "gmail_send"');
     expect(source).toContain('returnTo: "/dashboard/crm"');
+    expect(source).not.toContain(
+      "profileId: profile.profileId,\n          idempotencyKey,"
+    );
     expect(source).toContain('authUrl.hostname !== "accounts.google.com"');
     expect(source).toContain("availableActions.canApprove");
     expect(source).toContain("availableActions.canLaunch");

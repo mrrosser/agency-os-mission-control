@@ -132,6 +132,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+          MISSION_CONTROL_PUBLIC_ORIGIN: https://leadflow-review.web.app
           LEAD_RUNS_TASK_QUEUE: ${{ vars.LEAD_RUNS_TASK_QUEUE || 'lead-runs-worker' }}
           LEAD_RUNS_TASK_LOCATION: ${{ vars.LEAD_RUNS_TASK_LOCATION || 'us-central1' }}
           LEAD_RUNS_TASK_SERVICE_ACCOUNT: ${{ vars.LEAD_RUNS_TASK_SERVICE_ACCOUNT || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
@@ -163,6 +164,10 @@ jobs:
           REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN: ${{ vars.REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN || 'true' }}
         run: |
           set -euo pipefail
+          if [ "$MISSION_CONTROL_PUBLIC_ORIGIN" != "https://leadflow-review.web.app" ]; then
+            echo "Mission Control public origin must exactly match the canonical Firebase Hosting origin."
+            exit 1
+          fi
           SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
@@ -231,6 +236,7 @@ jobs:
             fi
           }
           append_env_update "LEAD_RUNS_TASK_QUEUE" "$LEAD_RUNS_TASK_QUEUE"
+          append_env_update "MISSION_CONTROL_PUBLIC_ORIGIN" "$MISSION_CONTROL_PUBLIC_ORIGIN"
           append_env_update "LEAD_RUNS_TASK_LOCATION" "$LEAD_RUNS_TASK_LOCATION"
           append_env_update "LEAD_RUNS_TASK_SERVICE_ACCOUNT" "$LEAD_RUNS_TASK_SERVICE_ACCOUNT"
           append_env_update "LEAD_SOURCE_BUDGET_MAX_COST_USD" "$LEAD_SOURCE_BUDGET_MAX_COST_USD"
@@ -307,8 +313,13 @@ jobs:
             --format=json)"
           RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$RUNTIME_REVISION_STATE")"
           RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$RUNTIME_REVISION_STATE")"
+          RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN="$(jq -r '[.spec.containers[0].env[]? | select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
           if [ "$RUNTIME_IMAGE" != "$DEPLOY_IMAGE" ] || [ "$RUNTIME_READY" != "True" ]; then
             echo "Runtime revision image or readiness does not match the Firebase deployment."
+            exit 1
+          fi
+          if [ "$RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN" != "$MISSION_CONTROL_PUBLIC_ORIGIN" ]; then
+            echo "Runtime revision is missing the exact canonical Mission Control public origin."
             exit 1
           fi
           if ! jq -e '.spec.containers[0].env | map(.name) | index("AGENT_ACTION_ALLOWED_UIDS") != null' \

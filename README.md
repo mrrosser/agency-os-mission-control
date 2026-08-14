@@ -44,8 +44,8 @@ copy .env.local.example .env.local
 - Optional (competitor monitor scheduler): `COMPETITOR_MONITOR_TASK_QUEUE`, `COMPETITOR_MONITOR_TASK_LOCATION`, `COMPETITOR_MONITOR_TASK_SERVICE_ACCOUNT` (falls back to `LEAD_RUNS_*` queue vars when omitted)
 - Optional (service-to-service Day 1 worker): `REVENUE_DAY1_WORKER_TOKEN`
 - Optional (service-to-service Day 2 worker): `REVENUE_DAY2_WORKER_TOKEN` (falls back to Day 1 token when unset)
-- Optional (social draft approvals + dispatch): `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist via `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`), `SMAUTO_MCP_SERVER_URL`
-- Optional (dispatch status updates in Google Chat): `SOCIAL_DISPATCH_STATUS_NOTIFY`, `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG|AICF`)
+- Optional (social draft approvals + dispatch): `SOCIAL_DRAFT_WORKER_TOKEN` (or OIDC allowlist via `SOCIAL_DRAFT_WORKER_OIDC_SERVICE_ACCOUNT_EMAILS`), `SOCIAL_DRAFT_APPROVAL_BASE_URL`, `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DRAFT_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG`), `SMAUTO_MCP_SERVER_URL`
+- Optional (dispatch status updates in Google Chat): `SOCIAL_DISPATCH_STATUS_NOTIFY`, `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL` (or business-specific `SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_RTS|RNG`)
 - Optional (social onboarding UX): `NEXT_PUBLIC_SOCIALOPS_CONNECTIONS_URL` (external SocialOps connections page URL shown in onboarding checklist)
 - Optional (bounded revenue-auth cutover only): start with `REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN=true`; after the OIDC canary succeeds, set it explicitly to `false` and then remove all legacy worker-token secret references (removing the flag alone safely defaults back to `true`)
 - Optional (recommended quotas): `LEAD_RUNS_MAX_RUNS_PER_DAY`, `LEAD_RUNS_MAX_LEADS_PER_DAY`, `LEAD_RUN_FAILURE_ALERT_THRESHOLD`
@@ -388,6 +388,10 @@ Required GitHub Actions configuration:
   - `vars.LEADOPS_MCP_AUTH_MODE` (defaults to `id_token`)
   - `vars.LEADOPS_MCP_ID_TOKEN_AUDIENCE` (defaults to `https://ai-cofoundry-mcp-hub-7irsjzrysa-uc.a.run.app`)
   - `secrets.LEADOPS_MCP_API_KEY` (only required when `LEADOPS_MCP_AUTH_MODE=api_key`)
+
+The `ai-cofoundry-mcp-hub` hostname above is a legacy immutable Cloud Run
+resource identifier, not an active business label. Keep it until the MCP hub is
+dual-deployed under an RT.Solutions resource name and its audience is cut over.
 
 Production health monitor:
 - `.github/workflows/postdeploy-health-monitor.yml` runs authenticated smoke on a schedule.

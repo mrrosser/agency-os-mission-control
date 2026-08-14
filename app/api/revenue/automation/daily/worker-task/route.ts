@@ -25,7 +25,7 @@ const stageSchema = z.enum(["day1", "day2", "day30"]);
 
 const bodySchema = z.object({
   uid: z.string().trim().min(1).max(128).optional(),
-  businessKey: z.enum(["aicf", "rng", "rts"]),
+  businessKey: z.enum(["rng", "rts"]),
   timeZone: z.string().trim().min(1).max(80).optional(),
   runStages: z.array(stageSchema).min(1).max(3).optional(),
   dueOnly: z.boolean().default(true),

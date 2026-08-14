@@ -9,7 +9,6 @@ description: Maintain a cross-business executive memory loop and generate approv
 Create one shared operational intelligence loop across all business units:
 - RT Solutions
 - Rosser NFT Gallery
-- AI CoFoundry
 
 ## Inputs
 - Pipeline state by business (`lead_capture -> won/lost`)

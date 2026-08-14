@@ -3,15 +3,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { readBoundedRequestBody } from "@/lib/api/bounded-body";
-import { getIdempotencyKey, withIdempotency } from "@/lib/api/idempotency";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import {
   GoogleBusinessProfileContextError,
   resolveGoogleBusinessProfileContext,
 } from "@/lib/google/business-profiles";
 import { getGoogleAuthUrl, resolveMissionControlOrigin } from "@/lib/google/oauth";
+import {
+  createGoogleOAuthPkceBinding,
+  GOOGLE_OAUTH_ATTEMPT_COLLECTION,
+  GOOGLE_OAUTH_STATE_COLLECTION,
+  GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS,
+  googleOAuthAttemptDocumentId,
+  isGoogleOAuthStateIdentifier,
+  setGoogleOAuthPkceCookie,
+} from "@/lib/google/oauth-state";
 
 const contextIdSchema = z.string().trim().min(1).max(64);
 const bodySchema = z
@@ -32,8 +40,7 @@ const bodySchema = z
       )
       .optional(),
     scopePreset: z
-      .enum(["core", "drive", "calendar", "gmail", "gmail_send", "full"])
-      .optional(),
+      .enum(["core", "drive", "calendar", "gmail", "gmail_send", "full"]),
     workspaceId: z
       .string()
       .trim()
@@ -44,7 +51,6 @@ const bodySchema = z
     businessId: contextIdSchema.optional(),
     profileId: contextIdSchema.optional(),
     correlationId: z.string().trim().min(1).max(128).optional(),
-    idempotencyKey: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
 
@@ -76,7 +82,7 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
   const returnTo = body.returnTo || "/dashboard/integrations";
   const resolvedOrigin = resolveMissionControlOrigin(undefined, request.nextUrl.origin);
   const origin = resolvedOrigin.origin;
-  const scopePreset = body.scopePreset || "full";
+  const scopePreset = body.scopePreset;
   const correlationId = body.correlationId || requestCorrelationId;
   let profileContext: ReturnType<typeof resolveGoogleBusinessProfileContext>;
   try {
@@ -90,7 +96,9 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
     }
     throw error;
   }
-  const idempotencyKey = getIdempotencyKey(request, body);
+  if (!profileContext) {
+    throw new ApiError(400, "A Google business profile is required.");
+  }
 
   if (resolvedOrigin.redirected) {
     log.warn("oauth.connect.redirect_blocked", {
@@ -101,48 +109,95 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
     });
   }
 
-  const result = await withIdempotency(
-    {
-      uid: user.uid,
-      route: `google.connect.${profileContext?.profileId || "legacy"}`,
-      key: idempotencyKey,
-      log,
-    },
-    async () => {
-      const state = randomUUID();
-      await getAdminDb().collection("google_oauth_state").doc(state).set({
+  const state = randomUUID();
+  const pkce = createGoogleOAuthPkceBinding();
+  const expiresAt = Timestamp.fromMillis(
+    Date.now() + GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS * 1000
+  );
+  const db = getAdminDb();
+  const stateRef = db.collection(GOOGLE_OAUTH_STATE_COLLECTION).doc(state);
+  const attemptRef = db
+    .collection(GOOGLE_OAUTH_ATTEMPT_COLLECTION)
+    .doc(googleOAuthAttemptDocumentId(user.uid, profileContext.profileId));
+
+  await db.runTransaction(async (transaction) => {
+    const previousAttempt = await transaction.get(attemptRef);
+    const previousAttemptData = previousAttempt.exists
+      ? previousAttempt.data() || {}
+      : {};
+    const previousExpiresAt =
+      previousAttemptData.status === "processing"
+        ? previousAttemptData.processingExpiresAt || previousAttemptData.expiresAt
+        : previousAttemptData.expiresAt;
+    const previousExpiresAtMs =
+      previousExpiresAt && typeof previousExpiresAt.toMillis === "function"
+        ? previousExpiresAt.toMillis()
+        : previousExpiresAt instanceof Date
+          ? previousExpiresAt.getTime()
+          : Number.NaN;
+    if (
+      previousAttemptData.status === "processing" &&
+      (!Number.isFinite(previousExpiresAtMs) || previousExpiresAtMs > Date.now())
+    ) {
+      throw new ApiError(409, "A Google connection is already completing for this profile.");
+    }
+    const previousState = previousAttempt.exists
+      ? String(previousAttemptData.latestState || "")
+      : "";
+    if (isGoogleOAuthStateIdentifier(previousState) && previousState !== state) {
+      transaction.delete(
+        db.collection(GOOGLE_OAUTH_STATE_COLLECTION).doc(previousState)
+      );
+    }
+    transaction.create(stateRef, {
         uid: user.uid,
         returnTo,
         origin,
         scopePreset,
         workspaceId: body.workspaceId || null,
-        businessId: profileContext?.businessId || null,
-        profileId: profileContext?.profileId || null,
+        businessId: profileContext.businessId,
+        profileId: profileContext.profileId,
         correlationId,
+        codeChallenge: pkce.challenge,
+        attemptDocumentId: attemptRef.id,
         createdAt: FieldValue.serverTimestamp(),
+        expiresAt,
       });
+    transaction.set(attemptRef, {
+      uid: user.uid,
+      businessId: profileContext.businessId,
+      profileId: profileContext.profileId,
+      latestState: state,
+      status: "pending",
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt,
+    });
+  });
 
-      const authUrl = getGoogleAuthUrl(state, { scopePreset });
-      return profileContext
-        ? {
-            authUrl,
-            businessId: profileContext.businessId,
-            profileId: profileContext.profileId,
-          }
-        : { authUrl };
-    }
-  );
+  const authUrl = getGoogleAuthUrl(state, {
+    scopePreset,
+    codeChallenge: pkce.challenge,
+  });
+  const response = NextResponse.json({
+    authUrl,
+    businessId: profileContext.businessId,
+    profileId: profileContext.profileId,
+  });
+  setGoogleOAuthPkceCookie(response, state, pkce.verifier);
+  response.headers.set("cache-control", "private, no-store, max-age=0");
+  response.headers.set("pragma", "no-cache");
+  response.headers.set("referrer-policy", "no-referrer");
 
   log.info("oauth.connect.init", {
     uid: user.uid,
     scopePreset,
     origin,
     workspaceId: body.workspaceId || null,
-    businessId: profileContext?.businessId || null,
-    profileId: profileContext?.profileId || null,
+    businessId: profileContext.businessId,
+    profileId: profileContext.profileId,
     correlationId,
-    replayed: result.replayed,
+    browserBound: true,
   });
 
-  return NextResponse.json(result.data);
+  return response;
 }, { route: "google.connect" });

@@ -10,7 +10,11 @@ import {
   type GoogleBusinessProfile,
   type GoogleCapabilities,
 } from "@/lib/google/business-profiles";
-import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
+import {
+  getGoogleAccountRegistryMode,
+  getGoogleDefaultProfileId,
+  resolveGoogleAccountTokens,
+} from "@/lib/google/account-token-store";
 import { getStoredGoogleTokens } from "@/lib/google/oauth";
 
 const querySchema = z
@@ -42,27 +46,6 @@ const EMPTY_CAPABILITIES: GoogleCapabilities = {
   gmail: false,
   calendar: false,
 };
-
-function mergeCapabilities(values: GoogleCapabilities[]): GoogleCapabilities {
-  return values.reduce<GoogleCapabilities>(
-    (merged, current) => ({
-      drive: merged.drive || current.drive,
-      gmail: merged.gmail || current.gmail,
-      calendar: merged.calendar || current.calendar,
-    }),
-    { ...EMPTY_CAPABILITIES }
-  );
-}
-
-function mergeScopes(values: Array<string | null>): string | null {
-  const scopes = new Set<string>();
-  for (const value of values) {
-    for (const scope of String(value || "").split(/\s+/)) {
-      if (scope) scopes.add(scope);
-    }
-  }
-  return scopes.size > 0 ? Array.from(scopes).sort().join(" ") : null;
-}
 
 async function loadProfileStatus(
   uid: string,
@@ -109,8 +92,10 @@ export const GET = withApiHandler(async ({ request, correlationId, log }) => {
   }
 
   const requestedProfiles = selection ? [selection] : [...GOOGLE_BUSINESS_PROFILES];
-  const [legacyTokens, profiles] = await Promise.all([
+  const [legacyTokens, defaultProfileId, registryMode, profiles] = await Promise.all([
     getStoredGoogleTokens(user.uid),
+    getGoogleDefaultProfileId(user.uid),
+    getGoogleAccountRegistryMode(user.uid),
     Promise.all(
       requestedProfiles.map(async (profile): Promise<GoogleProfileStatus> => {
         try {
@@ -139,37 +124,47 @@ export const GET = withApiHandler(async ({ request, correlationId, log }) => {
   const legacyConnected = Boolean(legacyTokens?.refreshToken || legacyTokens?.accessToken);
   const legacyCapabilities = capabilitiesFromGoogleScopes(legacyScopes);
   const connectedProfiles = profiles.filter((profile) => profile.connected);
-  const connected = selection
-    ? Boolean(profiles[0]?.connected)
-    : legacyConnected || connectedProfiles.length > 0;
-  const capabilities = mergeCapabilities([
-    ...(selection || !legacyConnected ? [] : [legacyCapabilities]),
-    ...connectedProfiles.map((profile) => profile.capabilities),
-  ]);
-  const scopes = mergeScopes([
-    ...(selection || !legacyConnected ? [] : [legacyScopes]),
-    ...connectedProfiles.map((profile) => profile.scopes),
-  ]);
-  const hasSchemaV2Connection = connectedProfiles.length > 0;
+  const defaultProfile = defaultProfileId
+    ? profiles.find((profile) => profile.profileId === defaultProfileId) || null
+    : null;
+  const selectedProfile = selection ? profiles[0] || null : defaultProfile;
+  const hasSchemaV2Registry = registryMode === "schema_v2";
+  const mayUseLegacy = !selection && !hasSchemaV2Registry;
+  const usableLegacyConnected = mayUseLegacy && legacyConnected;
+  const connected = selectedProfile
+    ? selectedProfile.connected
+    : mayUseLegacy && legacyConnected;
+  const capabilities = selectedProfile
+    ? selectedProfile.capabilities
+    : mayUseLegacy
+      ? legacyCapabilities
+      : { ...EMPTY_CAPABILITIES };
+  const scopes = selectedProfile
+    ? selectedProfile.scopes
+    : mayUseLegacy
+      ? legacyScopes
+      : null;
   const storageMode = selection
     ? connected
       ? "schema_v2"
       : "none"
-    : hasSchemaV2Connection && legacyConnected
-      ? "mixed"
-      : hasSchemaV2Connection
+    : hasSchemaV2Registry
+      ? defaultProfileId
         ? "schema_v2"
-        : legacyConnected
-          ? "legacy"
-          : "none";
+        : "schema_v2_needs_default"
+      : mayUseLegacy && legacyConnected
+        ? "legacy"
+        : "none";
 
   log.info("google.status.loaded", {
     uid: user.uid,
     selectedBusinessId: selection?.businessId || null,
     selectedProfileId: selection?.profileId || null,
     connectedProfiles: connectedProfiles.length,
+    defaultProfileId,
     requestedProfiles: profiles.length,
     legacyConnected,
+    registryMode,
     storageMode,
     correlationId,
   });
@@ -179,13 +174,16 @@ export const GET = withApiHandler(async ({ request, correlationId, log }) => {
     scopes,
     capabilities,
     storageMode,
+    defaultProfileId,
     legacy: {
-      connected: legacyConnected,
-      scopes: legacyScopes,
-      capabilities: legacyCapabilities,
+      connected: usableLegacyConnected,
+      scopes: usableLegacyConnected ? legacyScopes : null,
+      capabilities: usableLegacyConnected
+        ? legacyCapabilities
+        : { ...EMPTY_CAPABILITIES },
     },
     selection,
-    profile: selection ? profiles[0] || null : null,
+    profile: selectedProfile,
     profiles,
   });
 }, { route: "google.status" });

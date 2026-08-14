@@ -91,7 +91,6 @@ describe("revenue cadence audit gcloud runtime hardening", () => {
     expect(specs.map((spec) => spec.name)).toEqual([
       "revenue-automation-rts",
       "revenue-automation-rng",
-      "revenue-automation-aicf",
       "revenue-weekly-brain",
     ]);
     expect(specs.every((spec) => Boolean(spec.endpointPath && spec.defaultSchedule))).toBe(true);

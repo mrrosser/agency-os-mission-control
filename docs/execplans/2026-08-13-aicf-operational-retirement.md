@@ -80,6 +80,30 @@ surfaces must fail closed for the retired identifiers.
 5. Verify pending historical AICF social approvals cannot approve or dispatch;
    the worker should record `retired_business_key` without an external call.
 
+## Firestore retirement completed
+
+On 2026-08-14, the post-deploy Firestore retirement was applied in one
+update-time-guarded transaction under correlation ID
+`a59f98b6-ad32-4c1a-88d8-45ac595cc499` and deterministic operation key
+`aicf-operational-retirement-v1`.
+
+- Four matching templates were archived, deactivated, and marked retired.
+- Nine genuinely pending AICF drafts were operationally rejected and retired.
+- Three approved/dispatched and three already-rejected drafts were verified by
+  exact content/update-time hashes and left untouched.
+- The transaction committed 13 target updates, 13 restricted exact-prior
+  snapshots, and one aggregate-only receipt. Client Firestore Rules deny access
+  to the receipt collection.
+- No queue, provider, OAuth, Scheduler, OpenClaw, or MCP action was invoked.
+- Dry-run plan hash:
+  `sha256:0428c8c20450b3f52d687df6bd5eaf973ce811d933f749fdfaa925a41ed18081`.
+- Pre/post aggregate hashes:
+  `sha256:5581df3947cefd7b3ddb3f8c34b6eb4b08aac3e11cba9e82d1b740c1ccc68c8f`
+  and
+  `sha256:fc89bd20e20698daa837826cfa502348185aa1a6b41f2bf706a520e29efd2ac2`.
+- An independent idempotent reread verified all 13 current target hashes and all
+  13 rollback snapshots without another write.
+
 ## Local verification
 
 ```powershell

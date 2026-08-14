@@ -34,9 +34,9 @@ const businessKey = String(process.env.SOCIAL_DRAFT_BUSINESS_KEY || "rng")
   .trim()
   .toLowerCase();
 
-const allowedBusinessKeys = new Set(["aicf", "rng", "rts"]);
+const allowedBusinessKeys = new Set(["rng", "rts"]);
 if (!allowedBusinessKeys.has(businessKey)) {
-  console.error("Invalid SOCIAL_DRAFT_BUSINESS_KEY. Expected one of: aicf, rng, rts.");
+  console.error("Invalid SOCIAL_DRAFT_BUSINESS_KEY. Expected one of: rng, rts.");
   process.exit(1);
 }
 

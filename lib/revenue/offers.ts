@@ -1,11 +1,12 @@
 export type BusinessUnitId = "ai_cofoundry" | "rosser_nft_gallery" | "rt_solutions";
 export type BusinessWorkspaceKey = "aicf" | "rng" | "rts" | "rt";
+export type ActiveBusinessUnitId = Exclude<BusinessUnitId, "ai_cofoundry">;
+export type ActiveBusinessWorkspaceKey = Exclude<BusinessWorkspaceKey, "aicf">;
 
 export const BUSINESS_UNIT_OPTIONS: ReadonlyArray<{
-  id: BusinessUnitId;
+  id: ActiveBusinessUnitId;
   label: string;
 }> = [
-  { id: "ai_cofoundry", label: "AI CoFoundry" },
   { id: "rosser_nft_gallery", label: "Rosser NFT Gallery" },
   { id: "rt_solutions", label: "RT Solutions" },
 ];
@@ -107,13 +108,22 @@ export const OFFER_DEFINITIONS: ReadonlyArray<OfferDefinition> = [
     cta: "Book discovery",
     depositRule: "paid_discovery_required",
   },
+];
+
+/** Historical lookup only. Never expose these definitions on active create surfaces. */
+export const RETIRED_OFFER_DEFINITIONS: ReadonlyArray<OfferDefinition> = [
   {
     code: "AICF-DISCOVERY",
     businessUnit: "ai_cofoundry",
-    name: "AI CoFoundry Discovery",
-    cta: "Book discovery",
+    name: "RT.Solutions (legacy AICF discovery record)",
+    cta: "Retired",
     depositRule: "paid_discovery_required",
   },
+];
+
+const ALL_OFFER_DEFINITIONS: ReadonlyArray<OfferDefinition> = [
+  ...OFFER_DEFINITIONS,
+  ...RETIRED_OFFER_DEFINITIONS,
 ];
 
 export const DEFAULT_OFFER_CODE_BY_BUSINESS: Record<BusinessUnitId, string> = {
@@ -178,21 +188,39 @@ export function isDepositStage(stage: unknown): boolean {
 
 export function normalizeBusinessUnit(input: unknown): BusinessUnitId {
   const value = String(input || "").trim().toLowerCase();
+  // Blank values are interpreted only for legacy reads. Every current write
+  // route supplies an explicit RT.Solutions default before calling this helper.
+  if (!value || value === "aicf" || value === "ai_cofoundry" || value === "ai-cofoundry") {
+    return "ai_cofoundry";
+  }
   if (value === "rng" || value === "rosser_nft_gallery") return "rosser_nft_gallery";
   if (value === "rt" || value === "rts" || value === "rt_solutions") return "rt_solutions";
-  return "ai_cofoundry";
+  throw new Error(`Unsupported business unit '${value}'`);
+}
+
+export function isRetiredBusinessUnit(input: unknown): boolean {
+  const value = String(input || "").trim().toLowerCase();
+  return value === "aicf" || value === "ai_cofoundry" || value === "ai-cofoundry";
+}
+
+export function assertActiveBusinessUnit(unit: BusinessUnitId): asserts unit is ActiveBusinessUnitId {
+  if (unit === "ai_cofoundry") {
+    throw new Error("The AICF business lane is retired; use RT.Solutions for new work");
+  }
 }
 
 export function businessUnitFromWorkspaceKey(key: BusinessWorkspaceKey): BusinessUnitId {
+  if (key === "aicf") return "ai_cofoundry";
   if (key === "rng") return "rosser_nft_gallery";
   if (key === "rts" || key === "rt") return "rt_solutions";
-  return "ai_cofoundry";
+  throw new Error(`Unsupported business workspace '${String(key)}'`);
 }
 
 export function workspaceKeyFromBusinessUnit(unit: BusinessUnitId): "aicf" | "rng" | "rts" {
+  if (unit === "ai_cofoundry") return "aicf";
   if (unit === "rosser_nft_gallery") return "rng";
   if (unit === "rt_solutions") return "rts";
-  return "aicf";
+  throw new Error(`Unsupported business unit '${String(unit)}'`);
 }
 
 export function normalizeOfferCode(input: unknown): string {
@@ -206,7 +234,7 @@ export function normalizeOfferCode(input: unknown): string {
 export function isOfferCodeForBusinessUnit(unit: BusinessUnitId, input: unknown): boolean {
   const code = normalizeOfferCode(input);
   if (!code) return false;
-  return OFFER_DEFINITIONS.some((offer) => offer.businessUnit === unit && offer.code === code);
+  return ALL_OFFER_DEFINITIONS.some((offer) => offer.businessUnit === unit && offer.code === code);
 }
 
 export function resolveOfferCodeForBusinessUnit(
@@ -228,11 +256,11 @@ export function resolveOfferCodeForBusinessUnit(
 export function findOfferByCode(input: unknown): OfferDefinition | null {
   const code = normalizeOfferCode(input);
   if (!code) return null;
-  return OFFER_DEFINITIONS.find((offer) => offer.code === code) || null;
+  return ALL_OFFER_DEFINITIONS.find((offer) => offer.code === code) || null;
 }
 
 export function getOffersForBusinessUnit(unit: BusinessUnitId): OfferDefinition[] {
-  return OFFER_DEFINITIONS.filter((offer) => offer.businessUnit === unit);
+  return ALL_OFFER_DEFINITIONS.filter((offer) => offer.businessUnit === unit);
 }
 
 export function getOffersForWorkspaceKey(key: BusinessWorkspaceKey): OfferDefinition[] {

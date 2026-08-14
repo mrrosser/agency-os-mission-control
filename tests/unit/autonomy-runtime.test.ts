@@ -66,7 +66,7 @@ describe("autonomy runtime pause", () => {
     ).resolves.toMatchObject({ paused: true, reason: "operator_global_pause", businessId: null });
   });
 
-  it("keeps explicitly scoped AI CoFoundry work outside the stored two-business pause", async () => {
+  it("fails closed for the retired AICF lane without reading the active policy", async () => {
     getAutonomyPolicyMock.mockResolvedValue({
       ...createDefaultAutonomyPolicy("owner-1"),
       globalKillSwitch: true,
@@ -74,7 +74,7 @@ describe("autonomy runtime pause", () => {
 
     await expect(
       resolveRuntimePause({ uid: "owner-1", businessKey: "aicf", log })
-    ).resolves.toMatchObject({ paused: false, reason: "not_paused", businessId: null });
+    ).resolves.toMatchObject({ paused: true, reason: "retired_business", businessId: null });
     expect(getAutonomyPolicyMock).not.toHaveBeenCalled();
   });
 

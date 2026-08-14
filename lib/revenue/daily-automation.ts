@@ -1,10 +1,11 @@
 import "server-only";
 
 export const REVENUE_AUTOMATION_TEMPLATE_IDS = {
-  aicf: "aicf-south-day1",
   rng: "rng-south-day1",
   rts: "rts-south-day1",
 } as const;
+
+export const RETIRED_REVENUE_AUTOMATION_TEMPLATE_IDS = ["aicf-south-day1"] as const;
 
 export type RevenueAutomationBusinessKey = keyof typeof REVENUE_AUTOMATION_TEMPLATE_IDS;
 export type RevenueAutomationStage = "day1" | "day2" | "day30";
@@ -43,7 +44,11 @@ export function resolveRevenueAutomationStage(
 export function templateIdForRevenueBusiness(
   businessKey: RevenueAutomationBusinessKey
 ): string {
-  return REVENUE_AUTOMATION_TEMPLATE_IDS[businessKey];
+  const templateId = REVENUE_AUTOMATION_TEMPLATE_IDS[businessKey];
+  if (!templateId) {
+    throw new Error(`Unsupported revenue automation business key '${String(businessKey)}'`);
+  }
+  return templateId;
 }
 
 export function orderedRevenueAutomationStages(): RevenueAutomationStage[] {

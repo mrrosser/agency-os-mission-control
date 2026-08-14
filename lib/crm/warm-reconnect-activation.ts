@@ -585,6 +585,7 @@ export function createWarmReconnectPilot(input: {
   googleReady: boolean;
   preferenceOrigin: string;
   fromEmail: string;
+  accountId: string;
   legacyDncOrgId: string;
 }): WarmReconnectPilot {
   if (
@@ -647,7 +648,11 @@ export function createWarmReconnectPilot(input: {
     tranche: "initial_5" as const,
     recipientCap: WARM_RECONNECT_INITIAL_PILOT_SIZE,
     campaignPreviewFingerprint: input.request.campaignPreviewFingerprint,
-    sender: { ...input.request.sender, fromEmail: input.fromEmail },
+    sender: {
+      ...input.request.sender,
+      fromEmail: input.fromEmail,
+      accountId: input.accountId,
+    },
     artworkEmailApproval: {
       attested: true as const,
       evidenceNote: input.request.artworkEmailApproval.evidenceNote,

@@ -29,7 +29,7 @@ const mediaSchema = z.object({
 });
 
 const bodySchema = z.object({
-  businessKey: z.enum(["aicf", "rng", "rts"]).default("aicf"),
+  businessKey: z.enum(["rng", "rts"]).default("rts"),
   channels: z
     .array(z.enum(["instagram_story", "instagram_post", "facebook_story", "facebook_post"]))
     .min(1)

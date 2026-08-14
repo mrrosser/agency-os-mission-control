@@ -201,6 +201,18 @@ describe("revenue automation scheduler OIDC contract", () => {
     expect(script).toContain('/api/revenue/pos/worker-task');
   });
 
+  it("retires AICF jobs without remapping them onto the active RT.Solutions schedule", () => {
+    expect(script).not.toContain('Name = "revenue-automation-aicf"');
+    expect(script).not.toContain("REVENUE_AUTOMATION_AICF_CRON");
+    expect(script).toContain(
+      'templateIds = @("rts-south-day1", "rng-south-day1")'
+    );
+    expect(script).not.toContain(
+      'templateIds = @("rts-south-day1", "rng-south-day1", "aicf-south-day1")'
+    );
+    expect(script).toContain('"revenue-automation-aicf",');
+  });
+
   it("verifies enabled state, canonical body, content type, retry policy, and deadline", () => {
     expect(script).toContain('$job.state -ne "ENABLED"');
     expect(script).toContain('$job.attemptDeadline -ne "900s"');

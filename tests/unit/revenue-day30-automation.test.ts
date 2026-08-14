@@ -93,6 +93,18 @@ describe("revenue day30 automation helpers", () => {
         lossReason: null,
         objectionReason: null,
       },
+      {
+        leadId: "historical-aicf-proposal",
+        businessUnit: "ai_cofoundry",
+        offerCode: "AICF-DISCOVERY",
+        pipelineStage: "proposal",
+        valueUsd: 9000,
+        createdAt: new Date("2026-02-24T08:00:00.000Z"),
+        updatedAt: new Date("2026-02-25T11:30:00.000Z"),
+        winReason: null,
+        lossReason: null,
+        objectionReason: null,
+      },
     ];
 
     const queue = buildHotCloserQueueEntries({
@@ -106,6 +118,7 @@ describe("revenue day30 automation helpers", () => {
     expect(queue[0]?.leadId).toBe("proposal-hot");
     expect(queue[0]?.priority).toBe("high");
     expect(queue[0]?.breached).toBe(true);
+    expect(queue.some((entry) => entry.businessUnit === "ai_cofoundry")).toBe(false);
   });
 
   it("creates service candidates from weekly decisions", () => {
@@ -117,6 +130,20 @@ describe("revenue day30 automation helpers", () => {
         offerCode: "RTS-QUICK-WEBSITE-SPRINT",
         action: "scale",
         reason: "Strong close rate",
+        streakWeeks: 2,
+        leadsSourced: 30,
+        closeRatePct: 24,
+        meetingRatePct: 18,
+        depositRateFromMeetingsPct: 45,
+        cycleDaysToDeposit: 8,
+      },
+      {
+        decisionId: "d-retired",
+        weekStartDate: "2026-02-23",
+        businessUnit: "ai_cofoundry",
+        offerCode: "AICF-DISCOVERY",
+        action: "scale",
+        reason: "Historical close rate",
         streakWeeks: 2,
         leadsSourced: 30,
         closeRatePct: 24,

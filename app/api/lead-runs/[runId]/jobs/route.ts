@@ -23,6 +23,8 @@ import {
   resolveLeadRunOrgId,
 } from "@/lib/lead-runs/quotas";
 import {
+  assertActiveBusinessUnit,
+  isRetiredBusinessUnit,
   normalizeBusinessUnit,
   resolveOfferCodeForBusinessUnit,
   workspaceKeyFromBusinessUnit,
@@ -35,8 +37,8 @@ const startBodySchema = z.object({
     draftFirst: z.boolean().optional(),
     requireBookingConfirmation: z.boolean().optional(),
     timeZone: z.string().min(1).max(80).optional(),
-    businessKey: z.enum(["aicf", "rng", "rts", "rt"]).optional(),
-    businessUnit: z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional(),
+    businessKey: z.enum(["rng", "rts", "rt"]).optional(),
+    businessUnit: z.enum(["rosser_nft_gallery", "rt_solutions"]).optional(),
     offerCode: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9-]+$/).optional(),
     useSMS: z.boolean().optional(),
     useAvatar: z.boolean().optional(),
@@ -146,6 +148,12 @@ export const POST = withApiHandler(
       if (existingJobSnap.exists) {
         const existingJob = existingJobSnap.data() as LeadRunJobDoc;
         if (
+          isRetiredBusinessUnit(existingJob.config?.businessKey) ||
+          isRetiredBusinessUnit(existingJob.config?.businessUnit)
+        ) {
+          throw new ApiError(410, "This lead run belongs to a retired business lane");
+        }
+        if (
           existingJob.status === "queued" ||
           existingJob.status === "running" ||
           existingJob.status === "paused"
@@ -171,6 +179,17 @@ export const POST = withApiHandler(
       }
 
       const businessUnit = normalizeBusinessUnit(body.config?.businessUnit || runData.businessUnit);
+      try {
+        assertActiveBusinessUnit(businessUnit);
+      } catch {
+        log.warn("lead-runs.jobs.retired_business_blocked", {
+          runId,
+          uid: user.uid,
+          businessUnit,
+          correlationId,
+        });
+        throw new ApiError(410, "This lead run belongs to a retired business lane");
+      }
       const offerResolution = resolveOfferCodeForBusinessUnit(
         businessUnit,
         body.config?.offerCode || runData.offerCode
@@ -270,6 +289,13 @@ export const POST = withApiHandler(
     const snap = await jobRef.get();
     if (!snap.exists) throw new ApiError(404, "Lead run job not found");
     const existing = snap.data() as LeadRunJobDoc;
+
+    if (
+      isRetiredBusinessUnit(existing.config?.businessKey) ||
+      isRetiredBusinessUnit(existing.config?.businessUnit)
+    ) {
+      throw new ApiError(410, "This lead run belongs to a retired business lane");
+    }
 
     if (body.action === "pause") {
       if (existing.status === "queued" || existing.status === "running") {

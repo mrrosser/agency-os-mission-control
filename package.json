@@ -35,6 +35,8 @@
     "revenue:weekly:health": "node scripts/revenue-weekly-health-report.mjs",
     "leadgen:digest:run": "node scripts/leadgen-digest-run.mjs",
     "crm:backfill:paperclip": "node scripts/backfill-paperclip-customers.mjs",
+    "crm:rosser-gallery-card:dry-run": "node --no-warnings --experimental-strip-types scripts/rosser-gallery-card-import-dry-run.mjs",
+    "crm:rosser-gallery-card:reconcile": "node --no-warnings --experimental-strip-types scripts/rosser-gallery-card-reconcile.mjs",
     "revenue:day1:seed-templates": "node scripts/revenue-day1-seed-templates.mjs",
     "deploy:firebase": "node scripts/firebase-deploy.mjs",
     "promptfoo:eval": "npx --yes promptfoo@0.121.1 eval -c promptfooconfig.yaml -o .promptfoo/results/eval.json",
@@ -104,6 +106,7 @@
     "glob": {
       "minimatch": "10.2.6"
     },
+    "nanoid": "3.3.18",
     "next": {
       "postcss": "8.5.23"
     },

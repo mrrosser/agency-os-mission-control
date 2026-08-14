@@ -5,7 +5,6 @@ export const AGENT_PROTOCOL_POLICY_VERSION = "mission-control-agent/v1";
 export const ACTION_EXECUTOR_AGENT_ID = "fn-actions";
 
 export const BUSINESS_UNIT_IDS = [
-  "ai_cofoundry",
   "rosser_nft_gallery",
   "rt_solutions",
 ] as const satisfies readonly BusinessUnitId[];
@@ -30,7 +29,6 @@ export type AgentServiceId = (typeof AGENT_SERVICE_IDS)[number];
 
 export const AGENT_SCOPES = [
   "orchestration",
-  "business:ai_cofoundry",
   "business:rosser_nft_gallery",
   "business:rt_solutions",
   "marketing",
@@ -151,21 +149,6 @@ export const AGENT_REGISTRY: readonly AgentDefinition[] = [
     baseMonthlyCostUsd: 26,
     requiredServices: ["openai_brain"],
     declaredServices: ["smauto_mcp", "leadops_mcp", "paperclip_system", "openclaw_sync"],
-  },
-  {
-    id: "biz-aicf",
-    aliases: ["biz_aicf"],
-    label: "AI CoFoundry Agent",
-    role: "business-specialist",
-    businessId: "ai_cofoundry",
-    allowedBusinessIds: ["ai_cofoundry"],
-    allowedSpaceIds: [AGENT_SPACE_IDS.outreach, AGENT_SPACE_IDS.operations],
-    scopes: ["business:ai_cofoundry"],
-    trustLevel: "bounded_internal",
-    capabilities: ["context.read", "crm.read", "outreach.draft"],
-    canConsequentialExternalWrite: false,
-    baseMonthlyCostUsd: 14,
-    requiredServices: ["openai_brain", "google_workspace"],
   },
   {
     id: "biz-rng",
@@ -429,7 +412,7 @@ export function resolveCallerBusinessIds(claims: Record<string, unknown>): Busin
   const allowed = new Set<BusinessUnitId>();
   for (const value of values) {
     const normalized = value.trim() as BusinessUnitId;
-    if (BUSINESS_UNIT_IDS.includes(normalized)) allowed.add(normalized);
+    if ((BUSINESS_UNIT_IDS as readonly string[]).includes(normalized)) allowed.add(normalized);
   }
   return Array.from(allowed);
 }

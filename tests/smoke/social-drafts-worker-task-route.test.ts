@@ -34,7 +34,7 @@ describe("social drafts worker-task route", () => {
       draft: {
         draftId: "d-worker",
         uid: "uid-1",
-        businessKey: "aicf",
+        businessKey: "rts",
         channels: ["facebook_post"],
         caption: "Worker generated draft",
         media: [{ type: "image", url: "https://cdn.example.com/i.jpg" }],
@@ -98,7 +98,7 @@ describe("social drafts worker-task route", () => {
       },
       body: JSON.stringify({
         uid: "uid-1",
-        businessKey: "aicf",
+        businessKey: "rts",
         channels: ["facebook_post"],
         caption: "Worker generated draft",
         media: [{ type: "image", url: "https://cdn.example.com/i.jpg" }],
@@ -116,5 +116,30 @@ describe("social drafts worker-task route", () => {
     expect(data.ok).toBe(true);
     expect(withIdempotencyMock).toHaveBeenCalledOnce();
     expect(createDraftMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the retired AICF business key before creating a draft", async () => {
+    const req = new Request("http://localhost/api/social/drafts/worker-task", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer social-token",
+      },
+      body: JSON.stringify({
+        uid: "uid-1",
+        businessKey: "aicf",
+        channels: ["facebook_post"],
+        caption: "Retired lane",
+      }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext() as unknown as Parameters<typeof POST>[1]
+    );
+
+    expect(res.status).toBe(400);
+    expect(withIdempotencyMock).not.toHaveBeenCalled();
+    expect(createDraftMock).not.toHaveBeenCalled();
   });
 });

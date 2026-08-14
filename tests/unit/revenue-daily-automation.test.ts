@@ -22,6 +22,8 @@ describe("revenue daily automation helpers", () => {
   it("maps business keys to canonical template ids", () => {
     expect(templateIdForRevenueBusiness("rng")).toBe("rng-south-day1");
     expect(templateIdForRevenueBusiness("rts")).toBe("rts-south-day1");
-    expect(templateIdForRevenueBusiness("aicf")).toBe("aicf-south-day1");
+    expect(() => templateIdForRevenueBusiness("aicf" as never)).toThrow(
+      "Unsupported revenue automation business key 'aicf'"
+    );
   });
 });

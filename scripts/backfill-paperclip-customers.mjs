@@ -160,8 +160,8 @@ export function normalizeLeadForPaperclip(docId, row) {
     email,
     phone,
     sourceLabel: asString(row.source) || "mission_control",
-    businessUnit: asString(row.businessUnit) || "ai_cofoundry",
-    offerCode: asString(row.offerCode) || "AICF-DISCOVERY",
+    businessUnit: asString(row.businessUnit) || "rt_solutions",
+    offerCode: asString(row.offerCode) || "RTS-QUICK-WEBSITE-SPRINT",
     pipelineStage: resolvePipelineStage(row),
     metadata: {
       sourceSystem: "mission_control",

@@ -5,6 +5,7 @@ import type { AutonomyBusinessId } from "@/lib/agents/autonomy-policy";
 export type RuntimePauseReason =
   | "not_paused"
   | "environment_kill_switch"
+  | "retired_business"
   | "operator_global_pause"
   | "policy_read_failed";
 
@@ -47,15 +48,13 @@ export async function resolveRuntimePause(input: {
     return { paused: true, reason: "environment_kill_switch", businessId };
   }
 
-  // The stored operator policy intentionally covers only RT Solutions and
-  // Rosser Gallery. An explicitly scoped AI CoFoundry run remains governed by
-  // the environment switch. Legacy or unknown scopes still consult the global
-  // policy so an old RT/Rosser job cannot bypass an operator pause.
+  // AICF is retained only as historical provenance. It must never bypass the
+  // current two-business policy or perform new work.
   if (
     !businessId &&
     (isExplicitAiCoFoundry(input.businessKey) || isExplicitAiCoFoundry(input.businessUnit))
   ) {
-    return { paused: false, reason: "not_paused", businessId: null };
+    return { paused: true, reason: "retired_business", businessId: null };
   }
 
   try {

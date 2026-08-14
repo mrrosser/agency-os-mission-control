@@ -67,10 +67,9 @@ job_upsert() {
 declare -A TEMPLATE_BY_BUSINESS=(
   [rts]="rts-south-day1"
   [rng]="rng-south-day1"
-  [aicf]="aicf-south-day1"
 )
 
-for business in rts rng aicf; do
+for business in rts rng; do
   template_id="${TEMPLATE_BY_BUSINESS[$business]}"
 
   start_job="revenue-day1-${business}-start"
@@ -94,4 +93,4 @@ for business in rts rng aicf; do
   job_upsert "$seed_job_d14" "$SEED_D14_CRON" "$seed_payload_d14"
 done
 
-echo "Configured Day1 scheduler jobs (start + D+2/D+5/D+10/D+14 followup seeds) for rts/rng/aicf in ${TIME_ZONE}."
+echo "Configured Day1 scheduler jobs (start + D+2/D+5/D+10/D+14 followup seeds) for rts/rng in ${TIME_ZONE}."

@@ -8,6 +8,7 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import type { LeadSource, LeadSourceRequest } from "@/lib/leads/types";
 import {
+  isRetiredBusinessUnit,
   normalizeBusinessUnit,
   normalizeOfferCode,
   resolveOfferCodeForBusinessUnit,
@@ -25,6 +26,7 @@ type LeadRunTemplate = {
     useOutboundCall?: boolean;
     draftFirst?: boolean;
   };
+  retired?: boolean;
 };
 
 function optionalTrimmedString(maxLength: number) {
@@ -88,7 +90,7 @@ const paramsSchema = z.object({
   businessUnit: z
     .preprocess(
       (value) => (typeof value === "string" ? value.trim().toLowerCase() : undefined),
-      z.enum(["ai_cofoundry", "rosser_nft_gallery", "rt_solutions"]).optional()
+      z.enum(["rosser_nft_gallery", "rt_solutions"]).optional()
     )
     .optional(),
   offerCode: z
@@ -113,7 +115,7 @@ const outreachSchema = z
     businessKey: z
       .preprocess(
         (value) => (typeof value === "string" ? value.trim().toLowerCase() : undefined),
-        z.enum(["aicf", "rng", "rts", "rt"]).optional()
+        z.enum(["rng", "rts", "rt"]).optional()
       )
       .optional(),
     useSMS: optionalBooleanLike(),
@@ -140,26 +142,46 @@ function templatesRef(uid: string) {
 }
 
 export const GET = withApiHandler(
-  async ({ request, log }) => {
+  async ({ request, log, correlationId }) => {
     const user = await requireFirebaseAuth(request, log);
+    const requestUrl = request.nextUrl || new URL(request.url);
+    const includeRetired = requestUrl.searchParams.get("includeRetired") === "1";
 
     const snap = await templatesRef(user.uid)
       .orderBy("updatedAt", "desc")
       .limit(50)
       .get();
 
-    const templates: LeadRunTemplate[] = snap.docs.map((doc) => {
+    const allTemplates: LeadRunTemplate[] = snap.docs.map((doc) => {
       const data = doc.data() as Partial<LeadRunTemplate> & {
         params?: LeadSourceRequest;
         outreach?: LeadRunTemplate["outreach"];
       };
+      const params = data.params || {};
+      const outreach = data.outreach || {};
+      const retired =
+        !String(params.businessUnit || "").trim() ||
+        isRetiredBusinessUnit(params.businessUnit) ||
+        String(outreach.businessKey || "").trim().toLowerCase() === "aicf";
       return {
         templateId: doc.id,
         name: String(data.name || "Untitled"),
         clientName: data.clientName ?? null,
-        params: data.params || {},
-        outreach: data.outreach || {},
+        params,
+        outreach,
+        retired,
       };
+    });
+    const templates = includeRetired
+      ? allTemplates
+      : allTemplates.filter((template) => !template.retired);
+
+    log.info("leads.templates.listed", {
+      uid: user.uid,
+      returned: templates.length,
+      retiredHidden: includeRetired ? 0 : allTemplates.length - templates.length,
+      includeRetired,
+      correlationId,
     });
 
     return NextResponse.json({ templates });
@@ -171,7 +193,7 @@ export const POST = withApiHandler(
   async ({ request, log }) => {
     const body = await parseJson(request, bodySchema);
     const user = await requireFirebaseAuth(request, log);
-    const businessUnit = normalizeBusinessUnit(body.params.businessUnit);
+    const businessUnit = normalizeBusinessUnit(body.params.businessUnit || "rt_solutions");
     const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, body.params.offerCode);
     const offerCode = offerResolution.offerCode;
     if (offerResolution.adjusted && offerResolution.requestedCode) {

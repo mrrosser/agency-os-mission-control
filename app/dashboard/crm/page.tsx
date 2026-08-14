@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
 import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
+import { GoogleOAuthCallbackFeedback } from "@/components/integrations/GoogleOAuthCallbackFeedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -163,7 +164,7 @@ function formatTimelineDate(value: string | null | undefined): string {
 function formatBusinessUnitLabel(value: BusinessUnitId): string {
   if (value === "rosser_nft_gallery") return "Rosser Gallery";
   if (value === "rt_solutions") return "RT.Solutions";
-  return "AI CoFoundry";
+  return "RT.Solutions (legacy record)";
 }
 
 function formatDailyOutcomeStatus(value: DailyOutcomeStatus): string {
@@ -604,7 +605,6 @@ export default function CRMPage() {
                   <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
                     <SelectItem value="rt_solutions">RT.Solutions</SelectItem>
                     <SelectItem value="rosser_nft_gallery">Rosser Gallery</SelectItem>
-                    <SelectItem value="ai_cofoundry">AI CoFoundry</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -632,6 +632,10 @@ export default function CRMPage() {
             </div>
           </DialogContent>
         </Dialog>
+      </div>
+
+      <div className="mb-8 empty:hidden">
+        <GoogleOAuthCallbackFeedback />
       </div>
 
       <PortfolioRegistrySummary

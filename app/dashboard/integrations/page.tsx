@@ -1,28 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { SmsSender } from "@/components/integrations/SmsSender";
 import { VoiceGenerator } from "@/components/integrations/VoiceGenerator";
 import { AvatarCreator } from "@/components/integrations/AvatarCreator";
 import { GoogleWorkspaceConnect } from "@/components/integrations/GoogleWorkspaceConnect";
+import { GoogleOAuthCallbackFeedback } from "@/components/integrations/GoogleOAuthCallbackFeedback";
 import { SocialOnboardingChecklist } from "@/components/onboarding/SocialOnboardingChecklist";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { AfroGlyph } from "@/components/branding/AfroGlyph";
-import { GOOGLE_BUSINESS_PROFILES } from "@/lib/google/business-profiles";
 
 export default function IntegrationsPage() {
-    const searchParams = useSearchParams();
-    const googleError = searchParams?.get("google") === "error";
-    const googleErrorCode = searchParams?.get("googleError");
-    const googleErrorDescription = searchParams?.get("googleErrorDescription");
-    const googleBusinessId = searchParams?.get("googleBusiness");
-    const googleConnected = searchParams?.get("google") === "connected";
-    const googleBusiness = GOOGLE_BUSINESS_PROFILES.find(
-        (profile) => profile.businessId === googleBusinessId
-    );
-
     return (
         <div className="min-h-screen bg-black p-6 md:p-8">
             <div className="max-w-6xl mx-auto space-y-8">
@@ -46,40 +34,7 @@ export default function IntegrationsPage() {
                     </div>
                 </div>
 
-                {googleError && (
-                    <Card className="bg-red-500/5 border-red-500/20">
-                        <CardContent className="p-4 text-sm text-red-200 space-y-2">
-                            <p className="font-medium">
-                                {googleBusiness ? `${googleBusiness.label} Google connection was denied.` : "Google connection was denied."}
-                            </p>
-                            <p className="text-xs text-red-200/80">
-                                {googleErrorCode ? `Code: ${googleErrorCode}. ` : ""}
-                                {googleErrorDescription || "If you are using a managed Google Workspace account, your admin may block unverified apps until this OAuth consent screen is verified."}
-                            </p>
-                            <p className="text-xs text-red-200/80">
-                                Workarounds: try a personal Gmail account, ask your Workspace admin to allow the app, or wait for Google verification.
-                            </p>
-                            <div className="pt-1">
-                                <Link href="/help/google-oauth">
-                                    <Button
-                                        variant="outline"
-                                        className="border-red-500/30 bg-red-500/10 text-red-100 hover:bg-red-500/15"
-                                    >
-                                        Open verification checklist
-                                    </Button>
-                                </Link>
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-
-                {googleConnected && googleBusiness && (
-                    <Card className="border-emerald-500/20 bg-emerald-500/5">
-                        <CardContent className="p-4 text-sm text-emerald-100">
-                            {googleBusiness.label} is connected to its Google Workspace profile.
-                        </CardContent>
-                    </Card>
-                )}
+                <GoogleOAuthCallbackFeedback />
 
                 <GoogleWorkspaceConnect />
                 <SocialOnboardingChecklist />

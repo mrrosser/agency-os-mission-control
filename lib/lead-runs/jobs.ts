@@ -103,14 +103,12 @@ const DEFAULT_GOOGLE_PROFILE_BY_BUSINESS_KEY: Record<string, string> = {
 };
 
 const BUSINESS_KEY_BY_BUSINESS_UNIT: Record<string, LeadRunBusinessKey> = {
-  ai_cofoundry: "aicf",
   rosser_gallery: "rng",
   rosser_nft_gallery: "rng",
   rt_solutions: "rts",
 };
 
 const VALID_BUSINESS_KEYS = new Set<LeadRunBusinessKey>([
-  "aicf",
   "rng",
   "rt",
   "rts",
@@ -135,6 +133,10 @@ export function resolveLeadRunBusinessKey(
 ): LeadRunBusinessKey | null {
   const rawBusinessKey = String(config?.businessKey || "").trim().toLowerCase();
   const rawBusinessUnit = String(config?.businessUnit || "").trim().toLowerCase();
+
+  if (rawBusinessKey === "aicf" || rawBusinessUnit === "ai_cofoundry") {
+    throw new Error("The AICF lead-run lane is retired");
+  }
 
   if (rawBusinessKey && !VALID_BUSINESS_KEYS.has(rawBusinessKey as LeadRunBusinessKey)) {
     throw new Error(`Unsupported lead-run businessKey '${rawBusinessKey}'`);
@@ -170,6 +172,7 @@ export function resolveLeadRunGoogleProfileId(
 ): string | null {
   const normalized = String(businessKey || "").trim().toLowerCase();
   if (!normalized) return null;
+  if (normalized === "aicf") return null;
 
   const envName = `LEAD_RUNS_GOOGLE_PROFILE_${normalized.toUpperCase()}`;
   const configured = String(process.env[envName] || "").trim().toLowerCase();

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { google } from "googleapis";
+import { CodeChallengeMethod } from "google-auth-library";
 import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
@@ -11,6 +12,7 @@ import {
   persistGoogleAccountTokenFailure,
   persistGoogleAccountTokens,
   resolveGoogleAccountTokens,
+  type GoogleAccountScopePreset,
   type StoredGoogleAccountTokens,
 } from "@/lib/google/account-token-store";
 
@@ -24,22 +26,38 @@ export interface GoogleAccessTokenOptions {
   profileId?: string | null;
 }
 
-export async function fetchGoogleAccountEmail(
+export interface GoogleAccountIdentity {
+  email: string;
+  subject: string;
+}
+export async function fetchGoogleAccountIdentity(
   accessToken: string,
   log?: Logger
-): Promise<string> {
+): Promise<GoogleAccountIdentity> {
   const token = String(accessToken || "").trim();
   if (!token) throw new ApiError(400, "Google did not return an access token");
   const profile = await callGoogleAPI<{
     email?: unknown;
     email_verified?: unknown;
+    sub?: unknown;
   }>(GOOGLE_USERINFO_ENDPOINT, token, {}, log);
   const email =
     typeof profile.email === "string" ? profile.email.trim().toLowerCase() : "";
   if (profile.email_verified !== true || !GOOGLE_ACCOUNT_EMAIL_PATTERN.test(email)) {
     throw new ApiError(400, "Google did not return a verified account email");
   }
-  return email;
+  const subject = typeof profile.sub === "string" ? profile.sub.trim() : "";
+  if (!/^[A-Za-z0-9._~-]{1,255}$/.test(subject)) {
+    throw new ApiError(400, "Google did not return a stable account identity");
+  }
+  return { email, subject };
+}
+
+export async function fetchGoogleAccountEmail(
+  accessToken: string,
+  log?: Logger
+): Promise<string> {
+  return (await fetchGoogleAccountIdentity(accessToken, log)).email;
 }
 
 function describeAccountTokenResolutionError(error: unknown): {
@@ -103,21 +121,13 @@ export const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/userinfo.email",
-  "https://www.googleapis.com/auth/userinfo.profile",
 ];
 
-export type GoogleScopePreset =
-  | "core"
-  | "drive"
-  | "calendar"
-  | "gmail"
-  | "gmail_send"
-  | "full";
+export type GoogleScopePreset = GoogleAccountScopePreset;
 
 const GOOGLE_SCOPE_GROUPS = {
   identity: [
     "https://www.googleapis.com/auth/userinfo.email",
-    "https://www.googleapis.com/auth/userinfo.profile",
   ],
   drive: ["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/drive.file"],
   calendar: [
@@ -144,6 +154,14 @@ function getMissionControlPublicOrigin(): string | null {
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new ApiError(500, "MISSION_CONTROL_PUBLIC_ORIGIN must use http or https");
+  }
+
+  if (
+    url.protocol !== "https:" &&
+    url.hostname !== "localhost" &&
+    url.hostname !== "127.0.0.1"
+  ) {
+    throw new ApiError(500, "MISSION_CONTROL_PUBLIC_ORIGIN must use https");
   }
 
   if (url.hostname === "0.0.0.0" || url.hostname === "::") {
@@ -217,6 +235,14 @@ function getOAuthConfig() {
     throw new ApiError(500, "GOOGLE_OAUTH_REDIRECT_URI must use http or https");
   }
 
+  if (
+    redirectUrl.protocol !== "https:" &&
+    redirectUrl.hostname !== "localhost" &&
+    redirectUrl.hostname !== "127.0.0.1"
+  ) {
+    throw new ApiError(500, "GOOGLE_OAUTH_REDIRECT_URI must use https");
+  }
+
   // 0.0.0.0 / :: are bind-all addresses, not valid browser origins for OAuth redirects.
   if (redirectUrl.hostname === "0.0.0.0" || redirectUrl.hostname === "::") {
     throw new ApiError(
@@ -248,21 +274,29 @@ export function getOAuthClient() {
 export function googleAuthUrlOptionsForPreset(preset: GoogleScopePreset) {
   return {
     access_type: "offline",
-    prompt: "consent",
-    // The warm-reconnect sender grant must remain capability-specific. Reusing
-    // prior grants here could silently attach Drive, Calendar, or Gmail-read
-    // authority to a send-only campaign profile.
-    include_granted_scopes: preset === "gmail_send" ? false : true,
+    prompt: "consent select_account",
+    // Every organization/profile connection is capability-specific. Reusing
+    // prior grants can silently attach another profile's Drive, Calendar, or
+    // Gmail authority to this connection.
+    include_granted_scopes: false,
     scope: scopesForPreset(preset),
   } as const;
 }
 
-export function getGoogleAuthUrl(state: string, options?: { scopePreset?: GoogleScopePreset }) {
+export function getGoogleAuthUrl(
+  state: string,
+  options: { scopePreset: GoogleScopePreset; codeChallenge: string }
+) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(options.codeChallenge)) {
+    throw new ApiError(500, "Invalid OAuth PKCE challenge");
+  }
   const client = getOAuthClient();
-  const preset = options?.scopePreset ?? "full";
+  const preset = options.scopePreset;
   return client.generateAuthUrl({
     ...googleAuthUrlOptionsForPreset(preset),
     state,
+    code_challenge: options.codeChallenge,
+    code_challenge_method: CodeChallengeMethod.S256,
   });
 }
 
@@ -270,32 +304,91 @@ export function assertGoogleTokenScopeForPreset(
   preset: GoogleScopePreset,
   grantedScope: string | null | undefined
 ): void {
-  if (preset !== "gmail_send") return;
-  if (!isGoogleTokenScopeExactForPreset(preset, grantedScope)) {
+  if (!isGoogleTokenScopeBoundedForPreset(preset, grantedScope)) {
     throw new ApiError(
       400,
-      "Google returned a broader or incomplete grant than the Gmail-send profile allows"
+      "Google grant is missing required permissions or includes unsupported data access"
     );
   }
 }
 
-export function isGoogleTokenScopeExactForPreset(
+// Google can return OIDC identity aliases alongside the canonical userinfo
+// scopes even when incremental authorization is disabled. These aliases do
+// not add Drive, Calendar, Contacts, or Gmail-content authority.
+const GOOGLE_IDENTITY_SCOPE_ALIASES = new Set([
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+  "openid",
+  "email",
+  "profile",
+]);
+
+const GOOGLE_DATA_SCOPES_BY_PRESET: Readonly<
+  Record<GoogleScopePreset, readonly string[]>
+> = {
+  core: [...GOOGLE_SCOPE_GROUPS.drive, ...GOOGLE_SCOPE_GROUPS.calendar],
+  drive: [...GOOGLE_SCOPE_GROUPS.drive],
+  calendar: [...GOOGLE_SCOPE_GROUPS.calendar],
+  gmail: [...GOOGLE_SCOPE_GROUPS.gmail],
+  gmail_send: [...GOOGLE_SCOPE_GROUPS.gmailSend],
+  full: [
+    ...GOOGLE_SCOPE_GROUPS.drive,
+    ...GOOGLE_SCOPE_GROUPS.calendar,
+    ...GOOGLE_SCOPE_GROUPS.gmail,
+  ],
+};
+
+export interface GoogleTokenScopeAssessment {
+  valid: boolean;
+  grantedCount: number;
+  missingRequiredCount: number;
+  identityAliasCount: number;
+  unsupportedCount: number;
+}
+
+export function assessGoogleTokenScopeForPreset(
   preset: GoogleScopePreset,
   grantedScope: string | null | undefined
-): boolean {
-  if (preset !== "gmail_send") return true;
+): GoogleTokenScopeAssessment {
   const granted = new Set(
     String(grantedScope || "")
       .split(/\s+/)
       .map((scope) => scope.trim())
       .filter(Boolean)
   );
-  const allowed = new Set(scopesForPreset("gmail_send"));
-  return (
-    granted.size === allowed.size &&
-    [...allowed].every((scope) => granted.has(scope)) &&
-    [...granted].every((scope) => allowed.has(scope))
-  );
+
+  const requiredDataScopes = GOOGLE_DATA_SCOPES_BY_PRESET[preset];
+  const missingRequiredCount =
+    requiredDataScopes.filter((scope) => !granted.has(scope)).length +
+    (granted.has("https://www.googleapis.com/auth/userinfo.email") ||
+    (granted.has("openid") && granted.has("email"))
+      ? 0
+      : 1);
+  const allowed = new Set([
+    ...requiredDataScopes,
+    ...GOOGLE_IDENTITY_SCOPE_ALIASES,
+  ]);
+  const unsupportedCount = [...granted].filter(
+    (scope) => !allowed.has(scope)
+  ).length;
+  const identityAliasCount = [...granted].filter(
+    (scope) => GOOGLE_IDENTITY_SCOPE_ALIASES.has(scope)
+  ).length;
+
+  return {
+    valid: missingRequiredCount === 0 && unsupportedCount === 0,
+    grantedCount: granted.size,
+    missingRequiredCount,
+    identityAliasCount,
+    unsupportedCount,
+  };
+}
+
+export function isGoogleTokenScopeBoundedForPreset(
+  preset: GoogleScopePreset,
+  grantedScope: string | null | undefined
+): boolean {
+  return assessGoogleTokenScopeForPreset(preset, grantedScope).valid;
 }
 
 export async function storeGoogleTokens(
@@ -345,18 +438,27 @@ export async function storeGoogleProfileTokens(
     scope?: string | null;
     token_type?: string | null;
     account_email?: string | null;
+    account_subject?: string | null;
   },
+  scopePreset: GoogleScopePreset,
   log?: Logger
 ) {
   try {
-    const persisted = await persistGoogleAccountProfileTokens(uid, profileId, {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiryDate: tokens.expiry_date,
-      scope: tokens.scope,
-      tokenType: tokens.token_type,
-      accountEmail: tokens.account_email,
-    });
+    assertGoogleTokenScopeForPreset(scopePreset, tokens.scope);
+    const persisted = await persistGoogleAccountProfileTokens(
+      uid,
+      profileId,
+      {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token,
+        expiryDate: tokens.expiry_date,
+        scope: tokens.scope,
+        tokenType: tokens.token_type,
+        accountEmail: tokens.account_email,
+        accountSubject: tokens.account_subject,
+      },
+      scopePreset
+    );
     log?.info("oauth.profile_tokens.saved", {
       uid,
       profileId: persisted.profileId,
@@ -381,18 +483,31 @@ export function resolveMissionControlOrigin(
     return { origin: forcedOrigin, redirected: forcedOrigin !== requestOrigin };
   }
 
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(requestOrigin);
+  } catch {
+    throw new ApiError(503, "Google connections require a configured public origin");
+  }
+  if (
+    (requestUrl.protocol !== "http:" && requestUrl.protocol !== "https:") ||
+    requestUrl.hostname === "0.0.0.0" ||
+    requestUrl.hostname === "::"
+  ) {
+    throw new ApiError(503, "Google connections require a configured public origin");
+  }
+
   const candidate = stateOrigin || requestOrigin;
   try {
     const url = new URL(candidate);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return { origin: requestOrigin, redirected: true };
+      return { origin: requestUrl.origin, redirected: true };
     }
     if (url.hostname === "0.0.0.0" || url.hostname === "::") {
-      return { origin: requestOrigin, redirected: true };
+      return { origin: requestUrl.origin, redirected: true };
     }
 
-    const req = new URL(requestOrigin);
-    if (url.origin === req.origin) {
+    if (url.origin === requestUrl.origin) {
       return { origin: url.origin, redirected: false };
     }
 
@@ -409,9 +524,9 @@ export function resolveMissionControlOrigin(
       return { origin: url.origin, redirected: true };
     }
 
-    return { origin: requestOrigin, redirected: true };
+    return { origin: requestUrl.origin, redirected: true };
   } catch {
-    return { origin: requestOrigin, redirected: true };
+    return { origin: requestUrl.origin, redirected: true };
   }
 }
 
@@ -440,23 +555,15 @@ export async function getAccessTokenForUser(
   let accountResolution: Awaited<
     ReturnType<typeof resolveGoogleAccountTokens>
   >;
-  if (profileId) {
-    try {
-      accountResolution = await resolveGoogleAccountTokens(uid, profileId);
-    } catch (error) {
-      log?.error("oauth.account_token_resolution_failed", {
-        uid,
-        profileId,
-        ...describeAccountTokenResolutionError(error),
-      });
-      throw new ApiError(503, "Google account credential vault is unavailable");
-    }
-  } else {
-    accountResolution = {
-      registryFound: false,
-      profileMapped: false,
-      record: null,
-    };
+  try {
+    accountResolution = await resolveGoogleAccountTokens(uid, profileId);
+  } catch (error) {
+    log?.error("oauth.account_token_resolution_failed", {
+      uid,
+      profileId,
+      ...describeAccountTokenResolutionError(error),
+    });
+    throw new ApiError(503, "Google account credential vault is unavailable");
   }
   if (profileId && !accountResolution.profileMapped) {
     throw new ApiError(409, `Google account profile '${profileId}' is not connected`);
@@ -464,10 +571,19 @@ export async function getAccessTokenForUser(
   if (profileId && accountResolution.profileMapped && !accountResolution.record) {
     throw new ApiError(403, `Google account profile '${profileId}' needs to be reconnected`);
   }
+  if (!profileId && accountResolution.registryFound && !accountResolution.profileMapped) {
+    throw new ApiError(
+      409,
+      "Choose a default Google organization profile in Integrations before using this tool"
+    );
+  }
+  if (!profileId && accountResolution.registryFound && !accountResolution.record) {
+    throw new ApiError(403, "The default Google organization profile needs to be reconnected");
+  }
 
   const accountRecord = accountResolution.record;
   const tokens: StoredGoogleAccountTokens | null =
-    profileId
+    accountRecord
       ? accountRecord?.tokens || null
       : await getStoredGoogleTokens(uid);
   if (!tokens?.refreshToken) {
@@ -550,6 +666,8 @@ export async function getAccessTokenForUser(
         scope: updatedTokens.scope || tokens.scope || null,
         tokenType: updatedTokens.token_type || tokens.tokenType || null,
         accountEmail: tokens.accountEmail || null,
+        accountSubject: tokens.accountSubject || null,
+        scopePreset: tokens.scopePreset || null,
       });
     } else {
       await storeGoogleTokens(
@@ -609,26 +727,4 @@ export async function getAccessTokenForUser(
         : "Failed to refresh Google access token."
     );
   }
-}
-
-export async function revokeGoogleTokens(uid: string, log?: Logger) {
-  const tokens = await getStoredGoogleTokens(uid);
-  if (!tokens?.refreshToken && !tokens?.accessToken) {
-    return;
-  }
-
-  const client = getOAuthClient();
-  client.setCredentials({
-    refresh_token: tokens.refreshToken || undefined,
-    access_token: tokens.accessToken || undefined,
-  });
-
-  try {
-    await client.revokeCredentials();
-  } catch (_error) {
-    log?.warn("google.oauth.revoke_failed");
-  }
-
-  await getAdminDb().collection(TOKEN_COLLECTION).doc(uid).delete();
-  log?.info("google.oauth.revoked", { uid });
 }

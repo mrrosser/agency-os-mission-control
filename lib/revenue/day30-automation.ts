@@ -26,6 +26,7 @@ import {
 } from "@/lib/revenue/outcome-gates";
 import { getPosWorkerStatus, type PosWorkerStatusSnapshot } from "@/lib/revenue/pos-worker";
 import {
+  isRetiredBusinessUnit,
   normalizeBusinessUnit,
   normalizeCrmPipelineStage,
   normalizeOfferCode,
@@ -586,6 +587,7 @@ export function buildHotCloserQueueEntries(args: {
   const slaMs = slaMinutes * 60 * 1000;
 
   const candidates = args.leads
+    .filter((lead) => !isRetiredBusinessUnit(lead.businessUnit))
     .filter((lead) => lead.pipelineStage === "booking" || lead.pipelineStage === "proposal")
     .filter((lead) => {
       const updatedMs = lead.updatedAt?.getTime() || Number.NaN;
@@ -646,7 +648,10 @@ export function buildServiceLabCandidates(args: {
   const maxCandidates = clampInt(args.maxCandidates, 1, 10, 5);
   const rows: ServiceLabCandidate[] = [];
 
-  const actionable = args.decisions.filter((decision) => decision.action !== "watch");
+  const actionable = args.decisions.filter(
+    (decision) =>
+      decision.action !== "watch" && !isRetiredBusinessUnit(decision.businessUnit)
+  );
   for (const decision of actionable) {
     const titleByAction: Record<DecisionAction, string> = {
       scale: `Scale ${decision.offerCode} into a new South-market segment`,
@@ -693,7 +698,9 @@ export function buildServiceLabCandidates(args: {
   }
 
   if (!rows.length && args.memory) {
-    const topLoss = args.memory.lossReasons[0];
+    const topLoss = args.memory.lossReasons.find(
+      (reason) => !isRetiredBusinessUnit(reason.businessUnit)
+    );
     if (topLoss) {
       rows.push({
         candidateId: sha(`${args.weekStartDate}:fallback:${topLoss.businessUnit}:${topLoss.offerCode}`).slice(0, 24),

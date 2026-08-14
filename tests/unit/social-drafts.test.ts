@@ -94,7 +94,7 @@ describe("social drafts helpers", () => {
     const draft: SocialDraftRecord = {
       draftId: "draft-11",
       uid: "uid-1",
-      businessKey: "aicf",
+      businessKey: "rts",
       channels: ["instagram_story", "facebook_post"],
       caption: "Dispatch me to social execution",
       media: [{ type: "image", url: "https://cdn.example.com/dispatch.jpg" }],
@@ -140,8 +140,8 @@ describe("social drafts helpers", () => {
     expect(resolveSocialDraftWebhookUrl("rts")).toBe("https://chat.example.com/default");
   });
 
-  it("falls back to legacy social webhook env when draft webhook envs are unset", () => {
+  it("does not let the retired AICF lane borrow a shared webhook", () => {
     process.env.GOOGLE_CHAT_MKT_SOCIAL_WEBHOOK_URL = "https://chat.example.com/legacy";
-    expect(resolveSocialDraftWebhookUrl("aicf")).toBe("https://chat.example.com/legacy");
+    expect(resolveSocialDraftWebhookUrl("aicf")).toBeNull();
   });
 });

@@ -66,7 +66,6 @@ job_upsert() {
 declare -A TEMPLATE_BY_BUSINESS=(
   [rts]="rts-south-day1"
   [rng]="rng-south-day1"
-  [aicf]="aicf-south-day1"
 )
 
 json_array_from_csv() {
@@ -127,7 +126,7 @@ weekly_template_ids_json() {
 
   local merged="["
   local first=1
-  for business in rts rng aicf; do
+  for business in rts rng; do
     local template_ids_json
     template_ids_json="$(template_ids_json_for_business "$business" "${TEMPLATE_BY_BUSINESS[$business]}")"
     local inner="${template_ids_json#[}"
@@ -145,7 +144,7 @@ weekly_template_ids_json() {
   echo "$merged"
 }
 
-for business in rts rng aicf; do
+for business in rts rng; do
   template_id="${TEMPLATE_BY_BUSINESS[$business]}"
   template_ids_json="$(template_ids_json_for_business "$business" "$template_id")"
   job_name="revenue-day30-${business}-daily"

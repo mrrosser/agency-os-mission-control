@@ -190,7 +190,6 @@ if ([string]::IsNullOrWhiteSpace($revenueUid)) {
 $dailySchedules = @{
   rts = "5 5 * * *"
   rng = "20 5 * * *"
-  aicf = "35 5 * * *"
 }
 
 foreach ($pair in $dailySchedules.GetEnumerator()) {
@@ -214,7 +213,7 @@ foreach ($pair in $dailySchedules.GetEnumerator()) {
 
 $weeklyBody = @{
   uid = $revenueUid
-  templateIds = @("rts-south-day1", "rng-south-day1", "aicf-south-day1")
+  templateIds = @("rts-south-day1", "rng-south-day1")
   dryRun = $false
   forceRun = $false
   timeZone = $TimeZone
@@ -274,6 +273,7 @@ if ($oauthJob) {
 }
 
 foreach ($jobName in @(
+    "revenue-automation-aicf",
     "revenue-day1-rts-start",
     "revenue-day1-rng-start",
     "revenue-day1-aicf-start",

@@ -20,7 +20,7 @@ const bodySchema = z.object({
   from: z.string().optional(),
   audioUrl: z.string().url().optional(),
   text: z.string().trim().min(1).max(700).optional(),
-  businessKey: z.string().trim().min(1).max(40).optional(),
+  businessKey: z.enum(["rng", "rts", "rt"]).optional(),
   voiceId: z.string().trim().min(1).max(120).optional(),
   modelId: z.string().trim().min(1).max(120).optional(),
   idempotencyKey: z.string().optional(),

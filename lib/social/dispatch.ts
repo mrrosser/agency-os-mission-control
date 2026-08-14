@@ -255,6 +255,7 @@ function readDispatchStatusNotificationsEnabled(): boolean {
 }
 
 function resolveSocialDispatchStatusWebhookUrl(businessKey: "aicf" | "rng" | "rts"): string | null {
+  if (businessKey === "aicf") return null;
   const businessSpecific = asString(
     process.env[`SOCIAL_DISPATCH_GOOGLE_CHAT_WEBHOOK_URL_${businessKey.toUpperCase()}`]
   );
@@ -484,6 +485,9 @@ async function bootstrapSmAutoSession(args: {
 }
 
 export async function dispatchSocialQueueItemToSmAuto(args: DispatchAttemptArgs): Promise<SmAutoDispatchResult> {
+  if (args.task.businessKey === "aicf") {
+    throw new ApiError(410, "The AICF social dispatch lane is retired");
+  }
   const endpoint = readSmAutoEndpoint();
   const authHeaders = await buildSmAutoAuthHeaders(endpoint);
   const payload = buildDispatchPayload(args.task, args.correlationId);
@@ -669,6 +673,19 @@ async function claimDispatchTask(args: {
         { merge: true }
       );
       return { state: "invalid" as const, reason: "invalid_queue_payload" };
+    }
+    if (task.businessKey === "aicf") {
+      tx.set(
+        queueRef,
+        {
+          status: "failed",
+          leaseUntil: null,
+          lastError: "retired_business_key",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return { state: "invalid" as const, reason: "retired_business_key" };
     }
 
     const attempt = clampInt(data.attempts, 0, 0, 999) + 1;
@@ -967,6 +984,36 @@ export async function runSocialDispatchWorker(
     }
     const businessSummary = byBusiness[rawTask.businessKey];
 
+    if (rawTask.businessKey === "aicf") {
+      result.skipped += 1;
+      businessSummary.skipped += 1;
+      result.items.push({
+        queueId: rawTask.queueId,
+        draftId: rawTask.draftId,
+        status: "skipped",
+        transport: null,
+        error: "retired_business_key",
+      });
+      if (!dryRun) {
+        await socialDispatchQueueCollection(args.uid).doc(rawTask.queueId).set(
+          {
+            status: "failed",
+            lastError: "retired_business_key",
+            leaseUntil: null,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+      args.log.warn("social.dispatch.worker.retired_business_skipped", {
+        uid: args.uid,
+        queueId: rawTask.queueId,
+        draftId: rawTask.draftId,
+        correlationId: args.correlationId,
+      });
+      continue;
+    }
+
     if (dryRun) {
       result.attempted += 1;
       businessSummary.attempted += 1;
@@ -1088,14 +1135,16 @@ export async function runSocialDispatchWorker(
   });
 
   await Promise.all(
-    Object.values(byBusiness).map((summary) =>
-      postBusinessDispatchSummary({
-        summary,
-        uid: args.uid,
-        correlationId: args.correlationId,
-        log: args.log,
-      })
-    )
+    Object.values(byBusiness)
+      .filter((summary) => summary.businessKey !== "aicf")
+      .map((summary) =>
+        postBusinessDispatchSummary({
+          summary,
+          uid: args.uid,
+          correlationId: args.correlationId,
+          log: args.log,
+        })
+      )
   );
 
   return result;

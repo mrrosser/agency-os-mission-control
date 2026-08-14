@@ -84,6 +84,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
           FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
           FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+          MISSION_CONTROL_PUBLIC_ORIGIN: https://leadflow-review.web.app
           LEAD_RUNS_TASK_QUEUE: ${{ vars.LEAD_RUNS_TASK_QUEUE || 'lead-runs-worker' }}
           LEAD_RUNS_TASK_LOCATION: ${{ vars.LEAD_RUNS_TASK_LOCATION || 'us-central1' }}
           LEAD_RUNS_TASK_SERVICE_ACCOUNT: ${{ vars.LEAD_RUNS_TASK_SERVICE_ACCOUNT || 'social-drafts-scheduler@leadflow-review.iam.gserviceaccount.com' }}
@@ -106,6 +107,10 @@ jobs:
           AGENT_ACTION_ALLOWED_UIDS: ${{ secrets.AGENT_ACTION_ALLOWED_UIDS || '' }}
         run: |
           set -euo pipefail
+          if [ "$MISSION_CONTROL_PUBLIC_ORIGIN" != "https://leadflow-review.web.app" ]; then
+            echo "Mission Control public origin must exactly match the canonical Firebase Hosting origin."
+            exit 1
+          fi
           SERVICE_URL="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
@@ -127,6 +132,7 @@ jobs:
             fi
           }
           append_env_update "LEAD_RUNS_TASK_QUEUE" "$LEAD_RUNS_TASK_QUEUE"
+          append_env_update "MISSION_CONTROL_PUBLIC_ORIGIN" "$MISSION_CONTROL_PUBLIC_ORIGIN"
           append_env_update "LEAD_RUNS_TASK_LOCATION" "$LEAD_RUNS_TASK_LOCATION"
           append_env_update "LEAD_RUNS_TASK_SERVICE_ACCOUNT" "$LEAD_RUNS_TASK_SERVICE_ACCOUNT"
           append_env_update "LEAD_SOURCE_BUDGET_MAX_COST_USD" "$LEAD_SOURCE_BUDGET_MAX_COST_USD"
@@ -145,12 +151,49 @@ jobs:
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
+          PREVIEW_SERVICE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          PREVIEW_DEPLOY_REVISION="$(jq -r '.status.latestCreatedRevisionName // empty' <<< "$PREVIEW_SERVICE_STATE")"
+          if [ -z "$PREVIEW_DEPLOY_REVISION" ]; then
+            echo "Unable to resolve the Firebase preview deployment revision."
+            exit 1
+          fi
+          PREVIEW_DEPLOY_IMAGE="$(gcloud run revisions describe "$PREVIEW_DEPLOY_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format='value(spec.containers[0].image)')"
+          if [ -z "$PREVIEW_DEPLOY_IMAGE" ]; then
+            echo "Unable to resolve the Firebase preview deployment image."
+            exit 1
+          fi
+          PREVIEW_RUNTIME_SUFFIX="pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          PREVIEW_RUNTIME_REVISION="${FIREBASE_SSR_SERVICE}-${PREVIEW_RUNTIME_SUFFIX}"
           gcloud run services update "$FIREBASE_SSR_SERVICE" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
+            --image "$PREVIEW_DEPLOY_IMAGE" \
             --memory 512Mi \
+            --no-traffic \
+            --revision-suffix "$PREVIEW_RUNTIME_SUFFIX" \
             --update-env-vars "^##^$ENV_UPDATES" \
             --quiet
+          PREVIEW_RUNTIME_STATE="$(gcloud run revisions describe "$PREVIEW_RUNTIME_REVISION" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --region "$FIREBASE_REGION" \
+            --format=json)"
+          PREVIEW_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$PREVIEW_RUNTIME_STATE")"
+          PREVIEW_RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$PREVIEW_RUNTIME_STATE")"
+          PREVIEW_RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN="$(jq -r '[.spec.containers[0].env[]? | select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")][0].value // empty' <<< "$PREVIEW_RUNTIME_STATE")"
+          if [ "$PREVIEW_RUNTIME_IMAGE" != "$PREVIEW_DEPLOY_IMAGE" ] || [ "$PREVIEW_RUNTIME_READY" != "True" ]; then
+            echo "Preview runtime revision image or readiness does not match the Firebase deployment."
+            exit 1
+          fi
+          if [ "$PREVIEW_RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN" != "$MISSION_CONTROL_PUBLIC_ORIGIN" ]; then
+            echo "Preview runtime revision is missing the exact canonical Mission Control public origin."
+            exit 1
+          fi
       - name: Firebase preview deploy skipped (missing WIF config)
         if: ${{ env.GCP_AUTH_READY != '1' }}
         run: echo "Missing GCP_WIF_PROVIDER/GCP_WIF_SERVICE_ACCOUNT repo vars; preview deploy skipped."

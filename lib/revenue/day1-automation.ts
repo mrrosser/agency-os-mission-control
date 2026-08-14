@@ -32,6 +32,7 @@ import {
 } from "@/lib/outreach/followups-jobs";
 import { getFollowupsOrgSettings } from "@/lib/outreach/followups-settings";
 import {
+  assertActiveBusinessUnit,
   normalizeBusinessUnit,
   resolveOfferCodeForBusinessUnit,
   workspaceKeyFromBusinessUnit,
@@ -286,6 +287,17 @@ export async function runDay1RevenueAutomation(
   }
 
   const businessUnit = normalizeBusinessUnit(templateParams.businessUnit);
+  try {
+    assertActiveBusinessUnit(businessUnit);
+  } catch {
+    args.log.warn("revenue.day1.retired_business_blocked", {
+      uid: args.uid,
+      templateId: args.templateId,
+      businessUnit,
+      correlationId: args.correlationId,
+    });
+    throw new ApiError(410, "This lead template belongs to a retired business lane");
+  }
   const offerResolution = resolveOfferCodeForBusinessUnit(businessUnit, templateParams.offerCode);
   const offerCode = offerResolution.offerCode;
   if (offerResolution.adjusted && offerResolution.requestedCode) {

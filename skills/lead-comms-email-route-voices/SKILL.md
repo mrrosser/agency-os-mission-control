@@ -1,6 +1,6 @@
 ---
 name: lead-comms-email-route-voices
-description: Route-specific style modules for mission-control email routing. Use when RT Solutions, Rosser NFT Gallery, or AI CoFoundry voice rules should load from references instead of living in one large prompt blob.
+description: Route-specific style modules for mission-control email routing. Use when RT Solutions or Rosser NFT Gallery voice rules should load from references instead of living in one large prompt blob.
 ---
 
 # Lead Comms Email Route Voices
@@ -21,9 +21,8 @@ description: Route-specific style modules for mission-control email routing. Use
 
 ## Example prompts
 - "Load lead-comms-email-route-voices for rt_solutions and draft the reply."
-- "Use lead-comms-email-route-voices with the ai_cofoundry overlay."
+- "Load lead-comms-email-route-voices for rosser_nft_gallery and draft the reply."
 
 ## References
 - `references/routes/rt_solutions.md`
 - `references/routes/rosser_nft_gallery.md`
-- `references/routes/ai_cofoundry.md`

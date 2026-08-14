@@ -65,7 +65,6 @@ job_upsert() {
 declare -A TEMPLATE_BY_BUSINESS=(
   [rts]="rts-south-day1"
   [rng]="rng-south-day1"
-  [aicf]="aicf-south-day1"
 )
 
 json_array_from_csv() {
@@ -113,7 +112,7 @@ template_ids_json_for_business() {
   echo "$parsed"
 }
 
-for business in rts rng aicf; do
+for business in rts rng; do
   template_id="${TEMPLATE_BY_BUSINESS[$business]}"
   template_ids_json="$(template_ids_json_for_business "$business" "$template_id")"
   job_name="revenue-day2-${business}-loop"
@@ -121,4 +120,4 @@ for business in rts rng aicf; do
   job_upsert "$job_name" "$DAY2_CRON" "$payload"
 done
 
-echo "Configured Day2 scheduler loop jobs for rts/rng/aicf in ${TIME_ZONE}."
+echo "Configured Day2 scheduler loop jobs for rts/rng in ${TIME_ZONE}."

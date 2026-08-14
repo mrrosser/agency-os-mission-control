@@ -8,7 +8,10 @@ vi.mock("@/lib/google/tokens", () => ({
   callGoogleAPI: callGoogleAPIMock,
 }));
 
-import { fetchGoogleAccountEmail } from "@/lib/google/oauth";
+import {
+  fetchGoogleAccountEmail,
+  fetchGoogleAccountIdentity,
+} from "@/lib/google/oauth";
 
 describe("Google OAuth account identity", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -17,6 +20,7 @@ describe("Google OAuth account identity", () => {
     callGoogleAPIMock.mockResolvedValue({
       email: " Sender@Example.com ",
       email_verified: true,
+      sub: "google-subject-123",
     });
 
     await expect(fetchGoogleAccountEmail("access-token")).resolves.toBe(
@@ -28,6 +32,10 @@ describe("Google OAuth account identity", () => {
       {},
       undefined
     );
+    await expect(fetchGoogleAccountIdentity("access-token")).resolves.toEqual({
+      email: "sender@example.com",
+      subject: "google-subject-123",
+    });
   });
 
   it("rejects an unverified or missing account identity", async () => {
@@ -37,6 +45,16 @@ describe("Google OAuth account identity", () => {
     });
     await expect(fetchGoogleAccountEmail("access-token")).rejects.toThrow(
       "verified account email"
+    );
+  });
+
+  it("rejects a missing stable Google subject even when email is verified", async () => {
+    callGoogleAPIMock.mockResolvedValue({
+      email: "sender@example.com",
+      email_verified: true,
+    });
+    await expect(fetchGoogleAccountIdentity("access-token")).rejects.toThrow(
+      "stable account identity"
     );
   });
 });

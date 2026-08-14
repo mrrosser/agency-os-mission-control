@@ -37,10 +37,10 @@ import {
     DEFAULT_OFFER_CODE_BY_BUSINESS,
     businessUnitFromWorkspaceKey,
     getOffersForWorkspaceKey,
+    isRetiredBusinessUnit,
     normalizeBusinessUnit,
     normalizeOfferCode,
-    workspaceKeyFromBusinessUnit,
-    type BusinessWorkspaceKey,
+    type ActiveBusinessWorkspaceKey,
 } from "@/lib/revenue/offers";
 import {
     OPERATIONS_POLL_INTERVAL_MS,
@@ -368,8 +368,8 @@ export default function OperationsPage() {
     const [useSMS, setUseSMS] = useState(false);
     const [useAvatar, setUseAvatar] = useState(false);
     const [useOutboundCall, setUseOutboundCall] = useState(false); // NEW: Real phone call
-    const [businessKey, setBusinessKey] = useState<BusinessWorkspaceKey>("aicf");
-    const [offerCode, setOfferCode] = useState<string>(DEFAULT_OFFER_CODE_BY_BUSINESS.ai_cofoundry);
+    const [businessKey, setBusinessKey] = useState<ActiveBusinessWorkspaceKey>("rts");
+    const [offerCode, setOfferCode] = useState<string>(DEFAULT_OFFER_CODE_BY_BUSINESS.rt_solutions);
     const [draftFirst, setDraftFirst] = useState(true);
     const [dryRun, setDryRun] = useState(true);
     const [journeys, setJourneys] = useState<LeadJourneyEntry[]>([]);
@@ -890,6 +890,17 @@ export default function OperationsPage() {
 
     const applyTemplate = (template: LeadRunTemplate) => {
         const p = template.params || {};
+        const templateBusinessKey = template.outreach?.businessKey;
+        if (
+            !String(p.businessUnit || "").trim() ||
+            isRetiredBusinessUnit(p.businessUnit) ||
+            templateBusinessKey === "aicf"
+        ) {
+            toast.error("This saved template is historical", {
+                description: "A retired business template cannot start new work. Create an RT.Solutions template instead.",
+            });
+            return;
+        }
         setLeadQuery(p.query || "");
         setTargetIndustry(p.industry || "");
         setTargetLocation(p.location || "");
@@ -908,7 +919,8 @@ export default function OperationsPage() {
             setMaxCostUsd(Math.max(0.05, Math.min(SOURCE_BUDGET_MAX_COST_USD, next)));
         }
         if (p.businessUnit) {
-            setBusinessKey(workspaceKeyFromBusinessUnit(normalizeBusinessUnit(p.businessUnit)));
+            const normalizedTemplateBusiness = normalizeBusinessUnit(p.businessUnit);
+            setBusinessKey(normalizedTemplateBusiness === "rosser_nft_gallery" ? "rng" : "rts");
         }
         const templateOfferCode = normalizeOfferCode(p.offerCode);
         if (templateOfferCode) {
@@ -916,8 +928,7 @@ export default function OperationsPage() {
         }
 
         const outreach = template.outreach || {};
-        const templateBusinessKey = outreach.businessKey;
-        if (templateBusinessKey === "aicf" || templateBusinessKey === "rng" || templateBusinessKey === "rts") {
+        if (templateBusinessKey === "rng" || templateBusinessKey === "rts") {
             setBusinessKey(templateBusinessKey);
         } else if (templateBusinessKey === "rt") {
             setBusinessKey("rts");
@@ -2698,13 +2709,12 @@ export default function OperationsPage() {
                                             <Label className="text-sm font-medium text-zinc-200">Business Workspace</Label>
                                             <Select
                                                 value={businessKey}
-                                                onValueChange={(value) => setBusinessKey(value as BusinessWorkspaceKey)}
+                                                onValueChange={(value) => setBusinessKey(value as ActiveBusinessWorkspaceKey)}
                                             >
                                                 <SelectTrigger className="h-11 bg-zinc-900 border-zinc-700 text-white">
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent className="border-zinc-800 bg-zinc-950 text-zinc-100">
-                                                    <SelectItem value="aicf">AI CoFoundry</SelectItem>
                                                     <SelectItem value="rng">Rosser NFT Gallery</SelectItem>
                                                     <SelectItem value="rts">RT Solutions</SelectItem>
                                                 </SelectContent>

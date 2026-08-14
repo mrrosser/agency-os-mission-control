@@ -75,7 +75,14 @@ describe("lead run jobs route", () => {
     const jobSet = vi.fn(async () => undefined);
 
     const runRef = {
-      get: vi.fn(async () => ({ exists: true, data: () => ({ userId: "user-1" }) })),
+      get: vi.fn(async () => ({
+        exists: true,
+        data: () => ({
+          userId: "user-1",
+          businessUnit: "rt_solutions",
+          offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        }),
+      })),
       collection: vi.fn((name: string) => {
         if (name === "jobs") {
           return {
@@ -203,7 +210,14 @@ describe("lead run jobs route", () => {
 
   it("returns 429 when active run concurrency cap is reached", async () => {
     const runRef = {
-      get: vi.fn(async () => ({ exists: true, data: () => ({ userId: "user-1" }) })),
+      get: vi.fn(async () => ({
+        exists: true,
+        data: () => ({
+          userId: "user-1",
+          businessUnit: "rt_solutions",
+          offerCode: "RTS-QUICK-WEBSITE-SPRINT",
+        }),
+      })),
       collection: vi.fn((name: string) => {
         if (name === "jobs") {
           return {
@@ -223,6 +237,8 @@ describe("lead run jobs route", () => {
         throw new Error(`unexpected subcollection: ${name}`);
       }),
       data: () => ({
+        businessUnit: "rt_solutions",
+        offerCode: "RTS-QUICK-WEBSITE-SPRINT",
         sourceDiagnostics: {
           fetchedTotal: 3,
           scoredTotal: 1,
@@ -257,5 +273,62 @@ describe("lead run jobs route", () => {
 
     expect(res.status).toBe(429);
     expect(String(data.error || "")).toContain("Too many concurrent active runs");
+  });
+
+  it("does not restart a historical AI Co-Foundry lead run", async () => {
+    const jobSet = vi.fn(async () => undefined);
+    const runRef = {
+      get: vi.fn(async () => ({
+        exists: true,
+        data: () => ({
+          userId: "user-1",
+          businessUnit: "ai_cofoundry",
+          offerCode: "AICF-DISCOVERY",
+        }),
+      })),
+      collection: vi.fn((name: string) => {
+        if (name === "jobs") {
+          return {
+            doc: vi.fn(() => ({
+              get: vi.fn(async () => ({ exists: false })),
+              set: jobSet,
+            })),
+          };
+        }
+        if (name === "leads") {
+          return {
+            get: vi.fn(async () => ({
+              docs: [{ id: "lead-legacy", data: () => ({ score: 90 }) }],
+            })),
+          };
+        }
+        throw new Error(`unexpected subcollection: ${name}`);
+      }),
+    };
+
+    getAdminDbMock.mockReturnValue({
+      collection: vi.fn(() => ({
+        doc: vi.fn(() => runRef),
+      })),
+    } as unknown as ReturnType<typeof getAdminDb>);
+
+    const req = new Request("http://localhost/api/lead-runs/run-aicf/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "start", config: { dryRun: true } }),
+    });
+
+    const res = await POST(
+      req as unknown as Parameters<typeof POST>[0],
+      createContext({ runId: "run-aicf" }) as unknown as Parameters<typeof POST>[1]
+    );
+    const data = await res.json();
+
+    expect(res.status).toBe(410);
+    expect(String(data.error || "")).toContain("retired business lane");
+    expect(jobSet).not.toHaveBeenCalled();
+    expect(triggerLeadRunWorkerMock).not.toHaveBeenCalled();
+    expect(claimLeadRunQuotaMock).not.toHaveBeenCalled();
+    expect(acquireLeadRunConcurrencySlotMock).not.toHaveBeenCalled();
   });
 });

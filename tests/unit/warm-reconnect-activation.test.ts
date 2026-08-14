@@ -91,6 +91,7 @@ function create(overrides: { candidates?: WarmReconnectCandidate[]; googleReady?
     candidates: overrides.candidates || [1, 2, 3, 4, 5].map(candidate),
     googleReady: overrides.googleReady ?? true,
     fromEmail: "marcus@example.com",
+    accountId: "google-account-1",
     preferenceOrigin: "https://leadflow-review.web.app",
     now: new Date("2026-08-12T12:00:00.000Z"),
   });
@@ -282,6 +283,7 @@ describe("warm reconnect activation state machine", () => {
       candidates: [1, 2, 3, 4, 5].map(candidate),
       googleReady: true,
       fromEmail: "marcus@example.com",
+      accountId: "google-account-1",
       preferenceOrigin: "https://leadflow-review.web.app",
     });
     expect(changedAddress.fingerprints.artifactFingerprint).not.toBe(

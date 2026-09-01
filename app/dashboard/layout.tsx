@@ -22,6 +22,7 @@ const DASHBOARD_LINKS = [
     { href: "/dashboard/opportunities", label: "Application Desk", icon: "receipt" as AfroGlyphVariant },
     { href: "/dashboard/crm", label: "CRM", icon: "people" as AfroGlyphVariant },
     { href: "/dashboard/competitors", label: "Competitors", icon: "trend" as AfroGlyphVariant },
+    { href: "/dashboard/aios-evolution/second-brain", label: "Second Brain", icon: "network" as AfroGlyphVariant },
     { href: "/dashboard/agents", label: "Agent Nexus", icon: "network" as AfroGlyphVariant },
     { href: "/dashboard/inbox", label: "Inbox", icon: "inbox" as AfroGlyphVariant },
     { href: "/dashboard/calendar", label: "Calendar", icon: "calendar" as AfroGlyphVariant },

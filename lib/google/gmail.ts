@@ -69,6 +69,7 @@ export interface EmailMessage {
     subject: string;
     body: string;
     isHtml?: boolean;
+    headers?: Record<string, string>;
     attachments?: Array<{
         filename: string;
         mimeType: string;
@@ -157,6 +158,12 @@ export async function sendEmail(
     // Content-Type
     const contentType = email.isHtml ? 'text/html' : 'text/plain';
     messageParts.push(`Content-Type: ${contentType}; charset=utf-8`);
+    for (const [name, value] of Object.entries(email.headers || {})) {
+        if (!/^[A-Za-z0-9-]{1,80}$/.test(name) || /[\r\n]/.test(value)) {
+            throw new Error('Invalid custom email header');
+        }
+        messageParts.push(`${name}: ${value}`);
+    }
     messageParts.push('');
 
     // Body

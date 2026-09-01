@@ -55,6 +55,33 @@ copy .env.local.example .env.local
 npm run dev
 ```
 
+## Autonomous Second Brain
+
+The operator dashboard lives at `/dashboard/aios-evolution/second-brain`. Mission
+Control stores sanitized candidate metadata, health, notification receipts, and the
+authoritative review ledger. Raw traces and proposed skill content remain in the
+local encrypted controller and are never sent to this app.
+
+Production requires five Secret Manager-backed values:
+`SECOND_BRAIN_OPERATOR_UID`, `SECOND_BRAIN_SERVICE_TOKEN`,
+`SECOND_BRAIN_EMAIL_ACTION_SECRET` (at least 32 random characters),
+`SECOND_BRAIN_REVIEW_ALLOWED_UIDS`, `SECOND_BRAIN_REVIEW_EMAILS`, and an HTTPS
+`MISSION_CONTROL_PUBLIC_ORIGIN`. Both reviewer allowlists are mandatory and every
+reviewer must match by Firebase UID and email. All service-supplied UIDs and all
+reviewer reads/writes are bound to the configured operator subtree. The operator
+Firebase account needs connected Gmail OAuth for live digest delivery. Additional
+reviewers need Firebase accounts, but do not need their own Gmail connection.
+
+Digest and urgent-alert routes are service-authenticated and default to dry-run. Live email
+is hard-disabled until seven independently verified shadow cycles and a reviewed outbox
+implementation exist. Email links
+open an authenticated confirmation screen; link GETs are read-only, and a decision
+is recorded only after an explicit POST confirmation. Keep all five values in
+Secret Manager and attach them to the Firebase frameworks Cloud
+Run backend after each deploy. See
+[`docs/runbook-autonomous-second-brain.md`](docs/runbook-autonomous-second-brain.md)
+for identity resolution, secret attachment, verification, and rollback gates.
+
 ## Lead Sourcing + Scoring
 - The Lead Engine lives in `app/dashboard/operations`.
 - If `GOOGLE_PLACES_API_KEY` (or a user-scoped secret `googlePlacesKey`) is set, live lead sourcing is enabled.

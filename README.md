@@ -379,6 +379,8 @@ If your npm version rewrites flags, this direct form always works:
 ```bash
 node scripts/firebase-deploy.mjs deploy --only hosting --project leadflow-review
 ```
+The wrapper sets Firebase function discovery to a bounded 60-second default for this app. To
+override it for diagnosis, set `FUNCTIONS_DISCOVERY_TIMEOUT` to an integer from 10 through 300.
 
 Repo-improvement dashboard behavior after deploy:
 - The hosted UI can render the inbox only when the runtime can read the shared CodexSkills reports and invoke the shared review recorder.

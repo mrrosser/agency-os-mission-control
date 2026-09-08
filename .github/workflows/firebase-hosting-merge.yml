@@ -35,6 +35,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-
       - run: npm ci
+      - name: Block high or critical dependency advisories before release
+        run: npm audit --audit-level=high
       - name: Validate default-off CRM assistant switches
         run: |
           for flag in CRM_ASSISTANT_ENABLED CRM_ASSISTANT_VOICE_ENABLED; do

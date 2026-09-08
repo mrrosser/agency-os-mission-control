@@ -9,6 +9,16 @@ const workflows = [
 const productionWorkflows = [workflows[0]];
 
 describe("Firebase deployment environment propagation", () => {
+  it.each(workflows)("fails closed on high/critical dependency findings before build or cloud authentication in %s", (path) => {
+    const source = readFileSync(join(process.cwd(), path), "utf8");
+    const gate = source.indexOf("run: npm audit --audit-level=high");
+    expect(gate).toBeGreaterThan(source.indexOf("- run: npm ci"));
+    expect(gate).toBeLessThan(source.indexOf("- run: npm run build"));
+    const auth = source.indexOf("uses: google-github-actions/auth@");
+    if (auth !== -1) expect(gate).toBeLessThan(auth);
+    expect(source.slice(source.indexOf("- name: Block high or critical"), gate)).not.toContain("continue-on-error");
+    expect(source.slice(gate, source.indexOf("\n", gate))).not.toContain("||");
+  });
   it("keeps CRM AI switches default-off, hard-disabled in PRs, and verified before release", () => {
     const main = readFileSync(join(process.cwd(), workflows[0]), "utf8");
     const preview = readFileSync(join(process.cwd(), workflows[1]), "utf8");

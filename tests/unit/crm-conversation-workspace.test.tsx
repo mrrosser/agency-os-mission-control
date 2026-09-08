@@ -84,7 +84,7 @@ describe("CRM conversation workspace boundaries", () => {
   });
 
   it("has no transcript persistence, raw-HTML rendering, or automatic site-tool opt-in", () => {
-    const source = readFileSync("components/crm/conversation-workspace.tsx", "utf8");
+    const source = readFileSync("components/crm/conversation-workspace.tsx", "utf8").replace(/\r\n/g, "\n");
     expect(source).not.toMatch(/localStorage|sessionStorage|dangerouslySetInnerHTML/);
     expect(source).toContain("const [siteToolsEnabled, setSiteToolsEnabled] = useState(false)");
     expect(source).toContain("onChange={(event) => toggleSiteTools(event.target.checked)}");

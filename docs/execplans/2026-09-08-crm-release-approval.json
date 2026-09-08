@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runId": "crm-review-recovery-20260908",
+  "correlationId": "crm-review-recovery-20260908",
+  "reviewRoundId": "crm-live-release-20260908-2",
+  "decisionId": "marcus-crm-release-email-enabled-20260908",
+  "decisionPromptSha256": "e2858bc9df82fe6a98e31f6eaad1c3f6e52b3ce48ffe9e0fd2f0147962490094",
+  "actionFingerprint": "482d61cd1f53e4bb29e557ce12385a571f691604cc076eb345eee4ee5cbfa4b9",
+  "status": "approved_with_required_preflight",
+  "approvalScope": [
+    "Publish the tested CRM startup repair, mobile workbench and first-party contact cards to leadflow-review using the protected repository release workflow",
+    "Enable CRM email-provider capability after exact mailbox binding and no-queued-send checks",
+    "Normal release preparation, test records with cleanup, branch/PR creation and required CI checks"
+  ],
+  "excludedScope": [
+    "No newsletter or reconnection campaign send, pilot creation or launch without separate exact copy and recipient approval",
+    "No marketing enrollment, imports or paid checkout creation",
+    "No weakening branch protection, send-only OAuth checks, consent, suppression or campaign approval gates",
+    "No fallback to a personal mailbox or silent change of the Gallery OAuth/From policy"
+  ],
+  "artifactReference": {
+    "branch": "codex/crm-recovery-mobile-20260908",
+    "productionMatchingBase": "36f5d2fc2e3b11598fcde9e41b6066be17361385",
+    "sourceMainAtPreflight": "4d3413fa8a5a8085bbaadc3de8e6c86b4fc9012c",
+    "releaseCommit": null,
+    "pullRequest": null
+  },
+  "pendingInterruptions": [
+    "Required GitHub approving review and strict test/build_and_preview checks before merge",
+    "Reconcile Gallery account identity: current Google identity is mrosser@rossergallery.com while saved OAuth rule requires mrosser@rossernftgallery.com",
+    "Current Gallery grant does not satisfy the exact gmail_send preset; no relaxation authorized"
+  ],
+  "materialDriftPredicate": "Re-review if provider project, release scope, expected sender identity, recipient/copy scope, required protection, runtime secret binding or release artifact materially changes. Compatible release labeling/privacy and configuration-preservation fixes remain in scope but require fresh tests and commit evidence."
+}

@@ -1,5 +1,28 @@
 # Latest Verification Run
 
+## 2026-09-08 CRM release approval and final candidate checks
+
+- Marcus approved publication with email capability, not any actual campaign send.
+- Fresh checks: 737 unit tests, 245 smoke tests, production build/typecheck, full lint (0 errors, 3 existing warnings), and 16 production-start browser scenarios passed.
+- Public card actions now exclude private intake notes. Release workflow preserves five existing Second Brain Secret Manager references and forces sending off on PR previews.
+- Release held: required GitHub approving review/checks; Gallery OAuth identity differs from saved policy and its broad grant fails the exact send-only requirement. No personal-mailbox fallback or scope relaxation.
+- No live deployment or email capability change yet; zero warm pilots/scheduler jobs were found in the fresh audit. No campaign send or import performed.
+- Exact release scope, baseline reconciliation, checks and rollback controls: `docs/reports/2026-09-08-crm-release-pr.md` and `docs/execplans/2026-09-08-crm-release-approval.json`.
+
+## 2026-09-08 CRM startup recovery and mobile workbench (local candidate)
+
+- Correlation ID: `crm-review-recovery-20260908`.
+- Isolated candidate based on production-matching `36f5d2f`; canonical dirty checkout unchanged.
+- Runtime Firebase bootstrap repaired; standalone recovery screen; exact public provider isolation for preferences and two new contact cards.
+- CRM People / Outreach / Share cards / Activity workspaces, quick actions, responsive search/business filtering, focus return and reduced-motion styling. Existing consent, approval and provider-send gates retained.
+- Full lint pass: 0 errors, 3 pre-existing warnings. Unit: 716/716 tests; smoke: 245/245 tests. Production build/typecheck pass with no build-time Firebase configuration.
+- Browser: 14 recovery/public-route scenarios and 2 mocked CRM workflow scenarios pass against production-start. No unexpected browser writes or external requests. Both QR PNGs independently decoded.
+- Redacted Gitleaks checks found no secrets in tracked changes/new text files. High-severity dependency audit gate passes; 13 moderate findings remain in unchanged dependencies. No package fixes applied.
+- No deploy, provider mutation, contact import, marketing enrollment, paid checkout or external send. Live CRM is not repaired until the release candidate is promoted.
+- Release must use the reviewed PR/main Hosting/SSR workflow with fresh ancestry and coordinated rollback proof. Historical rollback manifest is expired; raw deploy wrapper is not the release path.
+- Gallery current intake receipts unverified; RT automatic CRM bridge not built. Public cards and current-live-target QR codes must not be confused with completed intake integration.
+- Run/release details: `docs/execplans/2026-09-08-crm-recovery-mobile.md`. Diagnosis/screenshots and editable newsletter desk are in the RNG Artist Projects sibling repository, described in that plan.
+
 ## 2026-08-14 AICF Firestore operational retirement
 
 - RUN_ID: `20260814-002740-236467`

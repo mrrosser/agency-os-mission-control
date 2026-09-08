@@ -55,6 +55,35 @@ describe("firebase client config resolution", () => {
     expect(findMissingFirebaseClientConfig(config)).toEqual([]);
   });
 
+  it("preserves defaults through the real resolver when env is absent", () => {
+    const defaults = {
+      apiKey: "public-test-key", authDomain: "example.firebaseapp.com", projectId: "example",
+      storageBucket: "example.appspot.com", messagingSenderId: "123", appId: "1:123:web:abc",
+    };
+    expect(resolveFirebaseClientConfig({ defaultsJson: JSON.stringify({ config: defaults }), env: {} })).toEqual(defaults);
+  });
+
+  it("merges only nonempty public values with injected then env then defaults precedence", () => {
+    const config = resolveFirebaseClientConfig({
+      defaultsJson: JSON.stringify({ config: { apiKey: "default-key", projectId: "default-project", storageBucket: "default-bucket" } }),
+      env: { NEXT_PUBLIC_FIREBASE_API_KEY: "env-key", NEXT_PUBLIC_FIREBASE_PROJECT_ID: "  ", DATABASE_PASSWORD: "must-not-leak" },
+      injected: { apiKey: " injected-key ", projectId: "", storageBucket: undefined },
+    });
+    expect(config).toEqual({ apiKey: "injected-key", projectId: "default-project", storageBucket: "default-bucket" });
+    expect(JSON.stringify(config)).not.toContain("must-not-leak");
+  });
+
+  it("ignores invalid defaults and unknown injected keys", () => {
+    expect(resolveFirebaseClientConfig({ defaultsJson: "not-json" })).toEqual({});
+    const extra = { apiKey: "public-key", privateToken: "must-not-leak" };
+    expect(buildFirebaseClientConfigScript({ injected: extra })).not.toContain("must-not-leak");
+  });
+
+  it("accepts Hosting defaults without optional appId while retaining required identity checks", () => {
+    expect(findMissingFirebaseClientConfig({ apiKey: "public-key", authDomain: "test.firebaseapp.com", projectId: "test", storageBucket: "test.appspot.com", messagingSenderId: "123" })).toEqual([]);
+    expect(findMissingFirebaseClientConfig({ appId: "1:123:web:abc" })).toEqual(["apiKey", "authDomain", "projectId"]);
+  });
+
   it("serializes a browser-safe runtime script", () => {
     const script = buildFirebaseClientConfigScript({
       injected: {

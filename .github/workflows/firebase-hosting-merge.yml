@@ -16,6 +16,8 @@ concurrency:
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    env:
+      WARM_RECONNECT_PROVIDER_SEND_ENABLED: ${{ vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +34,8 @@ jobs:
             ${{ runner.os }}-nextjs-
       - run: npm ci
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
+      - name: Validate and pin the explicit provider-send switch
+        run: node scripts/firebase-preserved-runtime.mjs set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
       - name: Validate Firebase public client env
         run: node scripts/validate-firebase-public-env.mjs .env.local
       - run: npm test
@@ -61,6 +65,19 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+      - name: Preserve existing second-brain Secret Manager references
+        if: ${{ env.GCP_AUTH_READY == '1' }}
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
+          FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+        run: |
+          set -euo pipefail
+          LIVE_BEFORE_FRAMEWORKS="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" --project "$FIREBASE_PROJECT_ID" --region "$FIREBASE_REGION" --format=json | jq -er '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | unique | if length == 1 then .[0] else error("Expected one serving revision") end')"
+          SECOND_BRAIN_SNAPSHOT_PATH="$RUNNER_TEMP/second-brain-preserved-bindings.json"
+          SECOND_BRAIN_SECRET_REFS="$(gcloud run revisions describe "$LIVE_BEFORE_FRAMEWORKS" --project "$FIREBASE_PROJECT_ID" --region "$FIREBASE_REGION" --format=json | node scripts/firebase-preserved-runtime.mjs capture "$SECOND_BRAIN_SNAPSHOT_PATH")"
+          echo "SECOND_BRAIN_SNAPSHOT_PATH=$SECOND_BRAIN_SNAPSHOT_PATH" >> "$GITHUB_ENV"
+          echo "SECOND_BRAIN_SECRET_REFS=$SECOND_BRAIN_SECRET_REFS" >> "$GITHUB_ENV"
       - name: Firebase deploy (skips if WIF config missing)
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
@@ -260,6 +277,7 @@ jobs:
           append_env_update "REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE" "$REVENUE_AUTOMATION_WORKER_OIDC_AUDIENCE"
           append_env_update "REVENUE_AUTOMATION_UID" "$REVENUE_AUTOMATION_UID"
           append_env_update "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN"
+          append_env_update "WARM_RECONNECT_PROVIDER_SEND_ENABLED" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
           RUNTIME_CONFIG_ARGS=()
@@ -305,12 +323,14 @@ jobs:
             --no-traffic \
             --revision-suffix "$RUNTIME_SUFFIX" \
             --update-env-vars "^##^$ENV_UPDATES" \
+            --update-secrets "$SECOND_BRAIN_SECRET_REFS" \
             "${RUNTIME_CONFIG_ARGS[@]}" \
             --quiet
           RUNTIME_REVISION_STATE="$(gcloud run revisions describe "$RUNTIME_REVISION" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --format=json)"
+          node scripts/firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED" <<< "$RUNTIME_REVISION_STATE"
           RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$RUNTIME_REVISION_STATE")"
           RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$RUNTIME_REVISION_STATE")"
           RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN="$(jq -r '[.spec.containers[0].env[]? | select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
@@ -488,6 +508,7 @@ jobs:
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --format=json)"
+          node scripts/firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED" <<< "$CANDIDATE_STATE"
           CANDIDATE_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$CANDIDATE_STATE")"
           CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$CANDIDATE_STATE")"
           if [ "$CANDIDATE_IMAGE" != "$FIREBASE_RUNTIME_IMAGE" ] || [ "$CANDIDATE_READY" != "True" ]; then
@@ -622,6 +643,7 @@ jobs:
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --format=json)"
+          node scripts/firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED" <<< "$REBOUND_CANDIDATE_STATE"
           REBOUND_CANDIDATE_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$REBOUND_CANDIDATE_STATE")"
           REBOUND_CANDIDATE_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$REBOUND_CANDIDATE_STATE")"
           if [ "$REBOUND_SERVING_REVISION" != "$FIREBASE_RUNTIME_REVISION" ] || \

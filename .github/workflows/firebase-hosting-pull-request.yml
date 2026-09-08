@@ -16,6 +16,9 @@ jobs:
   build_and_preview:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
+    env:
+      # A preview must never inherit the production repository send switch.
+      WARM_RECONNECT_PROVIDER_SEND_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +35,8 @@ jobs:
             ${{ runner.os }}-nextjs-
       - run: npm ci
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
+      - name: Force provider sends off for preview framework discovery
+        run: node scripts/firebase-preserved-runtime.mjs set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
       - run: npm test
       - run: npm run build
         env:
@@ -58,6 +63,19 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+      - name: Preserve existing second-brain Secret Manager references
+        if: ${{ env.GCP_AUTH_READY == '1' }}
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'leadflow-review' }}
+          FIREBASE_REGION: ${{ vars.CLOUD_RUN_REGION || 'us-central1' }}
+          FIREBASE_SSR_SERVICE: ${{ vars.FIREBASE_SSR_SERVICE || 'ssrleadflowreview' }}
+        run: |
+          set -euo pipefail
+          LIVE_BEFORE_FRAMEWORKS="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" --project "$FIREBASE_PROJECT_ID" --region "$FIREBASE_REGION" --format=json | jq -er '[.status.traffic[]? | select((.percent // 0) == 100) | .revisionName] | unique | if length == 1 then .[0] else error("Expected one serving revision") end')"
+          SECOND_BRAIN_SNAPSHOT_PATH="$RUNNER_TEMP/second-brain-preserved-bindings.json"
+          SECOND_BRAIN_SECRET_REFS="$(gcloud run revisions describe "$LIVE_BEFORE_FRAMEWORKS" --project "$FIREBASE_PROJECT_ID" --region "$FIREBASE_REGION" --format=json | node scripts/firebase-preserved-runtime.mjs capture "$SECOND_BRAIN_SNAPSHOT_PATH")"
+          echo "SECOND_BRAIN_SNAPSHOT_PATH=$SECOND_BRAIN_SNAPSHOT_PATH" >> "$GITHUB_ENV"
+          echo "SECOND_BRAIN_SECRET_REFS=$SECOND_BRAIN_SECRET_REFS" >> "$GITHUB_ENV"
       - name: Firebase preview deploy (skips if WIF config missing)
         if: ${{ env.GCP_AUTH_READY == '1' }}
         env:
@@ -149,6 +167,7 @@ jobs:
           append_env_update "LEADOPS_MCP_AUTH_MODE" "$LEADOPS_MCP_AUTH_MODE"
           append_env_update "LEADOPS_MCP_ID_TOKEN_AUDIENCE" "$LEADOPS_MCP_ID_TOKEN_AUDIENCE"
           append_env_update "LEADOPS_MCP_API_KEY" "$LEADOPS_MCP_API_KEY"
+          append_env_update "WARM_RECONNECT_PROVIDER_SEND_ENABLED" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
           PREVIEW_SERVICE_STATE="$(gcloud run services describe "$FIREBASE_SSR_SERVICE" \
@@ -178,11 +197,13 @@ jobs:
             --no-traffic \
             --revision-suffix "$PREVIEW_RUNTIME_SUFFIX" \
             --update-env-vars "^##^$ENV_UPDATES" \
+            --update-secrets "$SECOND_BRAIN_SECRET_REFS" \
             --quiet
           PREVIEW_RUNTIME_STATE="$(gcloud run revisions describe "$PREVIEW_RUNTIME_REVISION" \
             --project "$FIREBASE_PROJECT_ID" \
             --region "$FIREBASE_REGION" \
             --format=json)"
+          node scripts/firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH" "false" <<< "$PREVIEW_RUNTIME_STATE"
           PREVIEW_RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$PREVIEW_RUNTIME_STATE")"
           PREVIEW_RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$PREVIEW_RUNTIME_STATE")"
           PREVIEW_RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN="$(jq -r '[.spec.containers[0].env[]? | select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")][0].value // empty' <<< "$PREVIEW_RUNTIME_STATE")"

@@ -19,6 +19,10 @@ const {
 }));
 
 vi.mock("next/navigation", () => ({ usePathname: pathnameMock }));
+vi.mock("next/dynamic", async () => {
+  const { WorkspaceProviders } = await import("@/components/providers/workspace-providers");
+  return { default: () => WorkspaceProviders };
+});
 vi.mock("@/components/providers/auth-provider", () => ({ AuthProvider: authProviderMock }));
 vi.mock("@/components/providers/telemetry-reporter", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/components/providers/telemetry-reporter")>()),
@@ -36,7 +40,7 @@ describe("preference capability page provider isolation", () => {
     vi.clearAllMocks();
   });
 
-  it.each(["/preferences", "/preferences/"])(
+  it.each(["/preferences", "/preferences/", "/connect/rosser-gallery", "/connect/rosser-gallery/", "/connect/rt-solutions", "/connect/rt-solutions/"])(
     "mounts no authenticated chrome or telemetry on %s",
     (pathname) => {
       pathnameMock.mockReturnValue(pathname);

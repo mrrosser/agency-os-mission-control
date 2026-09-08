@@ -8,6 +8,44 @@ const workflows = [
 ];
 
 describe("Firebase deployment environment propagation", () => {
+  it.each(workflows)("preserves existing second-brain references before framework mutation in %s", (path) => {
+    const source = readFileSync(join(process.cwd(), path), "utf8");
+    const capture = source.indexOf('firebase-preserved-runtime.mjs capture "$SECOND_BRAIN_SNAPSHOT_PATH"');
+    const firstFrameworkDeploy = source.indexOf("functions:artifacts:setpolicy");
+    const updateSecrets = source.indexOf('--update-secrets "$SECOND_BRAIN_SECRET_REFS"');
+    const verify = source.indexOf('firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH"');
+    expect(capture).toBeGreaterThan(-1);
+    expect(firstFrameworkDeploy).toBeGreaterThan(capture);
+    expect(updateSecrets).toBeGreaterThan(firstFrameworkDeploy);
+    expect(verify).toBeGreaterThan(updateSecrets);
+    expect(source).toContain('gcloud run revisions describe "$LIVE_BEFORE_FRAMEWORKS"');
+    expect(source).toContain('select((.percent // 0) == 100)');
+    expect(source).toContain('append_env_update "WARM_RECONNECT_PROVIDER_SEND_ENABLED" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"');
+    expect(source).not.toContain("gcloud secrets versions access");
+    expect(source).not.toContain("gcloud secrets create");
+    expect(source).not.toContain("gcloud secrets versions add");
+  });
+
+  it("allows an explicit default-off production switch but hard-disables preview execution", () => {
+    const main = readFileSync(join(process.cwd(), workflows[0]), "utf8");
+    const preview = readFileSync(join(process.cwd(), workflows[1]), "utf8");
+    expect(main).toContain("WARM_RECONNECT_PROVIDER_SEND_ENABLED: ${{ vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED || 'false' }}");
+    expect(preview).toContain('WARM_RECONNECT_PROVIDER_SEND_ENABLED: "false"');
+    expect(preview).not.toContain("vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED");
+    expect(preview).toContain('verify "$SECOND_BRAIN_SNAPSHOT_PATH" "false"');
+    for (const source of [main, preview]) {
+      const pinDiscovery = source.indexOf('set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"');
+      expect(pinDiscovery).toBeGreaterThan(-1);
+      expect(pinDiscovery).toBeLessThan(source.indexOf("- run: npm run build"));
+    }
+    const finalVerify = main.indexOf('<<< "$CANDIDATE_STATE"');
+    expect(finalVerify).toBeGreaterThan(main.indexOf("trap rollback_runtime EXIT"));
+    expect(finalVerify).toBeLessThan(main.indexOf('--to-revisions="$FIREBASE_RUNTIME_REVISION=100"'));
+    const reboundVerify = main.indexOf('<<< "$REBOUND_CANDIDATE_STATE"');
+    expect(reboundVerify).toBeGreaterThan(finalVerify);
+    expect(reboundVerify).toBeLessThan(main.indexOf("hosting:clone"));
+  });
+
   it.each(workflows)("revokes the Agent Nexus allowlist when the secret is empty in %s", (path) => {
     const source = readFileSync(join(process.cwd(), path), "utf8");
 

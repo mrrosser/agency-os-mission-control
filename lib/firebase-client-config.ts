@@ -2,9 +2,9 @@ export type FirebaseClientConfig = {
   apiKey: string;
   authDomain: string;
   projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
 };
 
 export const FIREBASE_CLIENT_CONFIG_KEYS: Array<keyof FirebaseClientConfig> = [
@@ -14,6 +14,12 @@ export const FIREBASE_CLIENT_CONFIG_KEYS: Array<keyof FirebaseClientConfig> = [
   "storageBucket",
   "messagingSenderId",
   "appId",
+];
+
+// This app initializes Auth and Firestore, not Analytics or Messaging. Hosting's
+// valid runtime defaults can omit appId; never invent one or block login for it.
+export const REQUIRED_FIREBASE_CLIENT_CONFIG_KEYS: Array<keyof FirebaseClientConfig> = [
+  "apiKey", "authDomain", "projectId",
 ];
 
 type PartialFirebaseClientConfig = Partial<Record<keyof FirebaseClientConfig, string>>;
@@ -60,17 +66,26 @@ export function resolveFirebaseClientConfig(options: {
   defaultsJson?: string | undefined;
   injected?: PartialFirebaseClientConfig | undefined;
 }): PartialFirebaseClientConfig {
-  return {
-    ...buildFirebaseClientConfigFromDefaults(options.defaultsJson),
-    ...buildFirebaseClientConfigFromEnv(options.env ?? {}),
-    ...options.injected,
-  };
+  const resolved: PartialFirebaseClientConfig = {};
+  // Empty env variables and partial injected config must not erase valid defaults.
+  // Copy only the public allowlist, never arbitrary server environment values.
+  for (const source of [
+    buildFirebaseClientConfigFromDefaults(options.defaultsJson),
+    buildFirebaseClientConfigFromEnv(options.env ?? {}),
+    options.injected,
+  ]) {
+    for (const key of FIREBASE_CLIENT_CONFIG_KEYS) {
+      const value = normalizeValue(source?.[key]);
+      if (value) resolved[key] = value;
+    }
+  }
+  return resolved;
 }
 
 export function findMissingFirebaseClientConfig(
   config: PartialFirebaseClientConfig
 ): Array<keyof FirebaseClientConfig> {
-  return FIREBASE_CLIENT_CONFIG_KEYS.filter((key) => !normalizeValue(config[key]));
+  return REQUIRED_FIREBASE_CLIENT_CONFIG_KEYS.filter((key) => !normalizeValue(config[key]));
 }
 
 export function buildFirebaseClientConfigScript(options: {

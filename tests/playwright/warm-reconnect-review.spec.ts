@@ -491,8 +491,19 @@ test.describe("local mocked warm reconnect review", () => {
           contentType: "application/json",
           body: JSON.stringify({
             sourceOfTruth: "firestore_projected",
-            customers: [],
+            customers: [
+              { customerId: "local-rt", companyName: "Local RT connection", contactName: "Test Builder", email: "builder@example.test", businessUnit: "rt_solutions", pipelineStage: "lead_capture", timelineCount: 1 },
+              { customerId: "local-gallery", companyName: "Local gallery connection", contactName: "Test Artist", email: "artist@example.test", businessUnit: "rosser_nft_gallery", pipelineStage: "lead_capture", timelineCount: 0 },
+            ],
           }),
+        }),
+      );
+      await page.route("**/api/crm/customers/*/timeline?limit=50", (route) =>
+        route.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify({ sourceOfTruth: "firestore_projected", events: [
+            { eventId: "local-event", type: "note", channel: "system", summary: "Synthetic local contact activity", occurredAt: "2026-09-08T12:00:00.000Z" },
+          ] }),
         }),
       );
       await page.route("**/api/crm/warm-reconnect/review", async (route) => {
@@ -539,6 +550,36 @@ test.describe("local mocked warm reconnect review", () => {
 
       await seedLocalFirebaseUser(page);
       await page.goto("/dashboard/crm", { waitUntil: "domcontentloaded" });
+
+      await expect(page.getByRole("heading", { name: "Your next conversation." })).toBeVisible();
+      const tour = page.getByTestId("first-scan-tour");
+      if (await tour.isVisible().catch(() => false)) await tour.getByTitle("Dismiss").click();
+      await expect(page.getByRole("tab", { name: "People", exact: true })).toHaveAttribute("aria-selected", "true");
+      await page.getByRole("button", { name: /Add a contact Capture/ }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await page.getByLabel("Company or display name").fill("Local review only");
+      await expect(page.getByRole("button", { name: "Save contact", exact: true })).toBeEnabled();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: /Add a contact Capture/ })).toBeFocused();
+      await expect(page.getByText("Synthetic local contact activity", { exact: true })).toBeVisible();
+      await page.locator("#crm-brand-filter").selectOption("rosser_nft_gallery");
+      await expect(page.getByText("1 of 2 loaded pipeline contacts.", { exact: false })).toBeVisible();
+      await expect(page.getByText("Synthetic local contact activity", { exact: true })).not.toBeVisible();
+      await expect(page.getByText("builder@example.test", { exact: true })).not.toBeVisible();
+      await expect(page.getByText("Select a customer to inspect timeline state.", { exact: true })).toBeVisible();
+      await page.getByRole("searchbox", { name: "Find a pipeline contact" }).fill("nobody");
+      await expect(page.getByText("0 of 2 loaded pipeline contacts.", { exact: false })).toBeVisible();
+      await page.getByRole("searchbox", { name: "Find a pipeline contact" }).clear();
+      await page.locator("#crm-brand-filter").selectOption("all");
+      await expect(page.getByText("2 of 2 loaded pipeline contacts.", { exact: false })).toBeVisible();
+      await expect(page.getByRole("tablist", { name: "CRM workspaces" })).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({ path: testInfo.outputPath(`workbench-${viewport.name}.png`), fullPage: false });
+      await page.getByRole("button", { name: /Share my card Your links/ }).click();
+      await expect(page.getByRole("tab", { name: "Share cards", exact: true })).toHaveAttribute("aria-selected", "true");
+      await expect(page.locator("#crm-panel-share")).toBeVisible();
+      await page.getByRole("button", { name: /Review outreach Draft/ }).click();
+      await expect(page.getByRole("tab", { name: "Outreach", exact: true })).toHaveAttribute("aria-selected", "true");
 
       const loadingReview = page.getByTestId("warm-reconnect-campaign");
       await expect(

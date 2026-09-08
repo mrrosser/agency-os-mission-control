@@ -1,31 +1,18 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Toaster } from "sonner";
-import { BetaFeedback } from "@/components/feedback/BetaFeedback";
-import { AuthProvider } from "@/components/providers/auth-provider";
-import ErrorBoundary from "@/components/providers/error-boundary";
-import { TelemetryReporter } from "@/components/providers/telemetry-reporter";
+import dynamic from "next/dynamic";
+import { isPublicProviderPath } from "@/lib/public-provider-paths";
 
-function isPreferenceCapabilityPath(pathname: string): boolean {
-  return pathname === "/preferences" || pathname === "/preferences/";
-}
+// Keep Firebase's module initialization out of public share/preference pages.
+const WorkspaceProviders = dynamic(() => import("./workspace-providers").then(module => module.WorkspaceProviders));
 
 export function RootProviders({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
-  if (isPreferenceCapabilityPath(pathname)) {
+  if (isPublicProviderPath(pathname)) {
     return <>{children}</>;
   }
 
-  return (
-    <AuthProvider>
-      <TelemetryReporter />
-      <ErrorBoundary>
-        {children}
-        <Toaster position="top-right" theme="dark" />
-        <BetaFeedback />
-      </ErrorBoundary>
-    </AuthProvider>
-  );
+  return <WorkspaceProviders>{children}</WorkspaceProviders>;
 }

@@ -167,12 +167,120 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain:
+    get:
+      operationId: getSecondBrainSnapshot
+      summary: Read sanitized Second Brain health, candidates, decisions, and notification receipts
+      security:
+        - firebaseBearer: []
+      responses:
+        "200":
+          description: Caller-scoped Second Brain snapshot
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Reviewer allowlists are not fully configured
+  /api/agents/second-brain/candidates/sync:
+    post:
+      operationId: syncSecondBrainCandidates
+      summary: Synchronize sanitized candidate metadata and controller health
+      security:
+        - secondBrainService: []
+      responses:
+        "200":
+          description: Candidate metadata synchronized idempotently
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain/decisions:
+    get:
+      operationId: listSecondBrainDecisions
+      summary: List authoritative review decisions after an optional cursor
+      security:
+        - secondBrainService: []
+      responses:
+        "200":
+          description: Ordered decision records and the next cursor
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain/notifications/digest:
+    post:
+      operationId: sendSecondBrainDigest
+      summary: Send an idempotent daily review digest or dry run
+      security:
+        - secondBrainService: []
+      responses:
+        "200":
+          description: Dry-run or delivery receipt
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain/notifications/urgent:
+    post:
+      operationId: sendSecondBrainUrgentAlert
+      summary: Send an idempotent urgent safety or rollback alert
+      security:
+        - secondBrainService: []
+      responses:
+        "200":
+          description: Dry-run or delivery receipt
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain/review:
+    post:
+      operationId: reviewSecondBrainCandidate
+      summary: Record an authenticated candidate-hash-bound review
+      security:
+        - firebaseBearer: []
+      responses:
+        "200":
+          description: Authoritative review record
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Candidate hash or review state conflict
+  /api/agents/second-brain/email-action/inspect:
+    get:
+      operationId: inspectSecondBrainEmailAction
+      summary: Inspect an authenticated email action without consuming it
+      security:
+        - firebaseBearer: []
+      responses:
+        "200":
+          description: Pending email action metadata
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/agents/second-brain/email-action/confirm:
+    post:
+      operationId: confirmSecondBrainEmailAction
+      summary: Consume a one-time email action and record its review
+      security:
+        - firebaseBearer: []
+      responses:
+        "200":
+          description: Authoritative review record
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Token reused or candidate state changed
 components:
   securitySchemes:
     firebaseBearer:
       type: http
       scheme: bearer
       bearerFormat: Firebase ID token
+    secondBrainService:
+      type: http
+      scheme: bearer
+      bearerFormat: Dedicated Second Brain service token
   parameters:
     CorrelationId:
       name: X-Correlation-Id

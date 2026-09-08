@@ -1,18 +1,13 @@
 import { spawn } from "node:child_process";
 import { normalizeFirebaseDeployArgs } from "./firebase-deploy-args.mjs";
+import { buildFirebaseDeployEnv } from "./firebase-deploy-env.mjs";
 
 const argv = process.argv.slice(2);
 const args = normalizeFirebaseDeployArgs(argv);
 
 // Firebase frameworks deploy may run an npm install for the generated SSR backend.
 // Force production-only installs so devDependencies (e.g. Playwright) don't bloat the bundle.
-const env = {
-  ...process.env,
-  NODE_ENV: "production",
-  // Prefer npm's modern omit flag over deprecated "production=true".
-  NPM_CONFIG_OMIT: "dev",
-  FIREBASE_CLI_EXPERIMENTS: process.env.FIREBASE_CLI_EXPERIMENTS || "webframeworks",
-};
+const env = buildFirebaseDeployEnv(process.env);
 
 const npxCmd = process.platform === "win32" ? "npx.cmd" : "npx";
 const child = spawn(

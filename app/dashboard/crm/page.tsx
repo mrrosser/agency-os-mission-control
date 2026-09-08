@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
-import { AlertTriangle, Calendar, CircleCheck, Plus } from "lucide-react";
+import { AlertTriangle, Calendar, CircleCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
@@ -10,7 +10,7 @@ import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activat
 import { GoogleOAuthCallbackFeedback } from "@/components/integrations/GoogleOAuthCallbackFeedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -37,6 +37,10 @@ import type {
   WarmReconnectReviewResponse,
 } from "@/lib/crm/warm-reconnect-types";
 import { toast } from "sonner";
+import { OperatorWorkbench } from "@/components/crm/operator-workbench";
+import { FirstPartyShareCards } from "@/components/crm/first-party-share-cards";
+import { filterCrmPeople, type CrmWorkspace, type CrmBrandFilter } from "@/lib/crm/workbench";
+import "./workbench.css";
 
 interface Lead {
   id: string;
@@ -183,8 +187,14 @@ const DAILY_OUTCOME_STATUS_COLORS: Record<DailyOutcomeStatus, string> = {
 
 export default function CRMPage() {
   const { user } = useAuth();
+  const [workspace, setWorkspace] = useState<CrmWorkspace>("people");
+  const [peopleQuery, setPeopleQuery] = useState("");
+  const [brandFilter, setBrandFilter] = useState<CrmBrandFilter>("all");
+  const addContactButtonRef = useRef<HTMLButtonElement>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(false);
+  const [leadsLoadError, setLeadsLoadError] = useState<string | null>(null);
+  const [leadsLoadComplete, setLeadsLoadComplete] = useState(false);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [sourceOfTruth, setSourceOfTruth] = useState<"paperclip" | "firestore_projected">(
     "firestore_projected"
@@ -224,22 +234,29 @@ export default function CRMPage() {
     [newLeadData.businessUnit]
   );
 
+  const visibleLeads = useMemo(() => filterCrmPeople(leads, peopleQuery, brandFilter), [leads, peopleQuery, brandFilter]);
   const selectedLead = useMemo(
-    () => leads.find((lead) => lead.id === selectedLeadId) || null,
-    [leads, selectedLeadId]
+    () => visibleLeads.find((lead) => lead.id === selectedLeadId) || null,
+    [visibleLeads, selectedLeadId]
   );
+  useEffect(() => {
+    if (selectedLeadId && !visibleLeads.some((lead) => lead.id === selectedLeadId)) {
+      setSelectedLeadId(null);
+      setTimelineEvents([]);
+    }
+  }, [visibleLeads, selectedLeadId]);
 
   const leadsByStage = useMemo(() => {
     const grouped = Object.fromEntries(
       CRM_PIPELINE_STAGE_ORDER.map((stage) => [stage, [] as Lead[]])
     ) as Record<CrmPipelineStage, Lead[]>;
 
-    for (const lead of leads) {
+    for (const lead of visibleLeads) {
       grouped[lead.pipelineStage].push(lead);
     }
 
     return grouped;
-  }, [leads]);
+  }, [visibleLeads]);
 
   useEffect(() => {
     const normalized = normalizeOfferCode(newLeadData.offerCode);
@@ -350,6 +367,7 @@ export default function CRMPage() {
   async function loadCustomers() {
     if (!user) return;
     setLoadingLeads(true);
+    setLeadsLoadError(null);
     try {
       const headers = await buildAuthHeaders(user);
       const res = await fetch("/api/crm/customers?limit=200", {
@@ -380,12 +398,15 @@ export default function CRMPage() {
       }));
 
       setLeads(nextLeads);
+      setLeadsLoadComplete(true);
       setSourceOfTruth(data.sourceOfTruth);
       setSelectedLeadId((current) => {
         if (current && nextLeads.some((lead) => lead.id === current)) return current;
         return nextLeads[0]?.id || null;
       });
     } catch (error) {
+      setLeadsLoadError(error instanceof Error ? error.message : "Unable to load pipeline contacts.");
+      setLeadsLoadComplete(false);
       toast.error("Failed to load CRM", {
         description: error instanceof Error ? error.message : String(error),
       });
@@ -490,6 +511,12 @@ export default function CRMPage() {
     await updateLeadStage(draggableId, nextStage);
   };
 
+  function openContactTimeline(leadId: string) {
+    setSelectedLeadId(leadId);
+    document.getElementById("crm-contact-timeline")?.scrollIntoView({ block: "start", behavior: "auto" });
+    document.getElementById("crm-contact-timeline")?.focus({ preventScroll: true });
+  }
+
   const handleCreateLead = async () => {
     if (!user || !newLeadData.companyName.trim()) return;
     try {
@@ -533,10 +560,10 @@ export default function CRMPage() {
   };
 
   return (
-    <div className="min-h-screen bg-black p-4 sm:p-6 md:p-8">
-      <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-white">CRM &amp; Revenue Pipeline</h1>
+    <div className="crm-page min-h-screen">
+      <OperatorWorkbench active={workspace} onChange={setWorkspace} onAdd={() => setNewLeadOpen(true)} addButtonRef={addContactButtonRef} registry={portfolioRegistry} loading={loadingPortfolioRegistry} />
+      <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="text-xs">
           <p className="text-zinc-400">
             Editable lead pipeline source:{" "}
             <span className="text-zinc-200">
@@ -546,43 +573,42 @@ export default function CRMPage() {
         </div>
 
         <Dialog open={newLeadOpen} onOpenChange={setNewLeadOpen}>
-          <DialogTrigger asChild>
-            <Button className="w-full bg-white text-black hover:bg-zinc-200 md:w-auto">
-              <Plus className="mr-2 h-4 w-4" /> Add Lead
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="border-zinc-800 bg-zinc-950 text-white">
+          <DialogContent className="max-h-[90dvh] overflow-y-auto border-zinc-800 bg-zinc-950 text-white" onCloseAutoFocus={(event) => { event.preventDefault(); addContactButtonRef.current?.focus(); }}>
             <DialogHeader>
-              <DialogTitle>Add New Lead</DialogTitle>
+              <DialogTitle>Add a contact</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-4">
               <div className="space-y-2">
-                <Label>Company Name</Label>
+                <Label htmlFor="crm-company">Company or display name</Label>
                 <Input
+                  id="crm-company"
                   value={newLeadData.companyName}
                   onChange={(e) => setNewLeadData({ ...newLeadData, companyName: e.target.value })}
                   className="border-zinc-700 bg-zinc-900"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Contact Name</Label>
+                <Label htmlFor="crm-name">Contact name</Label>
                 <Input
+                  id="crm-name"
                   value={newLeadData.founderName}
                   onChange={(e) => setNewLeadData({ ...newLeadData, founderName: e.target.value })}
                   className="border-zinc-700 bg-zinc-900"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Email</Label>
+                <Label htmlFor="crm-email">Email</Label>
                 <Input
+                  id="crm-email" type="email" autoComplete="email"
                   value={newLeadData.email}
                   onChange={(e) => setNewLeadData({ ...newLeadData, email: e.target.value })}
                   className="border-zinc-700 bg-zinc-900"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Phone</Label>
+                <Label htmlFor="crm-phone">Phone</Label>
                 <Input
+                  id="crm-phone" type="tel" autoComplete="tel"
                   value={newLeadData.phone}
                   onChange={(e) => setNewLeadData({ ...newLeadData, phone: e.target.value })}
                   className="border-zinc-700 bg-zinc-900"
@@ -626,8 +652,9 @@ export default function CRMPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={handleCreateLead} className="w-full">
-                Create Lead
+              <p className="text-xs text-zinc-400">Adding a contact does not subscribe them to email or authorize outreach.</p>
+              <Button onClick={handleCreateLead} className="min-h-12 w-full" disabled={!newLeadData.companyName.trim()}>
+                Save contact
               </Button>
             </div>
           </DialogContent>
@@ -638,11 +665,15 @@ export default function CRMPage() {
         <GoogleOAuthCallbackFeedback />
       </div>
 
+      <div id="crm-panel-outreach" role="tabpanel" aria-labelledby="crm-tab-outreach" hidden={workspace !== "outreach"} className="crm-panel">
+      <details className="crm-registry-detail">
+      <summary>Imported registry and permission evidence</summary>
       <PortfolioRegistrySummary
         summary={portfolioRegistry}
         loading={loadingPortfolioRegistry}
         error={portfolioRegistryError}
       />
+      </details>
 
       <WarmReconnectCampaign
         campaign={warmReconnectCampaign}
@@ -651,7 +682,13 @@ export default function CRMPage() {
       />
 
       <WarmReconnectActivation campaign={warmReconnectCampaign} />
+      </div>
 
+      <div id="crm-panel-share" role="tabpanel" aria-labelledby="crm-tab-share" hidden={workspace !== "share"} className="crm-panel">
+        <FirstPartyShareCards />
+      </div>
+
+      <div id="crm-panel-activity" role="tabpanel" aria-labelledby="crm-tab-activity" hidden={workspace !== "activity"} className="crm-panel">
       <section
         aria-labelledby="daily-outcome-heading"
         className="mb-6 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 sm:p-4"
@@ -759,10 +796,19 @@ export default function CRMPage() {
           </div>
         )}
       </section>
+      </div>
 
+      <div id="crm-panel-people" role="tabpanel" aria-labelledby="crm-tab-people" hidden={workspace !== "people"} className="crm-panel">
+      <div className="crm-filterbar">
+        <label htmlFor="crm-search">Find a pipeline contact<input id="crm-search" type="search" value={peopleQuery} onChange={(event) => setPeopleQuery(event.target.value)} placeholder="Name, organization, email or phone" /></label>
+        <label htmlFor="crm-brand-filter">Business<select id="crm-brand-filter" value={brandFilter} onChange={(event) => setBrandFilter(event.target.value as CrmBrandFilter)}><option value="all">Both businesses</option><option value="rosser_nft_gallery">Rosser Gallery</option><option value="rt_solutions">RT Solutions</option></select></label>
+      </div>
+      <p className="mb-4 text-xs text-zinc-400" role="status">{loadingLeads ? "Loading pipeline contacts…" : !leadsLoadComplete ? "Pipeline count unavailable until the source loads." : `${visibleLeads.length} of ${leads.length} loaded pipeline contacts. Imported registry people are reviewed separately under Outreach.`}</p>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-xl border border-zinc-900 bg-zinc-950/30 p-3 md:overflow-x-auto">
-          {loadingLeads ? (
+          {leadsLoadError ? (
+            <div role="alert" className="p-5 text-sm text-amber-200"><p>Pipeline contacts could not be loaded.</p><p className="mt-2 break-words text-xs">{leadsLoadError}</p><Button type="button" className="mt-4 min-h-11" onClick={() => void loadCustomers()}>Try loading contacts again</Button></div>
+          ) : loadingLeads || !leadsLoadComplete ? (
             <div className="flex min-h-[320px] items-center justify-center text-sm text-zinc-500">
               Loading CRM customers...
             </div>
@@ -775,16 +821,16 @@ export default function CRMPage() {
                     <p className="text-xs text-zinc-500">Update a stage from any phone.</p>
                   </div>
                   <Badge variant="secondary" className="bg-zinc-800 text-zinc-300">
-                    {leads.length}
+                    {visibleLeads.length}
                   </Badge>
                 </div>
 
-                {leads.length === 0 ? (
+                {visibleLeads.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-zinc-800 px-4 py-10 text-center text-sm text-zinc-500">
-                    No CRM customers yet.
+                    {leads.length ? "No matching contacts. Try a different search or business." : "No pipeline contacts yet. Add a contact above to get started."}
                   </p>
                 ) : (
-                  leads.map((lead) => {
+                  visibleLeads.map((lead) => {
                     const isSelected = lead.id === selectedLeadId;
                     const isUpdating = lead.id === updatingLeadId;
                     return (
@@ -845,7 +891,7 @@ export default function CRMPage() {
                               variant="outline"
                               size="sm"
                               aria-pressed={isSelected}
-                              onClick={() => setSelectedLeadId(lead.id)}
+                              onClick={() => openContactTimeline(lead.id)}
                               className="shrink-0 border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 hover:text-white"
                             >
                               {isSelected ? "Timeline selected" : "View timeline"}
@@ -896,7 +942,7 @@ export default function CRMPage() {
                                           ref={dragProvided.innerRef}
                                           {...dragProvided.draggableProps}
                                           {...dragProvided.dragHandleProps}
-                                          onClick={() => setSelectedLeadId(lead.id)}
+                                          onClick={() => openContactTimeline(lead.id)}
                                           className={`cursor-pointer border-zinc-800 bg-zinc-950 transition-all ${
                                             dragSnapshot.isDragging
                                               ? "rotate-2 shadow-2xl ring-2 ring-blue-500/50"
@@ -967,7 +1013,7 @@ export default function CRMPage() {
         <Card className="border-zinc-800 bg-zinc-950">
           <CardContent className="space-y-4 p-4">
             <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-white">Customer Timeline</h2>
+              <h2 id="crm-contact-timeline" tabIndex={-1} className="scroll-mt-20 text-lg font-semibold text-white">Contact activity</h2>
               <p className="text-xs text-zinc-400">
                 Source: {timelineSource === "paperclip" ? "Paperclip" : "Projected Firestore fallback"}
               </p>
@@ -1000,7 +1046,7 @@ export default function CRMPage() {
             <div className="space-y-3">
               {loadingTimeline ? (
                 <p className="text-sm text-zinc-500">Loading timeline...</p>
-              ) : timelineEvents.length === 0 ? (
+              ) : !selectedLead || timelineEvents.length === 0 ? (
                 <p className="text-sm text-zinc-500">No customer-linked activity yet.</p>
               ) : (
                 timelineEvents.map((event) => (
@@ -1026,6 +1072,7 @@ export default function CRMPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );

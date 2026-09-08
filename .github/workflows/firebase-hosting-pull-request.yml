@@ -31,6 +31,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-
       - run: npm ci
+      - name: Block high or critical dependency advisories before release
+        run: npm audit --audit-level=high
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
       - name: Force provider sends off for PR validation
         run: node scripts/firebase-preserved-runtime.mjs set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"

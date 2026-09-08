@@ -54,7 +54,9 @@ export default defineConfig({
   reporter: [["list"], ["html", { open: "never" }]],
   webServer: useLocalWebServer
     ? {
-        command: `npm run dev -- --port ${localPort}`,
+        command: process.env.PLAYWRIGHT_USE_BUILD === "true"
+          ? `npm run start -- --port ${localPort}`
+          : `npm run dev -- --port ${localPort}`,
         port: localPort,
         env: localFirebaseEnv,
         reuseExistingServer: !process.env.CI,

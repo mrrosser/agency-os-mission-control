@@ -19,10 +19,11 @@ describe("CRM daily workbench", () => {
     expect(people).toHaveLength(2);
   });
   it("supports keyboard tab wrapping and endpoints", () => {
-    expect(nextCrmWorkspace("people", "ArrowLeft")).toBe("activity");
-    expect(nextCrmWorkspace("activity", "ArrowRight")).toBe("people");
+    expect(nextCrmWorkspace("people", "ArrowLeft")).toBe("assistant");
+    expect(nextCrmWorkspace("activity", "ArrowRight")).toBe("assistant");
+    expect(nextCrmWorkspace("assistant", "ArrowRight")).toBe("people");
     expect(nextCrmWorkspace("share", "Home")).toBe("people");
-    expect(nextCrmWorkspace("people", "End")).toBe("activity");
+    expect(nextCrmWorkspace("people", "End")).toBe("assistant");
     expect(nextCrmWorkspace("share", "Enter")).toBe("share");
   });
   it("renders one-step operator actions, accessible tabs, and honest missing data", () => {
@@ -31,7 +32,9 @@ describe("CRM daily workbench", () => {
     expect(html).toContain("Add a contact");
     expect(html).toContain("Review outreach");
     expect(html).toContain("Share my card");
-    expect(html.match(/role="tab"/g)).toHaveLength(4);
+    expect(html).toContain("Talk to CRM");
+    expect(html.match(/role="tab"/g)).toHaveLength(5);
+    expect(html).toContain('aria-controls="crm-panel-assistant"');
     expect(html).toContain('aria-controls="crm-panel-people"');
     expect(html).toContain("Readiness unavailable");
     expect(html).toContain("Registry totals are not newsletter recipient counts");

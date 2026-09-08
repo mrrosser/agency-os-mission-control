@@ -9,6 +9,19 @@ const workflows = [
 const productionWorkflows = [workflows[0]];
 
 describe("Firebase deployment environment propagation", () => {
+  it("keeps CRM AI switches default-off, hard-disabled in PRs, and verified before release", () => {
+    const main = readFileSync(join(process.cwd(), workflows[0]), "utf8");
+    const preview = readFileSync(join(process.cwd(), workflows[1]), "utf8");
+    for (const flag of ["CRM_ASSISTANT_ENABLED", "CRM_ASSISTANT_VOICE_ENABLED"]) {
+      expect(main).toContain(`${flag}: \${{ vars.${flag} || 'false' }}`);
+      expect(preview).toContain(`${flag}: "false"`);
+      expect(main).toContain(`append_env_update "${flag}" "$${flag}"`);
+    }
+    expect(main.indexOf("Validate default-off CRM assistant switches")).toBeLessThan(main.indexOf("- run: npm run build"));
+    const verify = main.indexOf("CRM assistant runtime switch verification failed.");
+    expect(verify).toBeGreaterThan(main.indexOf('gcloud run services update "$FIREBASE_SSR_SERVICE"'));
+    expect(verify).toBeLessThan(main.indexOf('--update-tags="$RELEASE_TAG=$RUNTIME_REVISION"'));
+  });
   it.each(productionWorkflows)("preserves existing second-brain references before framework mutation in %s", (path) => {
     const source = readFileSync(join(process.cwd(), path), "utf8");
     const capture = source.indexOf('firebase-preserved-runtime.mjs capture "$SECOND_BRAIN_SNAPSHOT_PATH"');

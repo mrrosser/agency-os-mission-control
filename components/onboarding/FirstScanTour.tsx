@@ -197,6 +197,10 @@ export function FirstScanTour() {
             // ignore
           }
         }
+      } catch {
+        // An optional onboarding read must not crash the CRM when the phone is
+        // offline or Firestore is unavailable. Do not persist a dismissal here.
+        setOpen(false);
       } finally {
         setBooting(false);
       }

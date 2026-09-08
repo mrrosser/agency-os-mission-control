@@ -10,6 +10,7 @@ const WORKSPACE_LABELS: Record<CrmWorkspace, { label: string; glyph: AfroGlyphVa
   outreach: { label: "Outreach", glyph: "outreach" },
   share: { label: "Share cards", glyph: "network" },
   activity: { label: "Activity", glyph: "activity" },
+  assistant: { label: "Assistant", glyph: "voice" },
 };
 
 type Props = {
@@ -23,6 +24,19 @@ type Props = {
 
 export function OperatorWorkbench({ active, onChange, onAdd, registry, loading, addButtonRef }: Props) {
   const metric = (value: number | undefined) => value === undefined ? "—" : value.toLocaleString();
+  const openWorkspace = (next: CrmWorkspace) => {
+    onChange(next);
+    if (next === "assistant") {
+      window.requestAnimationFrame(() => {
+        const heading = document.getElementById("crm-assistant-heading");
+        if (!heading || heading.closest("[hidden]")) return;
+        heading.focus({ preventScroll: true });
+        heading.scrollIntoView({ block: "start", behavior: "instant" });
+      });
+      return;
+    }
+    document.getElementById(`crm-tab-${next}`)?.focus();
+  };
   return (
     <section className="crm-workbench" aria-label="CRM quick actions">
       <div className="crm-workbench-intro">
@@ -33,16 +47,20 @@ export function OperatorWorkbench({ active, onChange, onAdd, registry, loading, 
         </div>
         <a href="/dashboard/integrations" className="crm-settings-link">Connections &amp; settings ↗</a>
       </div>
-      <div className="crm-quick-actions">
+      <div className="crm-quick-actions crm-quick-actions--assistant">
+        <button type="button" onClick={() => openWorkspace("assistant")}>
+          <AfroGlyph variant="voice" aria-hidden="true" />
+          <span><strong>Talk to CRM</strong><small>Find the next step, in your words</small></span><span aria-hidden="true">→</span>
+        </button>
         <button type="button" onClick={onAdd} ref={addButtonRef}>
           <AfroGlyph variant="people" aria-hidden="true" />
           <span><strong>Add a contact</strong><small>Capture a real connection</small></span><span aria-hidden="true">＋</span>
         </button>
-        <button type="button" onClick={() => onChange("outreach")}>
+        <button type="button" onClick={() => openWorkspace("outreach")}>
           <AfroGlyph variant="outreach" aria-hidden="true" />
           <span><strong>Review outreach</strong><small>Draft, audience, then approval</small></span><span aria-hidden="true">→</span>
         </button>
-        <button type="button" onClick={() => onChange("share")}>
+        <button type="button" onClick={() => openWorkspace("share")}>
           <AfroGlyph variant="network" aria-hidden="true" />
           <span><strong>Share my card</strong><small>Your links and first-party intake</small></span><span aria-hidden="true">↗</span>
         </button>
@@ -51,12 +69,12 @@ export function OperatorWorkbench({ active, onChange, onAdd, registry, loading, 
         <div><strong>{metric(registry?.totals.people)}</strong><span>Registry people</span></div>
         <div><strong>{metric(registry?.totals.openConflicts)}</strong><span>Identity conflicts</span></div>
         <div><strong>{metric(registry?.permissions.contactPointStates.opted_in)}</strong><span>Opted-in contact points</span></div>
-        <button type="button" onClick={() => onChange("outreach")}>
+        <button type="button" onClick={() => openWorkspace("outreach")}>
           {loading ? "Checking outreach…" : registry ? "Review outreach readiness" : "Readiness unavailable · check connection"}
         </button>
       </div>
       <p className="crm-evidence-note">Registry totals are not newsletter recipient counts. Consent and suppression checks still apply.</p>
-      <div role="tablist" aria-label="CRM workspaces" className="crm-workspace-tabs">
+      <div role="tablist" aria-label="CRM workspaces" className="crm-workspace-tabs crm-workspace-tabs--assistant">
         {CRM_WORKSPACES.map((workspace) => (
           <button key={workspace} type="button" role="tab" id={`crm-tab-${workspace}`}
             aria-controls={`crm-panel-${workspace}`} aria-selected={active === workspace}

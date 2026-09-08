@@ -1,3 +1,5 @@
+import { ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
+
 export const WARM_RECONNECT_ACTIVATION_SCHEMA_VERSION =
   "crm.warm-reconnect-activation.v1" as const;
 
@@ -5,11 +7,7 @@ export const WARM_RECONNECT_PILOT_SCHEMA_VERSION =
   "crm.warm-reconnect-pilot.v1" as const;
 
 export const WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES = [
-  {
-    businessId: "rosser_nft_gallery",
-    profileId: "rosser_gallery_work",
-    label: "Rosser Gallery",
-  },
+  ROSSER_GALLERY_SENDING_PROFILE,
   {
     businessId: "rt_solutions",
     profileId: "rt_solutions_work",

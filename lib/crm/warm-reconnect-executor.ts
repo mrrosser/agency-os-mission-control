@@ -54,7 +54,11 @@ import {
 } from "@/lib/crm/warm-reconnect-types";
 import { loadPortfolioCrmSummaryForUid } from "@/lib/crm/portfolio-registry";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { resolveGoogleBusinessProfileContext } from "@/lib/google/business-profiles";
+import {
+  resolveGoogleBusinessProfileContext,
+  ROSSER_GALLERY_SENDING_EMAIL,
+  ROSSER_GALLERY_SENDING_PROFILE,
+} from "@/lib/google/business-profiles";
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import {
   getAccessTokenForUser,
@@ -700,7 +704,7 @@ function assertFrozenLaunchPilot(
     businessId: pilot.sender.businessId,
     profileId: pilot.sender.profileId,
   });
-  if (!profile || profile.profileId !== pilot.sender.profileId) {
+  if (!profile || profile.profileId !== pilot.sender.profileId || !matchesGallerySendingPolicy(pilot)) {
     throw new ApiError(409, "The approved Google sender profile drifted.");
   }
   const from = normalizeWarmReconnectEmail(pilot.sender.fromEmail);
@@ -1862,10 +1866,19 @@ export async function beginWarmReconnectProviderAttempt(input: {
   });
 }
 
+function matchesGallerySendingPolicy(pilot: WarmReconnectPilot): boolean {
+  return pilot.sender.businessId !== ROSSER_GALLERY_SENDING_PROFILE.businessId ||
+    (pilot.sender.profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId &&
+      pilot.sender.fromEmail === ROSSER_GALLERY_SENDING_EMAIL);
+}
+
 export async function resolveWarmReconnectGmailAccessToken(input: {
   uid: string;
   pilot: WarmReconnectPilot;
 }): Promise<string> {
+  if (!matchesGallerySendingPolicy(input.pilot)) {
+    throw new ApiError(409, "The dedicated Gallery sending account must be connected and explicitly approved.");
+  }
   const assertExactAccount = async () => {
     const resolution = await resolveGoogleAccountTokens(
       input.uid,

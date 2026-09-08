@@ -11,7 +11,38 @@ export const GOOGLE_BUSINESS_PROFILES = [
   },
 ] as const;
 
-export type GoogleBusinessProfile = (typeof GOOGLE_BUSINESS_PROFILES)[number];
+// Sending is an explicit purpose, never the business's general work/default profile.
+export const ROSSER_GALLERY_SENDING_PROFILE = {
+  businessId: "rosser_nft_gallery",
+  profileId: "rosser_gallery_send",
+  label: "Gallery sending",
+} as const;
+export const ROSSER_GALLERY_SENDING_EMAIL = "mrosser@rossergallery.com";
+
+export function isRosserGallerySendingProfile(profileId: string | null | undefined): boolean {
+  return profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId;
+}
+
+export function assertGoogleProfileConnectionPolicy(input: {
+  profileId: string;
+  scopePreset: string;
+  accountEmail?: string;
+}): void {
+  if (!isRosserGallerySendingProfile(input.profileId)) return;
+  if (input.scopePreset !== "gmail_send") {
+    throw new Error("Gallery sending requires the dedicated gmail_send permission preset.");
+  }
+  if (
+    input.accountEmail !== undefined &&
+    input.accountEmail.trim().toLowerCase() !== ROSSER_GALLERY_SENDING_EMAIL
+  ) {
+    throw new Error(`Gallery sending requires the Google account ${ROSSER_GALLERY_SENDING_EMAIL}.`);
+  }
+}
+
+export type GoogleBusinessProfile =
+  | (typeof GOOGLE_BUSINESS_PROFILES)[number]
+  | typeof ROSSER_GALLERY_SENDING_PROFILE;
 export type GoogleBusinessId = GoogleBusinessProfile["businessId"];
 export type GoogleProfileId = GoogleBusinessProfile["profileId"];
 
@@ -25,7 +56,7 @@ const PROFILE_BY_BUSINESS = new Map<string, GoogleBusinessProfile>(
   GOOGLE_BUSINESS_PROFILES.map((profile) => [profile.businessId, profile])
 );
 const PROFILE_BY_ID = new Map<string, GoogleBusinessProfile>(
-  GOOGLE_BUSINESS_PROFILES.map((profile) => [profile.profileId, profile])
+  [...GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_PROFILE].map((profile) => [profile.profileId, profile])
 );
 
 export class GoogleBusinessProfileContextError extends Error {
@@ -56,7 +87,7 @@ export function resolveGoogleBusinessProfileContext(input: {
     throw new GoogleBusinessProfileContextError();
   }
 
-  const resolved = byBusiness || byProfile;
+  const resolved = byProfile || byBusiness;
   if (!resolved) {
     throw new GoogleBusinessProfileContextError();
   }

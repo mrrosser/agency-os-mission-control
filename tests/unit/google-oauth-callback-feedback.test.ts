@@ -14,6 +14,7 @@ const ALLOWED_ERROR_CODES = [
   "token_exchange_failed",
   "scope_not_allowed",
   "account_identity_failed",
+  "sending_account_mismatch",
   "account_already_connected",
   "profile_replacement_requires_disconnect",
   "credential_storage_failed",
@@ -21,6 +22,18 @@ const ALLOWED_ERROR_CODES = [
 ] as const;
 
 describe("Google OAuth callback feedback", () => {
+  it("describes the separate sending connection without suggesting a work-profile replacement", () => {
+    const params = new URLSearchParams({
+      google: "connected", googleBusiness: "rosser_nft_gallery", googleProfile: "rosser_gallery_send",
+    });
+    expect(getGoogleOAuthCallbackFeedback(params)).toMatchObject({
+      title: "Gallery sending Google connection completed",
+      description: expect.stringContaining("existing Drive, Calendar, and inbox connection is unchanged"),
+    });
+    params.set("google", "error");
+    params.set("googleError", "sending_account_mismatch");
+    expect(getGoogleOAuthCallbackFeedback(params)?.description).toContain("mrosser@rossergallery.com");
+  });
   it.each(ALLOWED_ERROR_CODES)("maps %s to bounded actionable copy", (code) => {
     const params = new URLSearchParams({
       google: "error",

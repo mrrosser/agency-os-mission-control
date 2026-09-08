@@ -19,13 +19,13 @@ const senderSchema = z
     replyTo: z.string().trim().email().max(254),
     physicalPostalAddress: humanText(300),
     businessId: z.enum(["rosser_nft_gallery", "rt_solutions"]),
-    profileId: z.enum(["rosser_gallery_work", "rt_solutions_work"]),
+    profileId: z.enum(["rosser_gallery_send", "rt_solutions_work"]),
   })
   .strict()
   .superRefine((sender, context) => {
     const expected =
       sender.businessId === "rosser_nft_gallery"
-        ? "rosser_gallery_work"
+        ? "rosser_gallery_send"
         : "rt_solutions_work";
     if (sender.profileId !== expected) {
       context.addIssue({

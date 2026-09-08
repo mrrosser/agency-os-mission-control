@@ -106,7 +106,7 @@ describe("warm reconnect activation routes", () => {
         replyTo: "marcus@example.com",
         physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
         businessId: "rosser_nft_gallery",
-        profileId: "rosser_gallery_work",
+        profileId: "rosser_gallery_send",
       },
       artworkEmailApproval: {
         approvedForThisEmailCampaign: true,

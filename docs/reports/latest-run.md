@@ -1,5 +1,16 @@
 # Latest Verification Run
 
+## 2026-09-08 dedicated Gallery sending follow-up (local only)
+
+- Marcus confirmed `mrosser@rossergallery.com` as both the OAuth account and From identity. This supersedes the older identity-policy blocker recorded in the historical entry below; it does not authorize a campaign send.
+- Isolated follow-up based on frozen `fdcfd2a`; no edits to the active release branch, live provider configuration, or credentials.
+- Separate `rosser_gallery_send` profile with exact `gmail_send`, server-side account pinning, same-subject credential isolation, and no general-default/fallback behavior. Existing `rosser_gallery_work` Drive/Calendar/inbox grant remains unchanged. Legacy registries fail before any migration or token writes.
+- Full unit: 759 tests / 144 files. Full smoke: 245 tests / 88 files. TypeScript and full lint pass (3 existing warnings, 0 errors). Independent core review has no remaining actionable findings.
+- Redacted changed-source secrets scan passes. High-severity dependency gate passes; 15 moderate findings remain in unchanged dependencies.
+- Production build passed. Two Chromium production-start CRM scenarios passed at desktop 1440×1000 and phone 412×915; separate sending UI visible, no overflow, no unexpected requests or mutations. Dummy five-field Firebase runtime defaults only; all CRM APIs mocked and external traffic denied. Owned loopback 3080 server stopped; other services untouched.
+- No commit, push, deployment, reconnect, draft, import, or send performed by this follow-up task.
+- Local/release instructions and operator OAuth step: `docs/execplans/gallery-dedicated-sending-20260908.md`.
+
 ## 2026-09-08 CRM release approval and final candidate checks
 
 - Marcus approved publication with email capability, not any actual campaign send.

@@ -25,6 +25,7 @@ import type {
   WarmReconnectActivationGateState,
   WarmReconnectActivationResponse,
   WarmReconnectCandidate,
+  WarmReconnectGoogleProfileId,
   WarmReconnectPilotApprovalRequest,
   WarmReconnectPilotLaunchRequest,
   WarmReconnectPilotRecipientView,
@@ -33,6 +34,7 @@ import type {
   WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
+import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL } from "@/lib/google/business-profiles";
 
 const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation";
 
@@ -59,7 +61,7 @@ type SenderForm = {
   legalEntity: string;
   replyTo: string;
   physicalPostalAddress: string;
-  profileId: "rosser_gallery_work" | "rt_solutions_work";
+  profileId: WarmReconnectGoogleProfileId;
   artworkEvidenceNote: string;
   artworkApproved: boolean;
 };
@@ -73,7 +75,7 @@ const INITIAL_SENDER_FORM: SenderForm = {
   legalEntity: "",
   replyTo: "",
   physicalPostalAddress: "",
-  profileId: "rosser_gallery_work",
+  profileId: "rosser_gallery_send",
   artworkEvidenceNote: "",
   artworkApproved: false,
 };
@@ -206,7 +208,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     return body as T;
   }
 
-  async function connectGoogle(profileId: "rosser_gallery_work" | "rt_solutions_work") {
+  async function connectGoogle(profileId: WarmReconnectGoogleProfileId) {
     if (!user || connectingProfile) return;
     const profile = activation?.googleProfiles.find((item) => item.profileId === profileId);
     if (!profile) {
@@ -494,6 +496,12 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       <p className="mt-1 text-[11px] text-zinc-500">
                         {ready ? "Gmail send connected" : titleCase(profile.state)}
                       </p>
+                      {isRosserGallerySendingProfile(profile.profileId) && (
+                        <p className="mt-2 text-xs leading-5 text-zinc-300">
+                          Separate send-only connection for {ROSSER_GALLERY_SENDING_EMAIL}.
+                          Your existing Gallery Drive, Calendar, and inbox connection stays unchanged.
+                        </p>
+                      )}
                       {profile.accountEmail ? (
                         <p className="mt-1 truncate text-[11px] text-zinc-400">
                           Verified sender: {profile.accountEmail}

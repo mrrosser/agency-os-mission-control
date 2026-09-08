@@ -86,7 +86,7 @@ function pilot() {
         replyTo: "marcus@example.com",
         physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
         businessId: "rosser_nft_gallery",
-        profileId: "rosser_gallery_work",
+        profileId: "rosser_gallery_send",
       },
       artworkEmailApproval: {
         approvedForThisEmailCampaign: true,
@@ -95,7 +95,7 @@ function pilot() {
     },
     candidates: [1, 2, 3, 4, 5].map(candidate),
     googleReady: true,
-    fromEmail: "marcus@example.com",
+    fromEmail: "mrosser@rossergallery.com",
     accountId: "google-account-approved",
     preferenceOrigin: "https://leadflow-review.web.app",
   });
@@ -107,11 +107,11 @@ function resolution(accountId: string) {
     profileMapped: true,
     record: {
       accountId,
-      profileId: "rosser_gallery_work",
+      profileId: "rosser_gallery_send",
       tokens: {
         accessToken: "access-token",
         refreshToken: "refresh-token",
-        accountEmail: "marcus@example.com",
+        accountEmail: "mrosser@rossergallery.com",
         scope: EXACT_SEND_SCOPE,
       },
     },
@@ -121,6 +121,16 @@ function resolution(accountId: string) {
 describe("warm reconnect approved Google account binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(["work-profile", "wrong-from"])("blocks Gallery %s before reading or refreshing credentials", async (kind) => {
+    const changed = pilot();
+    if (kind === "work-profile") changed.sender.profileId = "rosser_gallery_work" as never;
+    else changed.sender.fromEmail = "personal@example.com";
+    await expect(resolveWarmReconnectGmailAccessToken({ uid: "owner-1", pilot: changed }))
+      .rejects.toThrow(/dedicated Gallery sending account/);
+    expect(resolveGoogleAccountTokensMock).not.toHaveBeenCalled();
+    expect(getAccessTokenForUserMock).not.toHaveBeenCalled();
   });
 
   it("returns access only when the opaque account binding remains exact", async () => {

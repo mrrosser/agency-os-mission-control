@@ -1,4 +1,4 @@
-import { GOOGLE_BUSINESS_PROFILES } from "@/lib/google/business-profiles";
+import { GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
 
 export type GoogleOAuthCallbackFeedback = {
   kind: "success" | "error";
@@ -53,6 +53,10 @@ const ERROR_COPY: Readonly<
       "The Google account identity could not be verified for this profile. Start again and choose the intended account.",
     showHelpLink: false,
   },
+  sending_account_mismatch: {
+    description: `Choose ${ROSSER_GALLERY_SENDING_EMAIL} for Gallery sending. No sending credentials were saved, and the existing Gallery work connection was not changed.`,
+    showHelpLink: false,
+  },
   account_already_connected: {
     description:
       "That Google account is already assigned to the other organization profile. Choose a different Google account so RT.Solutions and Rosser Gallery remain isolated.",
@@ -89,7 +93,7 @@ function resolveCallbackProfile(searchParams: SearchParamsReader) {
   const businessId = searchParams.get("googleBusiness");
   const profileId = searchParams.get("googleProfile");
 
-  return GOOGLE_BUSINESS_PROFILES.find(
+  return [...GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_PROFILE].find(
     (profile) =>
       profile.businessId === businessId && profile.profileId === profileId
   );
@@ -113,7 +117,9 @@ export function getGoogleOAuthCallbackFeedback(
     return {
       kind: "success",
       title: `${subject} completed`,
-      description: profile
+      description: profile?.profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId
+        ? "Gallery sending is connected separately. Its existing Drive, Calendar, and inbox connection is unchanged. No campaign was approved, launched, or sent."
+        : profile
         ? `${profile.label} is connected only to its ${profile.profileId} workspace profile.`
         : "The account is connected. Review each organization profile below before using Google tools.",
       showHelpLink: false,

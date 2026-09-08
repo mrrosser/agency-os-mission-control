@@ -7,6 +7,7 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import {
+  assertGoogleProfileConnectionPolicy,
   GoogleBusinessProfileContextError,
   resolveGoogleBusinessProfileContext,
 } from "@/lib/google/business-profiles";
@@ -98,6 +99,11 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
   }
   if (!profileContext) {
     throw new ApiError(400, "A Google business profile is required.");
+  }
+  try {
+    assertGoogleProfileConnectionPolicy({ profileId: profileContext.profileId, scopePreset });
+  } catch (error) {
+    throw new ApiError(400, error instanceof Error ? error.message : "Invalid sending connection.");
   }
 
   if (resolvedOrigin.redirected) {

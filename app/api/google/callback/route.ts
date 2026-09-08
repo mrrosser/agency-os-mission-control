@@ -5,6 +5,7 @@ import { z } from "zod";
 import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import {
+  assertGoogleProfileConnectionPolicy,
   GoogleBusinessProfileContextError,
   resolveGoogleBusinessProfileContext,
   type GoogleBusinessProfile,
@@ -63,6 +64,7 @@ type OAuthResultCode =
   | "token_exchange_failed"
   | "scope_not_allowed"
   | "account_identity_failed"
+  | "sending_account_mismatch"
   | "account_already_connected"
   | "profile_replacement_requires_disconnect"
   | "credential_storage_failed"
@@ -380,6 +382,10 @@ export const GET = withApiHandler(async ({ request, log }) => {
   let grantedScope: string;
   try {
     if (!accessToken) throw new ApiError(400, "Google did not return an access token");
+    assertGoogleProfileConnectionPolicy({
+      profileId: profileContext.profileId,
+      scopePreset: stateData.scopePreset,
+    });
     grantedScope = await authoritativeGrantedScope(client, accessToken, tokens.scope);
     assertGoogleTokenScopeForPreset(
       (stateData.scopePreset || "full") as GoogleScopePreset,
@@ -412,6 +418,21 @@ export const GET = withApiHandler(async ({ request, log }) => {
       profileContext,
       errorCode: "account_identity_failed",
     });
+  }
+
+  try {
+    assertGoogleProfileConnectionPolicy({
+      profileId: profileContext.profileId,
+      scopePreset: stateData.scopePreset,
+      accountEmail: identity.email,
+    });
+  } catch {
+    log.warn("oauth.callback.account_policy_rejected", {
+      uid: stateData.uid,
+      profileId: profileContext.profileId,
+      correlationId: stateData.correlationId || null,
+    });
+    return resultResponse({ request, state, stateData, profileContext, errorCode: "sending_account_mismatch" });
   }
 
   try {

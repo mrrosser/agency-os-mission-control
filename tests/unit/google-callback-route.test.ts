@@ -203,6 +203,36 @@ describe("google callback route", () => {
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
+  it.each([
+    ["mrosser@rossergallery.com", true],
+    ["mrosser@rossernftgallery.com", false],
+    ["personal@example.com", false],
+  ])("pins dedicated Gallery sending to the confirmed Google identity: %s", async (email, allowed) => {
+    const profileId = "rosser_gallery_send";
+    const businessId = "rosser_nft_gallery";
+    const attemptDocumentId = createHash("sha256")
+      .update(`7:uid-123:${profileId.length}:${profileId}`).digest("hex");
+    transactionGetMock.mockImplementation(async (reference: { collection: string }) =>
+      reference.collection === "google_oauth_state"
+        ? stateSnapshot(stateData({ profileId, businessId, attemptDocumentId, returnTo: "/dashboard/crm" }))
+        : attemptSnapshot({ profileId, businessId, ...attemptRecord.current })
+    );
+    fetchGoogleAccountIdentityMock.mockResolvedValue({ email, subject: "gallery-subject" });
+    const response = await GET(callbackRequest(`code=abc123&state=${STATE}`), {} as never);
+    expect(response.status).toBe(303);
+    if (allowed) {
+      expect(response.headers.get("location")).toContain("google=connected");
+      expect(storeGoogleProfileTokensMock).toHaveBeenCalledWith(
+        "uid-123", profileId,
+        expect.objectContaining({ account_email: email, account_subject: "gallery-subject", scope: LIVE_SCOPE }),
+        "gmail_send", expect.anything()
+      );
+    } else {
+      expect(response.headers.get("location")).toContain("googleError=sending_account_mismatch");
+      expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+    }
+  });
+
   it("uses token introspection when the token response omits scopes", async () => {
     getTokenMock.mockResolvedValue({
       tokens: {

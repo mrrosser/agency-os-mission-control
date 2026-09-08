@@ -256,6 +256,8 @@ function seedAccount(
 
 const RT_PROFILE = "rt_solutions_work";
 const ROSSER_PROFILE = "rosser_gallery_work";
+const ROSSER_SEND_PROFILE = "rosser_gallery_send";
+const ROSSER_SEND_EMAIL = "mrosser@rossergallery.com";
 const RT_SUBJECT = "google-subject-123";
 const GMAIL_SEND_SCOPE =
   "email https://www.googleapis.com/auth/gmail.send openid";
@@ -734,5 +736,80 @@ describe("Google account token store", () => {
       lastRefreshErrorCode: "invalid_grant__with_details",
       lastRefreshErrorMessage: "Google OAuth refresh requires reconnection.",
     });
+  });
+
+  it("keeps same-subject work and sending credentials separate through refresh and local disconnect", async () => {
+    const workTokens = { ...TOKEN_RECORD, scope: FULL_SCOPE, accountEmail: ROSSER_SEND_EMAIL };
+    const work = await persistGoogleAccountProfileTokens(UID, ROSSER_PROFILE, workTokens, "full");
+    await setGoogleDefaultProfileId(UID, ROSSER_PROFILE);
+    const workSecretKey = `${UID}:google-oauth-account-${work.accountId}`;
+    const workSecretBefore = firestore.secrets.get(workSecretKey);
+    const workAccountBefore = { ...firestore.documents.get(accountPath(work.accountId)) };
+    const workBindingBefore = { ...firestore.documents.get(bindingPath(ROSSER_PROFILE)) };
+
+    const send = await persistGoogleAccountProfileTokens(UID, ROSSER_SEND_PROFILE, {
+      ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL, refreshToken: "separate-send-refresh",
+    }, "gmail_send");
+    expect(send.accountId).not.toBe(work.accountId);
+    expect(work.accountId).toBe(accountIdForSubject(RT_SUBJECT));
+    await expect(getGoogleDefaultProfileId(UID)).resolves.toBe(ROSSER_PROFILE);
+    await expect(resolveGoogleAccountTokens(UID)).resolves.toMatchObject({ record: { accountId: work.accountId } });
+    await expect(resolveGoogleAccountTokens(UID, ROSSER_SEND_PROFILE)).resolves.toMatchObject({
+      record: { accountId: send.accountId, tokens: { refreshToken: "separate-send-refresh", accountEmail: ROSSER_SEND_EMAIL } },
+    });
+    await persistGoogleAccountTokens(UID, send.accountId, {
+      ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL, refreshToken: "separate-send-refresh", accessToken: "refreshed-send-access",
+    });
+    expect(firestore.secrets.get(workSecretKey)).toBe(workSecretBefore);
+    const disconnect = await beginGoogleAccountProfileDisconnect(UID, ROSSER_SEND_PROFILE);
+    await finishGoogleAccountProfileDisconnect(UID, ROSSER_SEND_PROFILE, disconnect.accountId!, disconnect.operationId!);
+    expect(firestore.secrets.get(workSecretKey)).toBe(workSecretBefore);
+    expect(firestore.documents.get(accountPath(work.accountId))).toEqual(workAccountBefore);
+    expect(firestore.documents.get(bindingPath(ROSSER_PROFILE))).toEqual(workBindingBefore);
+    await expect(getGoogleDefaultProfileId(UID)).resolves.toBe(ROSSER_PROFILE);
+    expect(firestore.deleteUserSecretMock).toHaveBeenCalledExactlyOnceWith(UID, `google-oauth-account-${send.accountId}`);
+  });
+
+  it.each([
+    ["wrong-account", "personal@example.com", GMAIL_SEND_SCOPE, "gmail_send"],
+    ["obsolete-account", "mrosser@rossernftgallery.com", GMAIL_SEND_SCOPE, "gmail_send"],
+    ["broad-grant", ROSSER_SEND_EMAIL, FULL_SCOPE, "gmail_send"],
+    ["broad-preset", ROSSER_SEND_EMAIL, FULL_SCOPE, "full"],
+  ] as const)("rejects %s before any credential writes", async (_case, accountEmail, scope, preset) => {
+    await expect(persistGoogleAccountProfileTokens(UID, ROSSER_SEND_PROFILE,
+      { ...TOKEN_RECORD, accountEmail, scope }, preset)).rejects.toThrow();
+    expect(firestore.runTransactionMock).not.toHaveBeenCalled();
+    expect(firestore.setUserSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("does not silently migrate or delete legacy work credentials when adding sending", async () => {
+    const legacy = { accessToken: "legacy-access", refreshToken: "legacy-refresh", scope: FULL_SCOPE };
+    seedDocument(REGISTRY_PATH, legacy);
+    await expect(persistGoogleAccountProfileTokens(UID, ROSSER_SEND_PROFILE,
+      { ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL }, "gmail_send")).rejects.toThrow(/migrate the existing/);
+    expect(firestore.documents.size).toBe(1);
+    expect(firestore.documents.get(REGISTRY_PATH)).toEqual(legacy);
+    expect(firestore.setUserSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("never promotes or falls back to the sending profile as the general default", async () => {
+    await expect(setGoogleDefaultProfileId(UID, ROSSER_SEND_PROFILE)).rejects.toThrow(/general Google default/);
+    seedDocument(REGISTRY_PATH, { schemaVersion: 2, defaultProfileId: ROSSER_SEND_PROFILE });
+    seedAccount(ROSSER_SEND_PROFILE, "tampered-account", { ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL });
+    await expect(resolveGoogleAccountTokens(UID)).resolves.toMatchObject({ record: null });
+    expect(firestore.accessUserSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back to a work binding when the dedicated sending binding is missing", async () => {
+    seedDocument(REGISTRY_PATH, { schemaVersion: 2, defaultProfileId: ROSSER_PROFILE });
+    seedAccount(ROSSER_PROFILE, "work-account", { ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL });
+    await expect(resolveGoogleAccountTokens(UID, ROSSER_SEND_PROFILE)).resolves.toMatchObject({ record: null, profileMapped: false });
+    expect(firestore.accessUserSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a sending binding pointed at an existing work credential even with exact scope", async () => {
+    seedDocument(REGISTRY_PATH, { schemaVersion: 2 });
+    seedAccount(ROSSER_SEND_PROFILE, accountIdForSubject(RT_SUBJECT), { ...TOKEN_RECORD, accountEmail: ROSSER_SEND_EMAIL });
+    await expect(resolveGoogleAccountTokens(UID, ROSSER_SEND_PROFILE)).resolves.toMatchObject({ record: null, profileMapped: true });
   });
 });

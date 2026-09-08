@@ -145,20 +145,35 @@ describe("google connect route", () => {
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   });
 
-  it("accepts the bounded Gmail-send preset", async () => {
+  it("accepts the dedicated Gallery Gmail-send preset without replacing the work profile", async () => {
     const response = await POST(connectRequest({
       returnTo: "/dashboard/crm",
       scopePreset: "gmail_send",
       businessId: "rosser_nft_gallery",
-      profileId: "rosser_gallery_work",
+      profileId: "rosser_gallery_send",
     }), {} as never);
 
     expect(response.status).toBe(200);
+    expect(transactionCreateMock.mock.calls[0]?.[1]).toMatchObject({
+      profileId: "rosser_gallery_send", scopePreset: "gmail_send",
+    });
     expect(getGoogleAuthUrlMock).toHaveBeenCalledWith(expect.any(String), {
       scopePreset: "gmail_send",
       codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
     });
   });
+
+  it.each(["core", "drive", "calendar", "gmail", "full"])(
+    "rejects the %s preset for dedicated Gallery sending before creating OAuth state",
+    async (scopePreset) => {
+      const response = await POST(connectRequest({
+        scopePreset, businessId: "rosser_nft_gallery", profileId: "rosser_gallery_send",
+      }), {} as never);
+      expect(response.status).toBe(400);
+      expect(runTransactionMock).not.toHaveBeenCalled();
+      expect(getGoogleAuthUrlMock).not.toHaveBeenCalled();
+    }
+  );
 
   it("deletes the prior state when a newer attempt supersedes it", async () => {
     const previousState = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

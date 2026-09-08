@@ -1,11 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   capabilitiesFromGoogleScopes,
+  GOOGLE_BUSINESS_PROFILES,
   hasGoogleGmailSendScope,
   resolveGoogleBusinessProfileContext,
 } from "@/lib/google/business-profiles";
 
 describe("Google business profile contract", () => {
+  it("requires explicit selection of the separate Gallery sending profile", () => {
+    expect(resolveGoogleBusinessProfileContext({ businessId: "rosser_nft_gallery" })?.profileId)
+      .toBe("rosser_gallery_work");
+    expect(resolveGoogleBusinessProfileContext({
+      businessId: "rosser_nft_gallery", profileId: "rosser_gallery_send",
+    })?.profileId).toBe("rosser_gallery_send");
+    expect(GOOGLE_BUSINESS_PROFILES.map((profile) => profile.profileId))
+      .toEqual(["rt_solutions_work", "rosser_gallery_work"]);
+    expect(() => resolveGoogleBusinessProfileContext({
+      businessId: "rt_solutions", profileId: "rosser_gallery_send",
+    })).toThrow("Unknown or mismatched");
+  });
   it("distinguishes Gmail send authority from read-only Gmail access", () => {
     expect(
       hasGoogleGmailSendScope(

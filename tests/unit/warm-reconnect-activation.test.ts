@@ -71,7 +71,7 @@ function request(
       replyTo: "marcus@example.com",
       physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
       businessId: "rosser_nft_gallery",
-      profileId: "rosser_gallery_work",
+      profileId: "rosser_gallery_send",
     },
     artworkEmailApproval: {
       approvedForThisEmailCampaign: true,
@@ -90,7 +90,7 @@ function create(overrides: { candidates?: WarmReconnectCandidate[]; googleReady?
     request: request(),
     candidates: overrides.candidates || [1, 2, 3, 4, 5].map(candidate),
     googleReady: overrides.googleReady ?? true,
-    fromEmail: "marcus@example.com",
+    fromEmail: "mrosser@rossergallery.com",
     accountId: "google-account-1",
     preferenceOrigin: "https://leadflow-review.web.app",
     now: new Date("2026-08-12T12:00:00.000Z"),
@@ -147,6 +147,16 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it.each(["old-work-profile", "wrong-sender"])("rejects Gallery %s when creating a pilot", (kind) => {
+    const input = request();
+    if (kind === "old-work-profile") input.sender.profileId = "rosser_gallery_work" as never;
+    expect(() => createWarmReconnectPilot({
+      pilotId: "pilot-1", workspaceId: "workspace-1", ownerUid: "owner-1", legacyDncOrgId: "org-1",
+      request: input, candidates: [1, 2, 3, 4, 5].map(candidate), googleReady: true,
+      fromEmail: kind === "wrong-sender" ? "personal@example.com" : "mrosser@rossergallery.com",
+      accountId: "gallery-send-account", preferenceOrigin: "https://leadflow-review.web.app",
+    })).toThrow(ApiError);
+  });
   it("creates only an exact five-person first tranche without duplicating PII", () => {
     const pilot = create();
 
@@ -282,7 +292,7 @@ describe("warm reconnect activation state machine", () => {
       }),
       candidates: [1, 2, 3, 4, 5].map(candidate),
       googleReady: true,
-      fromEmail: "marcus@example.com",
+      fromEmail: "mrosser@rossergallery.com",
       accountId: "google-account-1",
       preferenceOrigin: "https://leadflow-review.web.app",
     });

@@ -259,8 +259,8 @@ const activationReview = {
   googleProfiles: [
     {
       businessId: "rosser_nft_gallery",
-      profileId: "rosser_gallery_work",
-      label: "Rosser Gallery",
+      profileId: "rosser_gallery_send",
+      label: "Gallery sending",
       state: "not_connected",
       connected: false,
       gmailCapable: false,
@@ -291,7 +291,7 @@ const activationReview = {
       replyTo: "reply@example.test",
       physicalPostalAddress: "Verified address held by server",
       businessId: "rosser_nft_gallery",
-      profileId: "rosser_gallery_work",
+      profileId: "rosser_gallery_send",
     },
     artworkEmailApproval: { attested: true, evidenceNote: "Synthetic Playwright approval" },
     preferenceContract: {
@@ -612,8 +612,10 @@ test.describe("local mocked warm reconnect review", () => {
         activation.getByText("review.person.1@example.test", { exact: true }),
       ).toBeVisible();
       await expect(
-        activation.getByRole("button", { name: "Connect Rosser Gallery" }),
+        activation.getByRole("button", { name: "Connect Gallery sending" }),
       ).toBeVisible();
+      await expect(activation.getByText(/Separate send-only connection for mrosser@rossergallery.com/)).toBeVisible();
+      await expect(activation.getByText(/existing Gallery Drive, Calendar, and inbox connection stays unchanged/)).toBeVisible();
       await expect(
         activation.getByRole("button", { name: "Connect RT.Solutions" }),
       ).toBeVisible();

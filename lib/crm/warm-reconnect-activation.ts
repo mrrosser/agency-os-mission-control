@@ -3,6 +3,7 @@ import "server-only";
 import { ApiError } from "@/lib/api/handler";
 import { readBoundedRequestBody } from "@/lib/api/bounded-body";
 import { z } from "zod";
+import { ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
 import {
   WARM_RECONNECT_APPROVAL_TTL_HOURS,
   WARM_RECONNECT_INITIAL_PILOT_SIZE,
@@ -604,12 +605,18 @@ export function createWarmReconnectPilot(input: {
 
   const expectedProfile =
     input.request.sender.businessId === "rosser_nft_gallery"
-      ? "rosser_gallery_work"
+      ? ROSSER_GALLERY_SENDING_PROFILE.profileId
       : input.request.sender.businessId === "rt_solutions"
         ? "rt_solutions_work"
         : null;
   if (!expectedProfile || input.request.sender.profileId !== expectedProfile) {
     throw new ApiError(400, "The Google business and profile selection do not match.");
+  }
+  if (
+    expectedProfile === ROSSER_GALLERY_SENDING_PROFILE.profileId &&
+    input.fromEmail !== ROSSER_GALLERY_SENDING_EMAIL
+  ) {
+    throw new ApiError(400, "Gallery sending requires its verified dedicated Google account.");
   }
 
   const now = (input.now || new Date()).toISOString();

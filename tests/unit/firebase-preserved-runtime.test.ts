@@ -65,7 +65,7 @@ describe("preserved Firebase runtime configuration", () => {
   it("rejects a tampered snapshot and preview send activation", () => {
     const snapshot = snapshotSecondBrainReferences(revision());
     expect(() => verifyPreservedRuntime(revision("true"), snapshot, "false")).toThrow("provider-send flag");
-    snapshot.bindings[0].secret = "wrong";
+    Object.assign(snapshot.bindings[0], { secret: "wrong" });
     expect(() => secondBrainUpdateSecrets(snapshot)).toThrow("five approved bindings");
   });
 

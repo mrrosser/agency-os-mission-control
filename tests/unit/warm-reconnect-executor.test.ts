@@ -99,7 +99,7 @@ function launchedPilot(
         replyTo: "marcus@example.com",
         physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
         businessId: "rosser_nft_gallery",
-        profileId: "rosser_gallery_work",
+        profileId: "rosser_gallery_send",
       },
       artworkEmailApproval: {
         approvedForThisEmailCampaign: true,
@@ -108,7 +108,7 @@ function launchedPilot(
     },
     candidates: [1, 2, 3, 4, 5].map(candidate),
     googleReady: true,
-    fromEmail: "marcus@example.com",
+    fromEmail: "mrosser@rossergallery.com",
     accountId: "google-account-1",
     preferenceOrigin: "https://leadflow-review.web.app",
     now: START,
@@ -570,7 +570,7 @@ describe("warm reconnect provider executor", () => {
       "ephemeral-access-token",
       expect.objectContaining({
         to: "person1@example.com",
-        from: "marcus@example.com",
+        from: "mrosser@rossergallery.com",
         senderName: "Marcus Rosser",
         replyTo: "marcus@example.com",
         preferencesUrl: expect.stringContaining("/preferences#token="),

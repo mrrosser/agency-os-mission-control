@@ -21,7 +21,9 @@ Fresh checks confirm `main` remains `4d3413f`; the two production-matching basel
 
 Fresh email checks found zero warm pilot documents and no warm-reconnect scheduler jobs; the live send flag remains absent/off. The exact Gallery binding resolves through Google to `mrosser@rossergallery.com`, not the currently required OAuth identity `mrosser@rossernftgallery.com`. No sender-alias lookup or send followed that mismatch. User reconciliation is requested. The existing broader OAuth grant also fails the dedicated send-only scope check; do not weaken that check or silently use personal credentials.
 
-Release-specific fixes remove preview-only labels and isolate public share-action props/modules from private intake-readiness notes. The workflow must preserve the five already-live Second Brain Secret Manager references, without reading or rotating their values, and force email capability off on PR preview runtimes. Production capability is controlled through a strict validated repository variable with false default; it must remain unchanged until the sender preflight is resolved.
+The existing CRM send-only connect button replaces that Gallery profile's broader grant; it is not an independent credential. This could remove current Drive/Calendar and Gmail-reading access. Capability approval does not authorize this loss. Preserve those integrations with a reviewed separate sending connection or obtain explicit approval for replacement; do not reconnect silently.
+
+Release-specific fixes remove preview-only labels and isolate public share-action props/modules from private intake-readiness notes. The production workflow preserves the five already-live Second Brain Secret Manager references without reading or rotating their values. Final review found the old shared-service preview path did not prove its public URL targeted the corrected runtime, so PR cloud deployments are removed, not merely send-disabled. Required PR tests/build remain; no preview URL is published. Production capability is controlled through a strict validated repository variable with false default; it must remain unchanged until the sender preflight is resolved.
 
 ## Implementation
 
@@ -96,3 +98,11 @@ Evidence: `C:\CTO Projects\RNG_Artist_Projects\output\crm-sept8-diagnostics\DIAG
 - Fresh redacted Gitleaks scan: no leaks in the aggregate tracked diff from main or all 28 new text files. Whitespace check passed; only existing LF/CRLF conversion warnings remain.
 - Evidence: sibling RNG `output/crm-sept8-diagnostics/release-browser/`, broad-render screenshots and this candidate's `test-results/`.
 - Release remains held for GitHub review/checks plus exact Gallery account and send-only scope reconciliation. No production release, capability change, email, import, or campaign launch occurred during these checks.
+
+### Final shared-preview hold
+
+The follow-up only changes the PR workflow, workflow assertions and release notes. It removes cloud authentication, Hosting/runtime mutations and write permissions from the PR job. The required `build_and_preview` job still runs npm tests and build and reports that no preview URL was published. Production workflow and application artifact are unchanged. Existing remote preview channels were not changed or treated as safe evidence.
+
+Final scoped workflow/runtime checks: 26 tests pass; ESLint, YAML parsing, all six revised PR Bash blocks and whitespace checks pass. The prior 28-test result above describes the superseded preview-runtime approach, not the final policy.
+
+Final full unit rerun: 144 files / 735 tests passed (367.81 seconds). The two fewer assertions correspond to removed preview deployment behavior, replaced by a no-cloud-deployment assertion; no application tests were removed. Combined with the unchanged 245 passing smoke tests, final suite coverage is 980 tests. Separate executor checks with process capability=true passed 16 unit and four route smoke tests with provider mocks. Final aggregate-diff Gitleaks scan from main found no leaks, including the now-tracked QR generation source.

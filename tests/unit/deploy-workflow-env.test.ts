@@ -6,9 +6,10 @@ const workflows = [
   ".github/workflows/firebase-hosting-merge.yml",
   ".github/workflows/firebase-hosting-pull-request.yml",
 ];
+const productionWorkflows = [workflows[0]];
 
 describe("Firebase deployment environment propagation", () => {
-  it.each(workflows)("preserves existing second-brain references before framework mutation in %s", (path) => {
+  it.each(productionWorkflows)("preserves existing second-brain references before framework mutation in %s", (path) => {
     const source = readFileSync(join(process.cwd(), path), "utf8");
     const capture = source.indexOf('firebase-preserved-runtime.mjs capture "$SECOND_BRAIN_SNAPSHOT_PATH"');
     const firstFrameworkDeploy = source.indexOf("functions:artifacts:setpolicy");
@@ -26,13 +27,12 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).not.toContain("gcloud secrets versions add");
   });
 
-  it("allows an explicit default-off production switch but hard-disables preview execution", () => {
+  it("allows an explicit default-off production switch but hard-disables PR validation sends", () => {
     const main = readFileSync(join(process.cwd(), workflows[0]), "utf8");
     const preview = readFileSync(join(process.cwd(), workflows[1]), "utf8");
     expect(main).toContain("WARM_RECONNECT_PROVIDER_SEND_ENABLED: ${{ vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED || 'false' }}");
     expect(preview).toContain('WARM_RECONNECT_PROVIDER_SEND_ENABLED: "false"');
     expect(preview).not.toContain("vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED");
-    expect(preview).toContain('verify "$SECOND_BRAIN_SNAPSHOT_PATH" "false"');
     for (const source of [main, preview]) {
       const pinDiscovery = source.indexOf('set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"');
       expect(pinDiscovery).toBeGreaterThan(-1);
@@ -46,7 +46,29 @@ describe("Firebase deployment environment propagation", () => {
     expect(reboundVerify).toBeLessThan(main.indexOf("hosting:clone"));
   });
 
-  it.each(workflows)("revokes the Agent Nexus allowlist when the secret is empty in %s", (path) => {
+  it("retains the required PR test/build check without a cloud deployment path", () => {
+    const preview = readFileSync(join(process.cwd(), workflows[1]), "utf8").replace(/\r\n/g, "\n");
+    expect(preview).toContain("  build_and_preview:");
+    expect(preview).toContain("on: pull_request");
+    expect(preview).toContain("- run: npm ci");
+    expect(preview).toContain("- run: npm test");
+    expect(preview).toContain("- run: npm run build");
+    expect(preview).toContain("permissions:\n  contents: read");
+    expect(preview).toContain("No preview URL is published.");
+    expect(preview).toContain('>> "$GITHUB_STEP_SUMMARY"');
+    expect(preview).toContain("if: ${{ always() }}");
+    // No dormant cloud credentials, mutable runtime commands, deploy actions,
+    // or configurable bypass: enabling production sends cannot re-enable PR deploys.
+    for (const forbidden of [
+      "id-token:", "checks: write", "pull-requests: write", "google-github-actions/",
+      "GCP_AUTH_READY", "GCP_WIF", "gcloud ", "firebase-deploy.mjs", "hosting:",
+      "functions:artifacts", "--update-secrets", "--update-env-vars", "--to-revisions",
+      "FirebaseExtended/", "firebase-tools", "npm run deploy", "test:postdeploy",
+      "curl ", "workflow_dispatch", "vars.",
+    ]) expect(preview).not.toContain(forbidden);
+  });
+
+  it.each(productionWorkflows)("revokes the Agent Nexus allowlist when the secret is empty in %s", (path) => {
     const source = readFileSync(join(process.cwd(), path), "utf8");
 
     expect(source).toContain(
@@ -149,7 +171,7 @@ describe("Firebase deployment environment propagation", () => {
     expect(source).toContain('LIVE_CHANNEL_NAME" = "$EXPECTED_LIVE_CHANNEL"');
   });
 
-  it.each(workflows)(
+  it.each(productionWorkflows)(
     "pins and verifies the canonical Mission Control public origin in %s",
     (path) => {
       const source = readFileSync(join(process.cwd(), path), "utf8");
@@ -181,28 +203,10 @@ describe("Firebase deployment environment propagation", () => {
         "exact canonical Mission Control public origin."
       );
 
-      if (path.endsWith("firebase-hosting-merge.yml")) {
-        const candidateTag = source.indexOf(
-          '--update-tags="$RELEASE_TAG=$RUNTIME_REVISION"'
-        );
-        expect(candidateTag).toBeGreaterThan(revisionVerification);
-      } else {
-        expect(source).toContain("status.latestCreatedRevisionName");
-        expect(source).not.toContain("status.latestReadyRevisionName");
-        expect(source).toContain(
-          'PREVIEW_RUNTIME_SUFFIX="pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"'
-        );
-        expect(source).toContain('--image "$PREVIEW_DEPLOY_IMAGE"');
-        expect(source).toContain("--no-traffic");
-        expect(source).toContain('--revision-suffix "$PREVIEW_RUNTIME_SUFFIX"');
-        expect(source).toContain(
-          'gcloud run revisions describe "$PREVIEW_RUNTIME_REVISION"'
-        );
-        expect(source).toContain(
-          'PREVIEW_RUNTIME_IMAGE" != "$PREVIEW_DEPLOY_IMAGE"'
-        );
-        expect(source).toContain('PREVIEW_RUNTIME_READY" != "True"');
-      }
+      const candidateTag = source.indexOf(
+        '--update-tags="$RELEASE_TAG=$RUNTIME_REVISION"'
+      );
+      expect(candidateTag).toBeGreaterThan(revisionVerification);
     }
   );
 

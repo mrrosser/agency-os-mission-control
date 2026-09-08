@@ -28,7 +28,8 @@
   "pendingInterruptions": [
     "Required GitHub approving review and strict test/build_and_preview checks before merge",
     "Reconcile Gallery account identity: current Google identity is mrosser@rossergallery.com while saved OAuth rule requires mrosser@rossernftgallery.com",
-    "Current Gallery grant does not satisfy the exact gmail_send preset; no relaxation authorized"
+    "Current Gallery grant does not satisfy the exact gmail_send preset; no relaxation authorized",
+    "Current send-only reconnect replaces the broader Gallery grant; preserve existing integrations or obtain explicit replacement approval first"
   ],
   "materialDriftPredicate": "Re-review if provider project, release scope, expected sender identity, recipient/copy scope, required protection, runtime secret binding or release artifact materially changes. Compatible release labeling/privacy and configuration-preservation fixes remain in scope but require fresh tests and commit evidence."
 }

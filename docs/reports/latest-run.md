@@ -3,8 +3,8 @@
 ## 2026-09-08 CRM release approval and final candidate checks
 
 - Marcus approved publication with email capability, not any actual campaign send.
-- Fresh checks: 737 unit tests, 245 smoke tests, production build/typecheck, full lint (0 errors, 3 existing warnings), and 16 production-start browser scenarios passed.
-- Public card actions now exclude private intake notes. Release workflow preserves five existing Second Brain Secret Manager references and forces sending off on PR previews.
+- Final checks: 735 unit tests after the preview hold; unchanged application artifact has 245 smoke tests, production build/typecheck, full lint (0 errors, 3 existing warnings), and 16 production-start browser scenarios passed.
+- Public card actions now exclude private intake notes. Production release preserves five existing Second Brain Secret Manager references. Shared-service PR deployments are removed after a binding-safety finding; required tests/build remain and no preview URL is published.
 - Release held: required GitHub approving review/checks; Gallery OAuth identity differs from saved policy and its broad grant fails the exact send-only requirement. No personal-mailbox fallback or scope relaxation.
 - No live deployment or email capability change yet; zero warm pilots/scheduler jobs were found in the fresh audit. No campaign send or import performed.
 - Exact release scope, baseline reconciliation, checks and rollback controls: `docs/reports/2026-09-08-crm-release-pr.md` and `docs/execplans/2026-09-08-crm-release-approval.json`.

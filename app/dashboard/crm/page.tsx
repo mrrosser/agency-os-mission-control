@@ -39,8 +39,10 @@ import type {
 import { toast } from "sonner";
 import { OperatorWorkbench } from "@/components/crm/operator-workbench";
 import { FirstPartyShareCards } from "@/components/crm/first-party-share-cards";
+import { ConversationWorkspace } from "@/components/crm/conversation-workspace";
 import { filterCrmPeople, type CrmWorkspace, type CrmBrandFilter } from "@/lib/crm/workbench";
 import "./workbench.css";
+import "@/components/crm/conversation-workspace.css";
 
 interface Lead {
   id: string;
@@ -663,6 +665,13 @@ export default function CRMPage() {
 
       <div className="mb-8 empty:hidden">
         <GoogleOAuthCallbackFeedback />
+      </div>
+
+      <div id="crm-panel-assistant" role="tabpanel" aria-labelledby="crm-tab-assistant" hidden={workspace !== "assistant"} className="crm-panel">
+        <ConversationWorkspace user={user} active={workspace === "assistant"} onNavigate={(destination) => {
+          setWorkspace(destination);
+          document.getElementById(`crm-tab-${destination}`)?.focus();
+        }} />
       </div>
 
       <div id="crm-panel-outreach" role="tabpanel" aria-labelledby="crm-tab-outreach" hidden={workspace !== "outreach"} className="crm-panel">

@@ -1,5 +1,15 @@
 # Latest Verification Run
 
+## 2026-09-08 CRM conversational Assistant (local first version)
+
+- Based on released main `6d79c844`, isolated branch `codex/crm-conversation-20260908`. Local uncommitted implementation only; production, secrets, contacts, consent and campaigns are unchanged. The older dedicated-sending entry below is historical; its release was completed before this feature began.
+- Mobile Assistant tab, text and explicit-start WebRTC voice, editable/exportable local drafts, and four bounded tools shared with optional WebMCP. No individual intake write, inbox analytics, hosted survey or send tool. No extra reviewer.
+- Full unit/smoke: 1,112 tests / 238 files. Final focused suite after the last two UI tests were added: 125 tests / 8 files. Full lint: zero errors, three existing warnings; changed-source lint clean. TypeScript and production build passed (91 static pages).
+- Final mocked production-start Chromium: 3/3 at 1440px, 390px and 320px. Includes draft revision, voice cleanup/recovery with AI disabled and consent unchecked, optional tool registration, permission failure and offline draft retention. No page errors, unexpected writes or overflow. Owned port 3081 server stopped. Never deploy the synthetic Firebase test build.
+- Dependency audit: zero high/critical, 15 moderate in unchanged dependencies. Final redacted changed-file secret scan: all 34 files passed; `git diff --check` passed. No dependencies added. Independent authority/lifecycle and release-flag/runbook review completed; the runbook now correctly distinguishes mute from hangup.
+- Default-off flags added to local release-workflow code only. No OpenAI request, real microphone access, commit, push, PR, deployment or email send. Publication and user-attended real mobile/API validation are the next approval gate.
+- Plan: `docs/execplans/crm-conversation-20260908.md`; run/deployment/recovery guide: `docs/crm-assistant.md`. Stable screenshots and transferable handoff are in the RNG Artist Projects sibling repository under `output/crm-conversation-2026-09-08/` and `docs/reports/2026-09-08-crm-conversation-workspace.md`.
+
 ## 2026-09-08 dedicated Gallery sending follow-up (local only)
 
 - Marcus confirmed `mrosser@rossergallery.com` as both the OAuth account and From identity. This supersedes the older identity-policy blocker recorded in the historical entry below; it does not authorize a campaign send.

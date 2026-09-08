@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WARM_RECONNECT_PROVIDER_SEND_ENABLED: "false"
+      CRM_ASSISTANT_ENABLED: "false"
+      CRM_ASSISTANT_VOICE_ENABLED: "false"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WARM_RECONNECT_PROVIDER_SEND_ENABLED: ${{ vars.WARM_RECONNECT_PROVIDER_SEND_ENABLED || 'false' }}
+      CRM_ASSISTANT_ENABLED: ${{ vars.CRM_ASSISTANT_ENABLED || 'false' }}
+      CRM_ASSISTANT_VOICE_ENABLED: ${{ vars.CRM_ASSISTANT_VOICE_ENABLED || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +35,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-
       - run: npm ci
+      - name: Validate default-off CRM assistant switches
+        run: |
+          for flag in CRM_ASSISTANT_ENABLED CRM_ASSISTANT_VOICE_ENABLED; do
+            case "${!flag}" in true|false) ;; *) echo "Invalid CRM assistant feature switch."; exit 1 ;; esac
+          done
       - run: echo "${{ secrets.ENV_LOCAL }}" > .env.local
       - name: Validate and pin the explicit provider-send switch
         run: node scripts/firebase-preserved-runtime.mjs set-send-flag .env.local "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
@@ -278,6 +285,8 @@ jobs:
           append_env_update "REVENUE_AUTOMATION_UID" "$REVENUE_AUTOMATION_UID"
           append_env_update "REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN" "$REVENUE_AUTOMATION_ALLOW_LEGACY_TOKEN"
           append_env_update "WARM_RECONNECT_PROVIDER_SEND_ENABLED" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED"
+          append_env_update "CRM_ASSISTANT_ENABLED" "$CRM_ASSISTANT_ENABLED"
+          append_env_update "CRM_ASSISTANT_VOICE_ENABLED" "$CRM_ASSISTANT_VOICE_ENABLED"
           # Set this even when empty so deleting the secret revokes a previously deployed allowlist.
           ENV_UPDATES="$ENV_UPDATES##AGENT_ACTION_ALLOWED_UIDS=$AGENT_ACTION_ALLOWED_UIDS"
           RUNTIME_CONFIG_ARGS=()
@@ -331,6 +340,13 @@ jobs:
             --region "$FIREBASE_REGION" \
             --format=json)"
           node scripts/firebase-preserved-runtime.mjs verify "$SECOND_BRAIN_SNAPSHOT_PATH" "$WARM_RECONNECT_PROVIDER_SEND_ENABLED" <<< "$RUNTIME_REVISION_STATE"
+          for flag in CRM_ASSISTANT_ENABLED CRM_ASSISTANT_VOICE_ENABLED; do
+            actual="$(jq -r --arg flag "$flag" '[.spec.containers[0].env[]? | select(.name == $flag)][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"
+            if [ "$actual" != "${!flag}" ]; then
+              echo "CRM assistant runtime switch verification failed."
+              exit 1
+            fi
+          done
           RUNTIME_IMAGE="$(jq -r '.spec.containers[0].image // empty' <<< "$RUNTIME_REVISION_STATE")"
           RUNTIME_READY="$(jq -r '[.status.conditions[]? | select(.type == "Ready") | .status][0] // empty' <<< "$RUNTIME_REVISION_STATE")"
           RUNTIME_MISSION_CONTROL_PUBLIC_ORIGIN="$(jq -r '[.spec.containers[0].env[]? | select(.name == "MISSION_CONTROL_PUBLIC_ORIGIN")][0].value // empty' <<< "$RUNTIME_REVISION_STATE")"

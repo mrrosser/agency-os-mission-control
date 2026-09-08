@@ -1,4 +1,4 @@
-export const CRM_WORKSPACES = ["people", "outreach", "share", "activity"] as const;
+export const CRM_WORKSPACES = ["people", "outreach", "share", "activity", "assistant"] as const;
 export type CrmWorkspace = (typeof CRM_WORKSPACES)[number];
 export type CrmBrandFilter = "all" | "rt_solutions" | "rosser_nft_gallery";
 

@@ -5,7 +5,7 @@ Node 22+ and Python 3.11+; built-in modules only. Relative paths work locally an
 From a project root:
 
 ```text
-node --test .agents/skills/evaluation-observability/providers.test.mjs
+node --test .agents/skills/evaluation-observability/providers.node-test.mjs
 python -m unittest discover -s .agents/skills/evaluation-observability -p test_measure_command.py
 python .agents/skills/evaluation-observability/measure_command.py --project your-project --case existing-check --kind local-task --receipt .runtime/evaluations/unique-run.json -- python path/to/existing_validator.py
 ```

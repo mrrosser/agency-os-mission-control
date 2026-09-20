@@ -22,7 +22,7 @@ Use existing project tests and deterministic tools first. This package records e
 - Security: local fixtures by default; external scans retain existing authorization and scope enforcement. No model score overrides an allowlist.
 
 ## Verification
-`node --test providers.test.mjs` and `python -m unittest discover -s . -p test_measure_command.py` run offline inside the package. `index.test.mjs` also contains canonical-repository CLI checks; run it in CodexSkills, not a minimal runtime mirror. Read [README.md](README.md) for adapters and [operations.md](operations.md) for installation, release and rollback.
+`node --test providers.node-test.mjs` and `python -m unittest discover -s . -p test_measure_command.py` run offline inside the package. `index.node-test.mjs` also contains canonical-repository CLI checks; run it in CodexSkills, not a minimal runtime mirror. Read [README.md](README.md) for adapters and [operations.md](operations.md) for installation, release and rollback.
 
 ## Example prompts
 - Measure the existing Blender artifact validator and record a receipt without changing the scene.

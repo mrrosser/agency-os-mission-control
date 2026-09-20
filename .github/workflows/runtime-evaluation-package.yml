@@ -34,5 +34,5 @@ jobs:
           pin=json.loads((p/'evaluation-observability-pin.json').read_text())
           for name, expected in pin['files'].items():
               assert hashlib.sha256((p/'skills/evaluation-observability'/name).read_bytes()).hexdigest() == expected, name
-      - run: node --test .agents/skills/evaluation-observability/providers.test.mjs
+      - run: node --test .agents/skills/evaluation-observability/providers.node-test.mjs
       - run: python -m unittest discover -s .agents/skills/evaluation-observability -p test_measure_command.py

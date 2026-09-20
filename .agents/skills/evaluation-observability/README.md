@@ -34,7 +34,7 @@ For browser work, record task completion assertions, unintended-action count, re
 From the CodexSkills root:
 
 ```powershell
-node --test packages/evaluation-observability/index.test.mjs
+node --test packages/evaluation-observability/index.node-test.mjs
 node scripts/export_pilot_evals.mjs docs/reports/astra-jev/pilot-jev-resumed-20260920.json docs/codex-rollout/NEW-evals-replay.json
 node scripts/cache_diagnostics_probe.mjs docs/codex-rollout/NEW-cache-dryrun.json --dry-run
 ```

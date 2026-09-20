@@ -1,0 +1,38 @@
+name: Runtime evaluation package
+on:
+  pull_request:
+    paths:
+      - '.agents/skills/evaluation-observability/**'
+      - '.agents/evaluation-observability-pin.json'
+      - '.github/workflows/runtime-evaluation-package.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - '.agents/skills/evaluation-observability/**'
+      - '.agents/evaluation-observability-pin.json'
+permissions:
+  contents: read
+jobs:
+  offline-package:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify pin
+        shell: python
+        run: |
+          import pathlib, json, hashlib
+          p=pathlib.Path('.agents')
+          pin=json.loads((p/'evaluation-observability-pin.json').read_text())
+          for name, expected in pin['files'].items():
+              assert hashlib.sha256((p/'skills/evaluation-observability'/name).read_bytes()).hexdigest() == expected, name
+      - run: node --test .agents/skills/evaluation-observability/providers.node-test.mjs
+      - run: python -m unittest discover -s .agents/skills/evaluation-observability -p test_measure_command.py

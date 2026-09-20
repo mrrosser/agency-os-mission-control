@@ -17,6 +17,6 @@ export async function observeChatCompletion(send,{project_id,onObservation=()=>{
       model_fingerprint:typeof result?.json?.model==='string'?createHash('sha256').update(result.json.model).digest('hex'):null,
       usage:{input_tokens,output_tokens,cached_tokens,cache_write_tokens},cost_usd:null,quality:'unassessed',execution_authorized:false};
     // Logging failures must not discard a successful draft or replace its existing fallback.
-    try {await onObservation(row);}catch {}
+    try {await onObservation(row);}catch { /* Preserve the caller result if logging fails. */ }
   }
 }

@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "source_repository": "https://github.com/mrrosser/CodexSkills",
-  "source_commit": "ff1b5b775342d66ab2cae3469b50d4faed122b00",
+  "source_commit": "68d33f5490588cc0b732c8105dd526a55f4ce5f9",
   "source_path": "packages/evaluation-observability",
   "files": {
-    "chat-completions.mjs": "2fbff57b13752f30cce314132aa64b29760bf0fa29993c0fed3652441ef930e5",
+    "chat-completions.mjs": "2823ab05c68170c46fc3c7b3f7865cb3c0e9acbd48ca659393d6d94fa147aae8",
     "index.mjs": "aceac2fc7be86261654da5ce7827be0e61d97630a593f70938f7fd335b3fa997",
     "index.test.mjs": "4655f0c610aac685e2419fbb3438ad313818338b53203173dbbaaa09fcfaff20",
     "measure_command.py": "aa4d05e98d6b5dc91fc9ae68e8469f38384481a59cae1e75777222d013e84e55",

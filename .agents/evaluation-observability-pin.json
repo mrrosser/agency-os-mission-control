@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/mrrosser/CodexSkills",
+  "source_commit": "ff1b5b775342d66ab2cae3469b50d4faed122b00",
+  "source_path": "packages/evaluation-observability",
+  "files": {
+    "chat-completions.mjs": "2fbff57b13752f30cce314132aa64b29760bf0fa29993c0fed3652441ef930e5",
+    "index.mjs": "aceac2fc7be86261654da5ce7827be0e61d97630a593f70938f7fd335b3fa997",
+    "index.test.mjs": "4655f0c610aac685e2419fbb3438ad313818338b53203173dbbaaa09fcfaff20",
+    "measure_command.py": "aa4d05e98d6b5dc91fc9ae68e8469f38384481a59cae1e75777222d013e84e55",
+    "operations.md": "71bbb0444e88a3956f80a79057c339434d210536f548cbca19fd41198088bd6a",
+    "providers.mjs": "cb1f98e989b82f14703a257232ce1320d88e6ff83cb3cb8ed1ad7ca9c9476e5b",
+    "providers.test.mjs": "a6984e506921166d7480a75889b6a95fbcf0ce1de6951a57d5ebee782dc752e7",
+    "README.md": "d9a89d814aadc9d2bda4f235ab9c71cf8c82dd4c5fa4f48817342cf6aee01869",
+    "SKILL.md": "df6abb6ecf4c808b020cf2ef6cd1a99c7476737bbf7148771fad6a5a02e863c2",
+    "test_measure_command.py": "562f2a03b327417e505d44a31ae6b5c060bc712c161f23fb7f2f87a220e2067e"
+  }
+}

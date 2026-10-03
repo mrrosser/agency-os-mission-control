@@ -5,8 +5,8 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase-admin";
 import {
   assertGoogleProfileConnectionPolicy,
-  isRosserGallerySendingProfile,
-  ROSSER_GALLERY_SENDING_EMAIL,
+  getGoogleSendingProfile,
+  isGoogleSendingProfile,
 } from "@/lib/google/business-profiles";
 import {
   accessUserSecret,
@@ -218,7 +218,7 @@ function normalizedAccountSubject(value: string | null | undefined): string | nu
 function googleAccountIdForSubject(uid: string, subject: string, profileId?: string): string {
   // Preserve every existing work-profile key. A separate grant for the same
   // Google subject must not overwrite its Drive/Calendar/inbox credentials.
-  const purpose = isRosserGallerySendingProfile(profileId) ? `:purpose:${profileId}` : "";
+  const purpose = isGoogleSendingProfile(profileId) ? `:purpose:${profileId}` : "";
   const digest = createHash("sha256")
     .update(`${uid.length}:${uid}:${subject.length}:${subject}${purpose}`, "utf8")
     .digest("hex")
@@ -293,7 +293,7 @@ export async function resolveGoogleAccountTokens(
   }
   const profileId =
     requestedProfileId || normalizeProfileId(registry.defaultProfileId);
-  if (!profileId || (!requestedProfileId && isRosserGallerySendingProfile(profileId))) {
+  if (!profileId || (!requestedProfileId && isGoogleSendingProfile(profileId))) {
     return { registryFound: true, profileMapped: false, record: null };
   }
   const bindingSnap = await registryRef
@@ -324,10 +324,11 @@ export async function resolveGoogleAccountTokens(
   const tokens = parseStoredTokens(
     await accessUserSecret(uid, accountSecretKey(accountId))
   );
+  const sendingProfile = getGoogleSendingProfile(profileId);
   if (
-    isRosserGallerySendingProfile(profileId) &&
+    sendingProfile &&
     (!tokens ||
-      normalizedAccountEmail(tokens.accountEmail) !== ROSSER_GALLERY_SENDING_EMAIL ||
+      normalizedAccountEmail(tokens.accountEmail) !== sendingProfile.accountEmail ||
       !normalizedAccountSubject(tokens.accountSubject) ||
       tokens.scopePreset !== "gmail_send" ||
       !isBoundedScopeForPreset("gmail_send", tokens.scope) ||
@@ -365,8 +366,9 @@ export async function setGoogleDefaultProfileId(
 ): Promise<string> {
   const profileId = normalizeProfileId(profileIdInput);
   if (!profileId) throw new Error("Google account profile id is required");
-  if (isRosserGallerySendingProfile(profileId)) {
-    throw new Error("The dedicated Gallery sending connection cannot be the general Google default.");
+  const sendingProfile = getGoogleSendingProfile(profileId);
+  if (sendingProfile) {
+    throw new Error(`The dedicated ${sendingProfile.label} connection cannot be the general Google default.`);
   }
   const db = getAdminDb();
   const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
@@ -413,14 +415,17 @@ export async function persistGoogleAccountTokens(
   tokens: StoredGoogleAccountTokens
 ): Promise<void> {
   const db = getAdminDb();
-  const accountRef = db
-    .collection(TOKEN_COLLECTION)
-    .doc(uid)
-    .collection(ACCOUNT_SUBCOLLECTION)
-    .doc(accountId);
+  const registryRef = db.collection(TOKEN_COLLECTION).doc(uid);
+  const accountRef = registryRef.collection(ACCOUNT_SUBCOLLECTION).doc(accountId);
   const credentialWriteOperationId = randomUUID();
   await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(accountRef);
+    const [snapshot, bindings] = await Promise.all([
+      transaction.get(accountRef),
+      transaction.get(
+        registryRef.collection(PROFILE_BINDING_SUBCOLLECTION)
+          .where("accountId", "==", accountId).limit(3)
+      ),
+    ]);
     const data = snapshot.exists ? snapshot.data() || {} : {};
     if (
       !snapshot.exists ||
@@ -428,6 +433,21 @@ export async function persistGoogleAccountTokens(
       operationId(data.credentialWriteOperationId)
     ) {
       throw new Error("Google account credential update is not available");
+    }
+    const sendingBinding = bindings.docs.find((binding) => isGoogleSendingProfile(binding.id));
+    if (sendingBinding) {
+      const sendingProfile = getGoogleSendingProfile(sendingBinding.id)!;
+      const subject = normalizedAccountSubject(tokens.accountSubject);
+      if (
+        bindings.docs.length !== 1 ||
+        normalizedAccountEmail(tokens.accountEmail) !== sendingProfile.accountEmail ||
+        !subject ||
+        tokens.scopePreset !== "gmail_send" ||
+        !isBoundedScopeForPreset("gmail_send", tokens.scope) ||
+        accountId !== googleAccountIdForSubject(uid, subject, sendingBinding.id)
+      ) {
+        throw new Error("Dedicated Google sending credential refresh is invalid");
+      }
     }
     transaction.set(
       accountRef,
@@ -529,10 +549,11 @@ export async function persistGoogleAccountProfileTokens(
   const credentialWriteOperationId = randomUUID();
 
   const reservation = await db.runTransaction(async (transaction) => {
-    if (isRosserGallerySendingProfile(profileId)) {
+    const sendingProfile = getGoogleSendingProfile(profileId);
+    if (sendingProfile) {
       const registrySnapshot = await transaction.get(registryRef);
       if (registrySnapshot.exists && !isSchemaV2Registry(registrySnapshot.data() || {})) {
-        throw new Error("Preserve and migrate the existing Google work connection before adding Gallery sending.");
+        throw new Error(`Preserve and migrate the existing Google work connection before adding ${sendingProfile.label}.`);
       }
     }
     const bindingSnapshot = await transaction.get(bindingRef);

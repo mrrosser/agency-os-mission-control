@@ -24,6 +24,7 @@ import type {
   WarmReconnectCandidate,
   WarmReconnectPilot,
 } from "@/lib/crm/warm-reconnect-activation-types";
+import { WARM_RECONNECT_CAMPAIGN_VERSION } from "@/lib/crm/warm-reconnect-types";
 
 const PREVIEW_FINGERPRINT = `sha256:${"a".repeat(64)}`;
 
@@ -81,16 +82,16 @@ function request(
   };
 }
 
-function create(overrides: { candidates?: WarmReconnectCandidate[]; googleReady?: boolean } = {}) {
+function create(overrides: { candidates?: WarmReconnectCandidate[]; googleReady?: boolean; request?: CreateWarmReconnectPilotRequest; fromEmail?: string } = {}) {
   return createWarmReconnectPilot({
     pilotId: "pilot-1",
     workspaceId: "workspace-1",
     ownerUid: "owner-1",
     legacyDncOrgId: "org-1",
-    request: request(),
+    request: overrides.request || request(),
     candidates: overrides.candidates || [1, 2, 3, 4, 5].map(candidate),
     googleReady: overrides.googleReady ?? true,
-    fromEmail: "mrosser@rossergallery.com",
+    fromEmail: overrides.fromEmail || "mrosser@rossergallery.com",
     accountId: "google-account-1",
     preferenceOrigin: "https://leadflow-review.web.app",
     now: new Date("2026-08-12T12:00:00.000Z"),
@@ -119,7 +120,7 @@ function attestAll(pilot: WarmReconnectPilot): WarmReconnectPilot {
   return next;
 }
 
-function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.000Z")) {
+function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.000Z"), confirmationOverrides: Record<string, unknown> = {}) {
   return decideWarmReconnectPilotApproval({
     pilot,
     approvalId: "approval-1",
@@ -138,8 +139,9 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        artworkApprovedForEmail: true,
+        ...((pilot.contentMode ?? "artwork_html") === "artwork_html" ? { artworkApprovedForEmail: true as const } : {}),
         exactAudienceReviewed: true,
+        ...confirmationOverrides,
       },
       note: "Approved for this exact five-person pilot only.",
     },
@@ -147,6 +149,59 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it("creates and approves plain text without an artwork attestation, retaining every other gate", () => {
+    const plain = create({ request: request({ contentMode: "plain_text", artworkEmailApproval: undefined }) });
+    expect(plain.contentMode).toBe("plain_text");
+    expect(plain.artworkEmailApproval).toBeNull();
+    expect(plain.gates).toHaveLength(8);
+    expect(plain.gates.some((gate) => gate.id === "artwork_email_channel_approval")).toBe(false);
+    expect(() => approve(plain)).toThrow("All five recipient relationships");
+    const approved = approve(attestAll(plain));
+    expect(approved.status).toBe("approved");
+    expect(approved.gates.every((gate) => gate.status === "verified")).toBe(true);
+    const artwork = create();
+    expect(artwork.contentMode).toBe("artwork_html");
+    expect(artwork.gates.some((gate) => gate.id === "artwork_email_channel_approval")).toBe(true);
+    expect(plain.fingerprints.artifactFingerprint).not.toBe(artwork.fingerprints.artifactFingerprint);
+    expect(plain.fingerprints.actionFingerprint).not.toBe(artwork.fingerprints.actionFingerprint);
+    expect(plain.fingerprints.audienceFingerprint).toBe(artwork.fingerprints.audienceFingerprint);
+    expect(() => computeWarmReconnectPilotFingerprints({ ...approved, contentMode: "artwork_html" }))
+      .toThrow("Artwork approval must match");
+  });
+
+  it("rejects absent artwork approval in legacy/artwork mode and rejects false artwork approval in plain mode", () => {
+    for (const contentMode of [undefined, "artwork_html"] as const) {
+      expect(() => create({ request: request({ contentMode, artworkEmailApproval: undefined }) }))
+        .toThrow("Artwork mode requires artwork approval");
+    }
+    expect(() => create({ request: request({ contentMode: "plain_text" }) }))
+      .toThrow("plain text must omit it");
+    expect(() => create({ request: request({ contentMode: "unknown" as never }) }))
+      .toThrow("Invalid warm reconnect content mode");
+  });
+
+  it("requires actual artwork confirmation for artwork and retains safety confirmations for plain text", () => {
+    const artwork = attestAll(create());
+    expect(() => approve(artwork, undefined, { artworkApprovedForEmail: undefined }))
+      .toThrow("Every activation gate must be verified");
+    const plain = attestAll(create({ request: request({ contentMode: "plain_text", artworkEmailApproval: undefined }) }));
+    expect(() => approve(plain, undefined, { artworkApprovedForEmail: true }))
+      .toThrow("Plain-text approval must omit artwork confirmation");
+    for (const confirmation of ["suppressionLedgerVerified", "preferencesAndUnsubscribeVerified", "physicalPostalAddressVerified", "exactAudienceReviewed"]) {
+      expect(() => approve(plain, undefined, { [confirmation]: undefined }))
+        .toThrow("Every activation gate must be verified");
+    }
+  });
+
+  it("accepts only the dedicated RT sending profile and exact RT account address", () => {
+    const rtRequest = request({ sender: { ...request().sender, businessId: "rt_solutions", profileId: "rt_solutions_send", replyTo: "mrosser@rt.solutions", legalEntity: "RT.Solutions" } });
+    expect(create({ request: rtRequest, fromEmail: "mrosser@rt.solutions" }).sender.profileId)
+      .toBe("rt_solutions_send");
+    expect(() => create({ request: { ...rtRequest, sender: { ...rtRequest.sender, profileId: "rt_solutions_work" as never } }, fromEmail: "mrosser@rt.solutions" }))
+      .toThrow(ApiError);
+    expect(() => create({ request: rtRequest, fromEmail: "wrong@example.com" })).toThrow(ApiError);
+  });
+
   it.each(["old-work-profile", "wrong-sender"])("rejects Gallery %s when creating a pilot", (kind) => {
     const input = request();
     if (kind === "old-work-profile") input.sender.profileId = "rosser_gallery_work" as never;
@@ -196,7 +251,7 @@ describe("warm reconnect activation state machine", () => {
     const lock = {
       schemaVersion: 1,
       campaignId: "marcus-warm-reconnect",
-      campaignVersion: "2026-08-12.1",
+      campaignVersion: WARM_RECONNECT_CAMPAIGN_VERSION,
       tranche: "initial_5",
       state: "active",
       pilotId: "pilot-first",

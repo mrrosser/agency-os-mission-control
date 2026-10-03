@@ -19,6 +19,32 @@ export const ROSSER_GALLERY_SENDING_PROFILE = {
 } as const;
 export const ROSSER_GALLERY_SENDING_EMAIL = "mrosser@rossergallery.com";
 
+export const RT_SOLUTIONS_SENDING_PROFILE = {
+  businessId: "rt_solutions",
+  profileId: "rt_solutions_send",
+  label: "RT.Solutions sending",
+} as const;
+export const RT_SOLUTIONS_SENDING_EMAIL = "mrosser@rt.solutions";
+
+const GOOGLE_SENDING_PROFILES = [
+  { ...ROSSER_GALLERY_SENDING_PROFILE, accountEmail: ROSSER_GALLERY_SENDING_EMAIL },
+  { ...RT_SOLUTIONS_SENDING_PROFILE, accountEmail: RT_SOLUTIONS_SENDING_EMAIL },
+] as const;
+
+export function getGoogleSendingProfile(profileId: string | null | undefined) {
+  return GOOGLE_SENDING_PROFILES.find((profile) => profile.profileId === profileId) || null;
+}
+
+export function getGoogleSendingProfileEmail(
+  profileId: string | null | undefined
+): string | null {
+  return getGoogleSendingProfile(profileId)?.accountEmail || null;
+}
+
+export function isGoogleSendingProfile(profileId: string | null | undefined): boolean {
+  return getGoogleSendingProfile(profileId) !== null;
+}
+
 export function isRosserGallerySendingProfile(profileId: string | null | undefined): boolean {
   return profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId;
 }
@@ -28,21 +54,23 @@ export function assertGoogleProfileConnectionPolicy(input: {
   scopePreset: string;
   accountEmail?: string;
 }): void {
-  if (!isRosserGallerySendingProfile(input.profileId)) return;
+  const sendingProfile = getGoogleSendingProfile(input.profileId);
+  if (!sendingProfile) return;
   if (input.scopePreset !== "gmail_send") {
-    throw new Error("Gallery sending requires the dedicated gmail_send permission preset.");
+    throw new Error(`${sendingProfile.label} requires the dedicated gmail_send permission preset.`);
   }
   if (
     input.accountEmail !== undefined &&
-    input.accountEmail.trim().toLowerCase() !== ROSSER_GALLERY_SENDING_EMAIL
+    input.accountEmail.trim().toLowerCase() !== sendingProfile.accountEmail
   ) {
-    throw new Error(`Gallery sending requires the Google account ${ROSSER_GALLERY_SENDING_EMAIL}.`);
+    throw new Error(`${sendingProfile.label} requires the Google account ${sendingProfile.accountEmail}.`);
   }
 }
 
 export type GoogleBusinessProfile =
   | (typeof GOOGLE_BUSINESS_PROFILES)[number]
-  | typeof ROSSER_GALLERY_SENDING_PROFILE;
+  | typeof ROSSER_GALLERY_SENDING_PROFILE
+  | typeof RT_SOLUTIONS_SENDING_PROFILE;
 export type GoogleBusinessId = GoogleBusinessProfile["businessId"];
 export type GoogleProfileId = GoogleBusinessProfile["profileId"];
 
@@ -56,7 +84,8 @@ const PROFILE_BY_BUSINESS = new Map<string, GoogleBusinessProfile>(
   GOOGLE_BUSINESS_PROFILES.map((profile) => [profile.businessId, profile])
 );
 const PROFILE_BY_ID = new Map<string, GoogleBusinessProfile>(
-  [...GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_PROFILE].map((profile) => [profile.profileId, profile])
+  [...GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_PROFILE, RT_SOLUTIONS_SENDING_PROFILE]
+    .map((profile) => [profile.profileId, profile])
 );
 
 export class GoogleBusinessProfileContextError extends Error {

@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
+import type { WarmReconnectContentMode } from "@/lib/crm/warm-reconnect-activation-types";
 
 export const WARM_RECONNECT_EMAIL_RENDERER_VERSION =
   "warm-reconnect-email-renderer.v1" as const;
@@ -10,6 +11,7 @@ export const WARM_RECONNECT_RENDERER_CONTRACT_VERSION =
 
 export interface WarmReconnectEmailRenderInput {
   campaign: WarmReconnectCampaignDraft;
+  contentMode?: WarmReconnectContentMode;
   firstName: string | null;
   senderName: string;
   legalEntity: string;
@@ -21,6 +23,7 @@ export interface WarmReconnectEmailRenderInput {
 
 export interface WarmReconnectRenderedEmail {
   rendererVersion: typeof WARM_RECONNECT_EMAIL_RENDERER_VERSION;
+  contentMode: WarmReconnectContentMode;
   subject: string;
   plainText: string;
   html: string;
@@ -29,6 +32,7 @@ export interface WarmReconnectRenderedEmail {
 }
 
 export function warmReconnectRenderedContractFingerprint(input: {
+  contentMode?: WarmReconnectContentMode;
   subject: string;
   plainText: string;
   html: string;
@@ -39,6 +43,7 @@ export function warmReconnectRenderedContractFingerprint(input: {
       JSON.stringify({
         contract: WARM_RECONNECT_RENDERER_CONTRACT_VERSION,
         rendererVersion: WARM_RECONNECT_EMAIL_RENDERER_VERSION,
+        contentMode: resolveWarmReconnectContentMode(input.contentMode),
         subject: input.subject,
         plainText: input.plainText,
         html: input.html,
@@ -54,6 +59,7 @@ export function warmReconnectRendererImplementationFingerprint(): string {
       [
         WARM_RECONNECT_RENDERER_CONTRACT_VERSION,
         WARM_RECONNECT_EMAIL_RENDERER_VERSION,
+        resolveWarmReconnectContentMode.toString(),
         cleanText.toString(),
         httpsUrl.toString(),
         assertPreferenceAndUnsubscribeUrls.toString(),
@@ -62,6 +68,13 @@ export function warmReconnectRendererImplementationFingerprint(): string {
       ].join("\n---\n")
     )
     .digest("hex")}`;
+}
+
+/** Stored pilots without a mode retain their original artwork approval boundary. */
+export function resolveWarmReconnectContentMode(value: unknown): WarmReconnectContentMode {
+  if (value === undefined || value === "artwork_html") return "artwork_html";
+  if (value === "plain_text") return "plain_text";
+  throw new Error("Invalid warm reconnect content mode");
 }
 
 function cleanText(label: string, value: string, maxLength: number): string {
@@ -139,6 +152,7 @@ function escapeHtml(value: string): string {
 export function renderWarmReconnectEmail(
   input: WarmReconnectEmailRenderInput
 ): WarmReconnectRenderedEmail {
+  const contentMode = resolveWarmReconnectContentMode(input.contentMode);
   const senderName = cleanText("sender name", input.senderName, 120);
   const legalEntity = cleanText("legal entity", input.legalEntity, 160);
   const postalAddress = cleanText(
@@ -158,7 +172,9 @@ export function renderWarmReconnectEmail(
     unsubscribeUrl,
     publicOrigin,
   });
-  const artworkUrl = new URL(input.campaign.artwork.url, publicOrigin).toString();
+  const artworkUrl = contentMode === "artwork_html"
+    ? new URL(input.campaign.artwork.url, publicOrigin).toString()
+    : "";
   const paragraphs = [...input.campaign.copy.paragraphs];
   const postCta = [...input.campaign.copy.postCtaParagraphs];
   const greeting = `Hi ${firstName},`;
@@ -182,7 +198,7 @@ export function renderWarmReconnectEmail(
   const postCtaHtml = postCta
     .map((paragraph) => `<p style="margin:0 0 18px">${escapeHtml(paragraph)}</p>`)
     .join("");
-  const html = [
+  const html = contentMode === "plain_text" ? "" : [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>',
     '<body style="margin:0;background:#0b0b0a;color:#f8f1e2;font-family:Arial,sans-serif">',
@@ -202,6 +218,7 @@ export function renderWarmReconnectEmail(
 
   const rendered = {
     rendererVersion: WARM_RECONNECT_EMAIL_RENDERER_VERSION,
+    contentMode,
     subject: input.campaign.copy.subject,
     plainText,
     html,

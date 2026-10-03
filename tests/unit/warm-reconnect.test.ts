@@ -91,25 +91,29 @@ describe("warm reconnect review-only campaign", () => {
         subject: "A quick hello from Marcus",
         alternateSubject: "Would you like to stay in touch?",
         preheader:
-          "A personal note, and an easy way to choose what you’d like to hear about.",
+          "Choose updates from Rosser Gallery, RT.Solutions, or both.",
         greeting: "Hi {{first_name | there}},",
         signature: ["Marcus Rosser", "New Orleans, Louisiana"],
       },
       primaryCta: {
-        label: "Choose what you’d like to hear about",
+        label: "Choose your updates",
         state: "missing",
         enabled: false,
         href: null,
       },
     });
     expect(first.copy.paragraphs).toEqual([
-      "I’m reaching out personally because our paths crossed at some point through my art, business, or community work here in New Orleans. I’m bringing those relationships together more thoughtfully, and I wanted to ask before I send you anything else.",
-      "If you’d like to stay connected, you’ll be able to choose what you want to hear about. That could be new work and events from Rosser Gallery, practical technology and business updates from RT.Solutions, or an occasional personal note from me.",
+      "It's Marcus Rosser. I wanted to say hello and share a simple way to stay connected with my work.",
+      "Rosser Gallery updates cover art, exhibitions, workshops, and community events. RT.Solutions updates cover practical technology, business systems, and project news.",
+      "If either sounds useful, you can choose Rosser Gallery, RT.Solutions, or both below.",
     ]);
     expect(first.copy.postCtaParagraphs).toEqual([
-      "If now isn’t the right time, no pressure. I’ll respect that.",
-      "Thank you for being part of my story in some way. I’m grateful our paths crossed.",
+      "This invitation doesn't subscribe you to anything. You'll only receive the updates you choose, and you can unsubscribe at any time. If neither is for you, no pressure.",
+      "Thanks for taking a look.",
     ]);
+    expect(first.campaignVersion).toBe("2026-10-03.1");
+    expect(first.owner.brands).toEqual(["Rosser Gallery", "RT.Solutions"]);
+    expect(first.copy.plainText).not.toMatch(/personal note|our paths crossed|part of my story/i);
     expect(first.copy.plainText).not.toContain("—");
     expect(first.review.previewFingerprint).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(laterObservation.review.previewFingerprint).toBe(

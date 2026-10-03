@@ -2,11 +2,49 @@ import React from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
 import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
+
+const hookState = vi.hoisted(() => ({ values: null as unknown[] | null, index: 0 }));
+
+vi.mock("react", async (importOriginal) => {
+  const react = await importOriginal<typeof import("react")>();
+  return {
+    ...react,
+    useState: (initial: unknown) => {
+      const index = hookState.index++;
+      return react.useState(
+        hookState.values && index < hookState.values.length ? hookState.values[index] : initial
+      );
+    },
+  };
+});
+
+function activationFixture(providerExecutionEnabled: unknown, approved = false) {
+  return {
+    googleProfiles: [],
+    candidates: [],
+    candidateSummary: { eligibleForReview: 0, returned: 0, excluded: 0, truncated: false },
+    constraints: { providerExecutionEnabled },
+    pilots: [{
+      pilotId: "fixture-pilot",
+      status: approved ? "approved" : "needs_campaign_approval",
+      contentMode: "plain_text",
+      recipients: [],
+      gates: [],
+      approval: approved ? { expiresAt: "2030-01-01T00:00:00.000Z" } : null,
+      availableActions: { canApprove: false, canLaunch: approved, canStop: true },
+    }],
+  };
+}
+
+function launchButton(html: string): string | undefined {
+  return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
+    ?.find((button) => button.includes("Authorize exact five-email launch"));
+}
 
 const summary: PortfolioCrmRegistrySummary = {
   schemaVersion: 1,
@@ -48,6 +86,11 @@ const summary: PortfolioCrmRegistrySummary = {
 };
 
 describe("warm reconnect campaign UI", () => {
+  beforeEach(() => {
+    hookState.values = null;
+    hookState.index = 0;
+  });
+
   it("renders the copy, owned artwork, exact aggregates, and zero-authority boundary", () => {
     const html = renderToStaticMarkup(
       <WarmReconnectCampaign
@@ -125,7 +168,54 @@ describe("warm reconnect campaign UI", () => {
     expect(html).toContain("Permission first. Approval and launch stay separate.");
     expect(html).toContain("No pilot exists. Approval and launch have zero authority.");
     expect(html).toContain("Launch is the separate action that authorizes those five Gmail sends.");
+    expect(html).toContain("Provider execution status is unknown until live controls load.");
+    expect(html).not.toContain("Provider execution is currently disabled.");
     expect(html).not.toContain("Launch approved pilot");
+  });
+
+  it.each([true, false])("renders the loaded provider setting without granting launch authority: %s", (enabled) => {
+    hookState.values = [activationFixture(enabled), false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(html).toContain(enabled
+      ? "Provider execution is enabled."
+      : "Provider execution is currently disabled.");
+    expect(html).toContain("The provider setting does not approve or launch a pilot.");
+    expect(html).not.toContain(enabled
+      ? "provider currently disabled"
+      : "provider enabled");
+    expect(launchButton(html)).toContain(enabled
+      ? "Authorize exact five-email launch · provider enabled"
+      : "Authorize exact five-email launch · provider currently disabled");
+    expect(launchButton(html)).toContain('disabled=""');
+  });
+
+  it.each([true, false])("preserves the approved pilot's launch control when provider status is %s", (enabled) => {
+    hookState.values = [activationFixture(enabled, true), false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(launchButton(html)).toBeDefined();
+    expect(launchButton(html)).not.toContain('disabled=""');
+  });
+
+  it.each([undefined, null, "true"])("shows unknown for an absent or malformed provider setting: %s", (enabled) => {
+    hookState.values = [activationFixture(enabled), false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(html).toContain("Provider execution status is unknown until live controls load.");
+    expect(launchButton(html)).toContain("provider status unknown");
+    expect(html).not.toContain("Provider execution is currently disabled.");
+    expect(html).not.toContain("Provider execution is enabled.");
+  });
+
+  it("shows unknown after an error instead of reusing the prior disabled status", () => {
+    hookState.values = [activationFixture(false), false, "Activation controls unavailable"];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(html).toContain("Activation controls unavailable");
+    expect(html).toContain("Provider execution status is unknown until live controls load.");
+    expect(launchButton(html)).toContain("provider status unknown");
+    expect(html).not.toContain("provider currently disabled");
   });
 
   it("keeps Google consent and pilot mutations on exact bounded routes", () => {

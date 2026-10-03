@@ -8,7 +8,6 @@ import type {
 } from "@/lib/crm/warm-reconnect-preferences";
 
 const EMPTY_TOPICS: WarmReconnectTopics = {
-  marcus_rosser_art: false,
   rosser_gallery: false,
   rt_solutions: false,
 };
@@ -19,21 +18,23 @@ const TOPIC_OPTIONS: Array<{
   description: string;
 }> = [
   {
-    id: "marcus_rosser_art",
-    name: "Marcus Rosser — art and studio notes",
-    description: "New work, process, exhibitions, and occasional personal updates.",
-  },
-  {
     id: "rosser_gallery",
     name: "Rosser Gallery",
-    description: "Gallery exhibitions, artist news, events, and community invitations.",
+    description: "Art, exhibitions, workshops, newsletters, and community events.",
   },
   {
     id: "rt_solutions",
     name: "RT.Solutions",
-    description: "Practical technology, business systems, and useful project updates.",
+    description: "Practical technology, business systems, project news, and events.",
   },
 ];
+
+function businessTopics(value?: Partial<WarmReconnectTopics>): WarmReconnectTopics {
+  return {
+    rosser_gallery: value?.rosser_gallery === true,
+    rt_solutions: value?.rt_solutions === true,
+  };
+}
 
 function fragmentToken(): string | null {
   const raw = window.location.hash.slice(1);
@@ -77,7 +78,7 @@ export function WarmReconnectPreferences() {
       .then((next) => {
         if (controller.signal.aborted) return;
         setResult(next);
-        setTopics(next.topics || EMPTY_TOPICS);
+        setTopics(businessTopics(next.topics));
       })
       .catch(() => {
         if (!controller.signal.aborted) setResult(null);
@@ -104,7 +105,7 @@ export function WarmReconnectPreferences() {
         topics,
       });
       setResult(next);
-      setTopics(next.topics || topics);
+      setTopics(businessTopics(next.topics || topics));
       setNotice(next.message);
     } catch {
       setNotice("We could not save that request. Please try again.");
@@ -154,7 +155,7 @@ export function WarmReconnectPreferences() {
             Your inbox should still feel like yours.
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-6 text-[#cfc4b1] sm:text-base">
-            Choose the parts of Marcus&apos;s work you genuinely want to follow. Your choices apply to promotional email and can be changed later.
+            Choose updates from Rosser Gallery, RT.Solutions, or both. Your choices apply to promotional email and can be changed later.
           </p>
         </header>
 

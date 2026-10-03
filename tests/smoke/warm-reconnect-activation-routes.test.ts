@@ -61,6 +61,26 @@ const pilot = {
   availableActions: { canLaunch: true, launchAuthorizesExactProviderExecution: true },
 };
 
+const pilotRequest = {
+  idempotencyKey: "pilot-key-1",
+  campaignPreviewFingerprint: sha,
+  tranche: "initial_5",
+  recipientCap: 5,
+  candidateRecipientIds: ["r1", "r2", "r3", "r4", "r5"],
+  sender: {
+    senderName: "Marcus Rosser",
+    legalEntity: "Rosser Gallery LLC",
+    replyTo: "marcus@example.com",
+    physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
+    businessId: "rosser_nft_gallery",
+    profileId: "rosser_gallery_send",
+  },
+  artworkEmailApproval: {
+    approvedForThisEmailCampaign: true,
+    evidenceNote: "Approved for this exact email campaign.",
+  },
+};
+
 describe("warm reconnect activation routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -94,25 +114,7 @@ describe("warm reconnect activation routes", () => {
   });
 
   it("accepts only a strict exact-five pilot request", async () => {
-    const body = {
-      idempotencyKey: "pilot-key-1",
-      campaignPreviewFingerprint: sha,
-      tranche: "initial_5",
-      recipientCap: 5,
-      candidateRecipientIds: ["r1", "r2", "r3", "r4", "r5"],
-      sender: {
-        senderName: "Marcus Rosser",
-        legalEntity: "Rosser Gallery LLC",
-        replyTo: "marcus@example.com",
-        physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
-        businessId: "rosser_nft_gallery",
-        profileId: "rosser_gallery_send",
-      },
-      artworkEmailApproval: {
-        approvedForThisEmailCampaign: true,
-        evidenceNote: "Approved for this exact email campaign.",
-      },
-    };
+    const body = pilotRequest;
     const response = await postPilot(
       jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", body) as never,
       context() as never
@@ -172,6 +174,104 @@ describe("warm reconnect activation routes", () => {
     );
     expect(actualOversize.status).toBe(413);
     expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts explicit plain text with the RT send profile and no artwork approval", async () => {
+    const body = {
+      ...pilotRequest,
+      contentMode: "plain_text",
+      artworkEmailApproval: undefined,
+      sender: {
+        ...pilotRequest.sender,
+        legalEntity: "RT Solutions LLC",
+        businessId: "rt_solutions",
+        profileId: "rt_solutions_send",
+      },
+    };
+    const response = await postPilot(
+      jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", body) as never,
+      context() as never
+    );
+
+    expect(response.status).toBe(201);
+    expect(createMock).toHaveBeenCalledOnce();
+    expect(createMock.mock.calls[0]?.[0].request).toMatchObject({
+      contentMode: "plain_text",
+      sender: { businessId: "rt_solutions", profileId: "rt_solutions_send" },
+    });
+    expect(createMock.mock.calls[0]?.[0].request).not.toHaveProperty("artworkEmailApproval");
+  });
+
+  it.each([undefined, "artwork_html"])(
+    "rejects missing artwork approval in legacy or explicit artwork mode: %s",
+    async (contentMode) => {
+      const response = await postPilot(
+        jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", {
+          ...pilotRequest,
+          contentMode,
+          artworkEmailApproval: undefined,
+        }) as never,
+        context() as never
+      );
+
+      expect(response.status).toBe(400);
+      expect(createMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects an artwork approval supplied with plain-text mode", async () => {
+    const response = await postPilot(
+      jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", {
+        ...pilotRequest,
+        contentMode: "plain_text",
+      }) as never,
+      context() as never
+    );
+
+    expect(response.status).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["plain", "", null])("rejects an invalid content mode: %s", async (contentMode) => {
+    const response = await postPilot(
+      jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", {
+        ...pilotRequest,
+        contentMode,
+      }) as never,
+      context() as never
+    );
+
+    expect(response.status).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("passes approval without artwork confirmation to the pilot-aware domain check", async () => {
+    const body = {
+      decision: "approve",
+      expectedArtifactFingerprint: sha,
+      expectedAudienceFingerprint: sha,
+      expectedActionFingerprint: sha,
+      approvalScope: "exact_five_one_time_reconnection_emails",
+      confirmations: {
+        senderLegalIdentityVerified: true,
+        physicalPostalAddressVerified: true,
+        preferencesAndUnsubscribeVerified: true,
+        suppressionLedgerVerified: true,
+        spfDkimDmarcVerified: true,
+        replyToMonitored: true,
+        exactAudienceReviewed: true,
+      },
+      note: "Approved for this exact plain-text pilot.",
+    };
+    const response = await postApproval(
+      jsonRequest("http://localhost/approval", body) as never,
+      context({ pilotId: "pilot-1" }) as never
+    );
+
+    expect(response.status).toBe(200);
+    expect(approvalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ uid: "owner-1", pilotId: "pilot-1", request: body })
+    );
   });
 
   it("exposes distinct review, approval, launch-request, and stop transitions", async () => {

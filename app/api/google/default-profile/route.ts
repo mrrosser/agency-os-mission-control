@@ -5,6 +5,7 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { readBoundedRequestBody } from "@/lib/api/bounded-body";
 import {
   GoogleBusinessProfileContextError,
+  isGoogleSendingProfile,
   resolveGoogleBusinessProfileContext,
 } from "@/lib/google/business-profiles";
 import { setGoogleDefaultProfileId } from "@/lib/google/account-token-store";
@@ -49,6 +50,9 @@ export const POST = withApiHandler(async ({ request, correlationId, log }) => {
     throw error;
   }
   if (!profile) throw new ApiError(400, "A Google business profile is required.");
+  if (isGoogleSendingProfile(profile.profileId)) {
+    throw new ApiError(400, "A dedicated sending connection cannot be the default Google work profile.");
+  }
 
   try {
     await setGoogleDefaultProfileId(user.uid, profile.profileId);

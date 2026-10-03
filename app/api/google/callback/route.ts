@@ -178,10 +178,11 @@ function resultResponse(input: {
   }
   const redirectUrl = sanitizeReturnTo(input.stateData?.returnTo, origin);
   redirectUrl.searchParams.set("google", input.connected ? "connected" : "error");
-  if (input.connected && input.profileContext) {
+  if (input.profileContext) {
     redirectUrl.searchParams.set("googleBusiness", input.profileContext.businessId);
     redirectUrl.searchParams.set("googleProfile", input.profileContext.profileId);
-  } else {
+  }
+  if (!input.connected) {
     redirectUrl.searchParams.set("googleError", input.errorCode || "provider_error");
   }
   if (input.stateData?.correlationId) {

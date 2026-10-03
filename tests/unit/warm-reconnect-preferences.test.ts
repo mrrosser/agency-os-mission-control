@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import {
   digestWarmReconnectToken,
@@ -13,6 +14,20 @@ type Stored = Record<string, unknown>;
 function fakeDb(seed: Record<string, Stored> = {}) {
   const records = new Map(Object.entries(seed));
   const writes: Array<{ operation: string; path: string; data: Stored }> = [];
+
+  function mergeFields(existing: Stored, incoming: Stored): Stored {
+    const merged = { ...existing };
+    for (const [key, value] of Object.entries(incoming)) {
+      const previous = merged[key];
+      const isMap = (entry: unknown): entry is Stored => Boolean(
+        entry && typeof entry === "object" && Object.getPrototypeOf(entry) === Object.prototype
+      );
+      merged[key] = isMap(previous) && isMap(value) && Object.keys(value).length > 0
+        ? mergeFields(previous, value)
+        : value;
+    }
+    return merged;
+  }
 
   function snapshot(path: string) {
     const value = records.get(path);
@@ -48,7 +63,7 @@ function fakeDb(seed: Record<string, Stored> = {}) {
       data: Stored,
       options?: { merge?: boolean }
     ) => {
-      const next = options?.merge ? { ...(records.get(reference.path) || {}), ...data } : data;
+      const next = options?.merge ? mergeFields(records.get(reference.path) || {}, data) : data;
       records.set(reference.path, next);
       writes.push({ operation: "set", path: reference.path, data });
     },
@@ -171,6 +186,11 @@ function contactDocument() {
 
 function tokenPath(rawToken: string) {
   return `crm_preference_tokens/${digestWarmReconnectToken(rawToken)}`;
+}
+
+function preferenceStatePath() {
+  const id = createHash("sha256").update(`preference:${workspaceId}:${contactPointId}`).digest("hex").slice(0, 40);
+  return `crm_contact_preferences/${id}`;
 }
 
 describe("warm reconnect preference capabilities", () => {
@@ -322,7 +342,6 @@ describe("warm reconnect preference capabilities", () => {
       token: preferenceToken,
       requestId: "request-1",
       topics: {
-        marcus_rosser_art: true,
         rosser_gallery: true,
         rt_solutions: false,
       },
@@ -359,8 +378,7 @@ describe("warm reconnect preference capabilities", () => {
       token: preferenceToken,
       requestId: "request-same",
       topics: {
-        marcus_rosser_art: true,
-        rosser_gallery: false,
+        rosser_gallery: true,
         rt_solutions: false,
       },
     };
@@ -370,9 +388,8 @@ describe("warm reconnect preference capabilities", () => {
       {
         ...first,
         topics: {
-          marcus_rosser_art: false,
-          rosser_gallery: true,
-          rt_solutions: false,
+          rosser_gallery: false,
+          rt_solutions: true,
         },
       },
       { db: fake.db }
@@ -385,26 +402,24 @@ describe("warm reconnect preference capabilities", () => {
     ).toHaveLength(1);
   });
 
-  it("records each later art → gallery → art choice as append-only chronology", async () => {
+  it("records each later RT to Gallery to RT choice as append-only chronology", async () => {
     const fake = fakeDb({
       [tokenPath(preferenceToken)]: tokenDocument("preferences"),
       [`crm_contact_points/${contactPointId}`]: contactDocument(),
     });
-    const artOnly = {
-      marcus_rosser_art: true,
+    const rtOnly = {
       rosser_gallery: false,
-      rt_solutions: false,
+      rt_solutions: true,
     };
     const galleryOnly = {
-      marcus_rosser_art: false,
       rosser_gallery: true,
       rt_solutions: false,
     };
 
     for (const [requestId, topics] of [
-      ["request-art-1", artOnly],
+      ["request-rt-1", rtOnly],
       ["request-gallery", galleryOnly],
-      ["request-art-2", artOnly],
+      ["request-rt-2", rtOnly],
     ] as const) {
       await processWarmReconnectPreferenceMutation(
         {
@@ -423,7 +438,7 @@ describe("warm reconnect preference capabilities", () => {
     const preferenceState = [...fake.records.values()].find(
       (record) => record.globallyUnsubscribed === false && record.topics
     );
-    expect(preferenceState).toMatchObject({ topics: artOnly });
+    expect(preferenceState).toMatchObject({ topics: rtOnly });
     expect(
       [...fake.records.keys()].filter((path) => path.startsWith("crm_permission_events/"))
     ).toHaveLength(3);
@@ -442,8 +457,7 @@ describe("warm reconnect preference capabilities", () => {
       token: preferenceToken,
       requestId: "request-expired",
       topics: {
-        marcus_rosser_art: true,
-        rosser_gallery: false,
+        rosser_gallery: true,
         rt_solutions: false,
       },
     };
@@ -533,5 +547,84 @@ describe("warm reconnect preference capabilities", () => {
     });
     expect(result).toMatchObject({ available: false, globallyUnsubscribed: false });
     expect(fake.writes).toHaveLength(before);
+  });
+
+  it("shows only business choices and preserves historical art consent and events when choices change", async () => {
+    const historicalTopics = { marcus_rosser_art: true, rosser_gallery: false, rt_solutions: false };
+    const historicalEvent = { eventType: "preferences_updated", topics: { ...historicalTopics }, permissionState: "topic_opted_in" };
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: contactDocument(),
+      [preferenceStatePath()]: { topics: { ...historicalTopics }, globallyUnsubscribed: false },
+      "crm_permission_events/historical-art-choice": historicalEvent,
+    });
+    const beforeInspect = [...fake.records.entries()];
+    const inspected = await processWarmReconnectPreferenceMutation(
+      { action: "inspect", token: preferenceToken }, { db: fake.db }
+    );
+    expect(inspected.topics).toEqual({ rosser_gallery: false, rt_solutions: false });
+    expect([...fake.records.entries()]).toEqual(beforeInspect);
+    expect(fake.writes).toHaveLength(0);
+
+    const saved = await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "business-choice",
+      topics: { rosser_gallery: true, rt_solutions: true },
+    }, { db: fake.db });
+    expect(saved.topics).toEqual({ rosser_gallery: true, rt_solutions: true });
+    expect(fake.records.get(preferenceStatePath())).toMatchObject({
+      topics: { marcus_rosser_art: true, rosser_gallery: true, rt_solutions: true },
+    });
+    expect(fake.records.get("crm_permission_events/historical-art-choice")).toEqual(historicalEvent);
+    const newEvent = fake.writes.find(write => write.path.startsWith("crm_permission_events/"));
+    expect(newEvent?.data.topics).toEqual({ rosser_gallery: true, rt_solutions: true });
+    expect(fake.writes.find(write => write.path === preferenceStatePath())?.data.topics)
+      .toEqual({ rosser_gallery: true, rt_solutions: true });
+    expect(fake.records.get(`crm_contact_points/${contactPointId}`)?.defaultPermissionState).toBe("unknown");
+  });
+
+  it.each([true, false])("rejects new personal-art choices even when the retired value is %s", async (retiredValue) => {
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: contactDocument(),
+    });
+    const topics = { rosser_gallery: true, rt_solutions: false, marcus_rosser_art: retiredValue };
+    const result = await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "retired-topic", topics,
+    }, { db: fake.db });
+    expect(result).toMatchObject({ available: false, canUpdatePreferences: false });
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it("keeps global unsubscribe sticky while retaining historical personal-art evidence", async () => {
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: contactDocument(),
+      [preferenceStatePath()]: { topics: { marcus_rosser_art: true, rosser_gallery: true, rt_solutions: false }, globallyUnsubscribed: false },
+    });
+    const unsubscribed = await globallyUnsubscribeWarmReconnectCapability(preferenceToken, { db: fake.db });
+    expect(unsubscribed).toMatchObject({ globallyUnsubscribed: true, topics: { rosser_gallery: false, rt_solutions: false } });
+    expect(fake.records.get(preferenceStatePath())).toMatchObject({ globallyUnsubscribed: true, topics: { marcus_rosser_art: true } });
+    const writesAfterUnsubscribe = fake.writes.length;
+    const result = await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "after-opt-out",
+      topics: { rosser_gallery: true, rt_solutions: true },
+    }, { db: fake.db });
+    expect(result).toMatchObject({ globallyUnsubscribed: true, canUpdatePreferences: false });
+    expect(fake.writes).toHaveLength(writesAfterUnsubscribe);
+    expect(fake.records.get(`crm_contact_points/${contactPointId}`)?.defaultPermissionState).toBe("opted_out");
+  });
+
+  it("honors a historical global unsubscribe state even without a suppression document", async () => {
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: contactDocument(),
+      [preferenceStatePath()]: { topics: { marcus_rosser_art: true }, globallyUnsubscribed: true },
+    });
+    const result = await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "legacy-opt-out",
+      topics: { rosser_gallery: true, rt_solutions: false },
+    }, { db: fake.db });
+    expect(result).toMatchObject({ globallyUnsubscribed: true, canUpdatePreferences: false });
+    expect(fake.writes).toHaveLength(0);
   });
 });

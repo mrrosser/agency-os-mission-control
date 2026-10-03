@@ -21,7 +21,6 @@ const GENERIC_PAYLOAD = {
   canUnsubscribe: false,
   globallyUnsubscribed: false,
   topics: {
-    marcus_rosser_art: false,
     rosser_gallery: false,
     rt_solutions: false,
   },
@@ -43,7 +42,7 @@ function isTopics(value: unknown): value is WarmReconnectTopics {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
   const keys = Object.keys(candidate).sort();
-  if (keys.join(",") !== "marcus_rosser_art,rosser_gallery,rt_solutions") return false;
+  if (keys.join(",") !== "rosser_gallery,rt_solutions") return false;
   return keys.every((key) => typeof candidate[key] === "boolean");
 }
 

@@ -187,6 +187,56 @@ describe("google status route", () => {
     expect(getStoredGoogleTokensMock).not.toHaveBeenCalled();
   });
 
+  it("reports only the explicitly selected RT sending profile while preserving the work default", async () => {
+    resolveGoogleAccountTokensMock.mockResolvedValue({
+      registryFound: true,
+      profileMapped: true,
+      record: {
+        accountId: "rt-send-account", profileId: "rt_solutions_send",
+        tokens: { refreshToken: "rt-send-refresh", scope: "https://www.googleapis.com/auth/gmail.send" },
+      },
+    });
+    const response = await GET(new NextRequest(
+      "https://leadflow-review.web.app/api/google/status?businessId=rt_solutions&profileId=rt_solutions_send"
+    ), {} as never);
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledExactlyOnceWith("uid-123", "rt_solutions_send");
+    expect(payload.defaultProfileId).toBe("rt_solutions_work");
+    expect(payload.profile).toMatchObject({
+      businessId: "rt_solutions", profileId: "rt_solutions_send", connected: true,
+    });
+    expect(payload.profiles).toHaveLength(1);
+    expect(payload.capabilities).toEqual({ drive: false, gmail: true, calendar: false });
+  });
+
+  it("never borrows existing RT work or legacy credentials for missing RT sending", async () => {
+    getStoredGoogleTokensMock.mockResolvedValue({
+      refreshToken: "legacy-refresh", scope: "https://www.googleapis.com/auth/gmail.send",
+    });
+    const response = await GET(new NextRequest(
+      "https://leadflow-review.web.app/api/google/status?businessId=rt_solutions&profileId=rt_solutions_send"
+    ), {} as never);
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledExactlyOnceWith("uid-123", "rt_solutions_send");
+    expect(payload.defaultProfileId).toBe("rt_solutions_work");
+    expect(payload.connected).toBe(false);
+    expect(payload.storageMode).toBe("none");
+    expect(payload.profile).toMatchObject({ profileId: "rt_solutions_send", state: "not_connected" });
+    expect(payload.legacy.connected).toBe(false);
+    expect(payload.capabilities).toEqual({ drive: false, gmail: false, calendar: false });
+  });
+
+  it("rejects mismatched business context for RT sending before credential lookup", async () => {
+    const response = await GET(new NextRequest(
+      "https://leadflow-review.web.app/api/google/status?businessId=rosser_nft_gallery&profileId=rt_solutions_send"
+    ), {} as never);
+    expect(response.status).toBe(400);
+    expect(resolveGoogleAccountTokensMock).not.toHaveBeenCalled();
+    expect(getStoredGoogleTokensMock).not.toHaveBeenCalled();
+  });
+
   it("marks a vault lookup failure unavailable without borrowing another profile", async () => {
     resolveGoogleAccountTokensMock.mockImplementation(
       async (_uid: string, profileId: string) => {

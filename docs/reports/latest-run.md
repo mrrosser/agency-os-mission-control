@@ -1,5 +1,16 @@
 # Latest Verification Run
 
+## 2026-10-03 dedicated RT sender and two-business plain-text invitation (scoped release candidate)
+
+- Isolated release branch from verified production/main `7eb058c185d290ceb351f975ec176a42cc48f1ec`; only the reviewed RT sender/copy/preferences/plain-text patch applied; original checkout unchanged. No CRM deployment, OAuth grant, credential write, subscription or campaign send.
+- Added purpose-separated `rt_solutions_send` for `mrosser@rt.solutions`, preserving work/default credentials. Both dedicated senders reject scope/identity drift, default use, and work-profile fallback; warm activation/execution use dedicated profiles only.
+- Added explicit plain-text rendering/MIME and mode-bound approval/idempotency, retaining all non-artwork gates; artwork remains the legacy mode and requires approval. Revised copy and preference UI to Gallery/RT only, preserved historical topic state/events and sticky unsubscribe.
+- Clean production-base final test run: 1,260/1,260 across 239 files passed. A prior concurrent run had one setup timeout; its isolated rerun and the complete lower-concurrency run both passed. Final clean-base production build/typecheck passed after the status correction. Lint 0 errors/3 existing warnings; unchanged dependency audit 0 vulnerabilities; patch secret scan and whitespace checks passed.
+- Runtime capability status now uses the executor's exact server-side send-flag policy; true/false/unknown UI states are tested. Production and repository flag were verified already true and are preserved. Fresh branch protection enforces strict `test` and `build_and_preview`, including admins; required approving-review count is currently zero.
+- Scoped deployment authorized; protected PR/main release workflow required. Before release, recheck zero persisted pilots or implement stale-pilot recovery; old fingerprint-bound pilots currently cause activation materialization to return 409. Fresh live metadata at 2026-10-03T16:39:44Z showed zero pilots; both work bindings remain and both dedicated bindings are absent. The release branch excludes inactive Second Brain commit `0c69cb42` entirely; current GitHub main and successful production workflow 35545668719 both match its clean parent 7eb058c.
+- Local review: `docs/reports/2026-10-03-plain-text-warm-reconnect-local-review.md`. Full evidence, revised copy, source patch and authorization handoff are in the parent task-2 workspace.
+
+
 ## 2026-09-08 CRM conversational Assistant (local first version)
 
 - Based on released main `6d79c844`, isolated branch `codex/crm-conversation-20260908`. Local uncommitted implementation only; production, secrets, contacts, consent and campaigns are unchanged. The older dedicated-sending entry below is historical; its release was completed before this feature began.

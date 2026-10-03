@@ -31,7 +31,7 @@ import {
   warmReconnectEmailKey,
   warmReconnectFingerprint,
 } from "@/lib/crm/warm-reconnect-dedupe";
-import { renderWarmReconnectEmail } from "@/lib/crm/warm-reconnect-email-renderer";
+import { renderWarmReconnectEmail, resolveWarmReconnectContentMode } from "@/lib/crm/warm-reconnect-email-renderer";
 import {
   WARM_RECONNECT_INVITATION_LEDGER_COLLECTION,
   parseWarmReconnectInvitationLedgerDocument,
@@ -58,6 +58,8 @@ import {
   resolveGoogleBusinessProfileContext,
   ROSSER_GALLERY_SENDING_EMAIL,
   ROSSER_GALLERY_SENDING_PROFILE,
+  RT_SOLUTIONS_SENDING_EMAIL,
+  RT_SOLUTIONS_SENDING_PROFILE,
 } from "@/lib/google/business-profiles";
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import {
@@ -70,9 +72,12 @@ import {
   expandDomainCandidates,
 } from "@/lib/outreach/dnc";
 import type { Logger } from "@/lib/logging";
+import { isWarmReconnectProviderSendEnabled } from "@/lib/crm/warm-reconnect-provider-config";
 
-export const WARM_RECONNECT_PROVIDER_SEND_FLAG =
-  "WARM_RECONNECT_PROVIDER_SEND_ENABLED" as const;
+export {
+  WARM_RECONNECT_PROVIDER_SEND_FLAG,
+  isWarmReconnectProviderSendEnabled,
+} from "@/lib/crm/warm-reconnect-provider-config";
 export const WARM_RECONNECT_MIN_CADENCE_MS =
   WARM_RECONNECT_EXECUTION_POLICY.minimumCadenceMs;
 export const WARM_RECONNECT_CAPABILITY_TTL_MS =
@@ -692,10 +697,14 @@ function assertFrozenLaunchPilot(
     throw new ApiError(409, "The exact campaign approval is missing or expired.");
   }
   const gateIds = new Set(pilot.gates.map((gate) => gate.id));
+  const expectedGateIds = new Set([...EXPECTED_GATE_IDS].filter((id) =>
+    resolveWarmReconnectContentMode(pilot.contentMode) !== "plain_text" ||
+    id !== "artwork_email_channel_approval"
+  ));
   if (
-    pilot.gates.length !== EXPECTED_GATE_IDS.size ||
-    gateIds.size !== EXPECTED_GATE_IDS.size ||
-    [...EXPECTED_GATE_IDS].some((id) => !gateIds.has(id as never)) ||
+    pilot.gates.length !== expectedGateIds.size ||
+    gateIds.size !== expectedGateIds.size ||
+    [...expectedGateIds].some((id) => !gateIds.has(id as never)) ||
     pilot.gates.some((gate) => gate.status !== "verified")
   ) {
     throw new ApiError(409, "Every approved activation gate must remain verified.");
@@ -704,7 +713,7 @@ function assertFrozenLaunchPilot(
     businessId: pilot.sender.businessId,
     profileId: pilot.sender.profileId,
   });
-  if (!profile || profile.profileId !== pilot.sender.profileId || !matchesGallerySendingPolicy(pilot)) {
+  if (!profile || profile.profileId !== pilot.sender.profileId || !matchesDedicatedSendingPolicy(pilot)) {
     throw new ApiError(409, "The approved Google sender profile drifted.");
   }
   const from = normalizeWarmReconnectEmail(pilot.sender.fromEmail);
@@ -1250,12 +1259,6 @@ function stopPilot(
     },
     { merge: false }
   );
-}
-
-export function isWarmReconnectProviderSendEnabled(
-  env: NodeJS.ProcessEnv = process.env
-): boolean {
-  return asString(env[WARM_RECONNECT_PROVIDER_SEND_FLAG]).toLowerCase() === "true";
 }
 
 export function isWarmReconnectGmailSendScopeExact(
@@ -1866,18 +1869,24 @@ export async function beginWarmReconnectProviderAttempt(input: {
   });
 }
 
-function matchesGallerySendingPolicy(pilot: WarmReconnectPilot): boolean {
-  return pilot.sender.businessId !== ROSSER_GALLERY_SENDING_PROFILE.businessId ||
-    (pilot.sender.profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId &&
-      pilot.sender.fromEmail === ROSSER_GALLERY_SENDING_EMAIL);
+function matchesDedicatedSendingPolicy(pilot: WarmReconnectPilot): boolean {
+  if (pilot.sender.businessId === ROSSER_GALLERY_SENDING_PROFILE.businessId) {
+    return pilot.sender.profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId &&
+      pilot.sender.fromEmail === ROSSER_GALLERY_SENDING_EMAIL;
+  }
+  if (pilot.sender.businessId === RT_SOLUTIONS_SENDING_PROFILE.businessId) {
+    return pilot.sender.profileId === RT_SOLUTIONS_SENDING_PROFILE.profileId &&
+      pilot.sender.fromEmail === RT_SOLUTIONS_SENDING_EMAIL;
+  }
+  return false;
 }
 
 export async function resolveWarmReconnectGmailAccessToken(input: {
   uid: string;
   pilot: WarmReconnectPilot;
 }): Promise<string> {
-  if (!matchesGallerySendingPolicy(input.pilot)) {
-    throw new ApiError(409, "The dedicated Gallery sending account must be connected and explicitly approved.");
+  if (!matchesDedicatedSendingPolicy(input.pilot)) {
+    throw new ApiError(409, "The selected dedicated sending account must be connected and explicitly approved.");
   }
   const assertExactAccount = async () => {
     const resolution = await resolveGoogleAccountTokens(
@@ -2388,6 +2397,7 @@ export async function runWarmReconnectPilotExecutor(input: {
     ).toString();
     rendered = dependencies.renderMessage({
       campaign,
+      contentMode: resolveWarmReconnectContentMode(claim.pilot.contentMode),
       firstName: claim.recipient.greetingName || null,
       senderName: claim.pilot.sender.senderName,
       legalEntity: claim.pilot.sender.legalEntity,
@@ -2449,6 +2459,7 @@ export async function runWarmReconnectPilotExecutor(input: {
         senderName: claim.pilot.sender.senderName,
         replyTo: claim.pilot.sender.replyTo,
         subject: rendered.subject,
+        contentMode: rendered.contentMode,
         plainText: rendered.plainText,
         html: rendered.html,
         messageId: deterministicMessageId(claim),

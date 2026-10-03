@@ -10,6 +10,8 @@ import type {
 import { FieldValue } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
+import { resolveWarmReconnectContentMode } from "@/lib/crm/warm-reconnect-email-renderer";
+import { isWarmReconnectProviderSendEnabled } from "@/lib/crm/warm-reconnect-provider-config";
 import type { Logger } from "@/lib/logging";
 import {
   WARM_RECONNECT_ACTIVATION_SCHEMA_VERSION,
@@ -727,7 +729,7 @@ export async function loadWarmReconnectActivationForUid(
       expandedPilotRequiresNewApproval: true,
       approvalTtlHours: WARM_RECONNECT_APPROVAL_TTL_HOURS,
       launchAuthorizesExactProviderExecution: true,
-      providerExecutionEnabled: false,
+      providerExecutionEnabled: isWarmReconnectProviderSendEnabled(),
     },
   };
 }
@@ -808,6 +810,7 @@ export async function createWarmReconnectPilotForUid(input: {
         warmReconnectFingerprint({
           preview: stored.campaignPreviewFingerprint,
           sender: stored.sender,
+          contentMode: resolveWarmReconnectContentMode(stored.contentMode),
           artwork: stored.artworkEmailApproval,
           preference: stored.preferenceContract,
           recipients: stored.recipients.map((recipient) => ({
@@ -820,6 +823,7 @@ export async function createWarmReconnectPilotForUid(input: {
           warmReconnectFingerprint({
             preview: pilot.campaignPreviewFingerprint,
             sender: pilot.sender,
+            contentMode: resolveWarmReconnectContentMode(pilot.contentMode),
             artwork: pilot.artworkEmailApproval,
             preference: pilot.preferenceContract,
             recipients: pilot.recipients.map((recipient) => ({

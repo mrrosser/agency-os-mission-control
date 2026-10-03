@@ -13,6 +13,7 @@ export function warmReconnectMimeImplementationFingerprint(): string {
     .update(
       [
         WARM_RECONNECT_MIME_VERSION,
+        resolveContentMode.toString(),
         assertHeaderValue.toString(),
         assertEmail.toString(),
         assertHttpsUrl.toString(),
@@ -28,6 +29,7 @@ export function warmReconnectMimeImplementationFingerprint(): string {
 }
 
 export interface WarmReconnectCampaignMessage {
+  contentMode?: "artwork_html" | "plain_text";
   to: string;
   from: string;
   senderName: string;
@@ -38,6 +40,14 @@ export interface WarmReconnectCampaignMessage {
   messageId: string;
   preferencesUrl: string;
   oneClickUnsubscribeUrl: string;
+}
+
+function resolveContentMode(
+  value: WarmReconnectCampaignMessage["contentMode"]
+): "artwork_html" | "plain_text" {
+  if (value === undefined) return "artwork_html";
+  if (value === "artwork_html" || value === "plain_text") return value;
+  throw new Error("Invalid campaign content mode");
 }
 
 function assertHeaderValue(label: string, value: string): string {
@@ -129,6 +139,7 @@ export function encodeWarmReconnectMimeForGmail(value: string): string {
 export function buildWarmReconnectCampaignMime(
   input: WarmReconnectCampaignMessage
 ): string {
+  const contentMode = resolveContentMode(input.contentMode);
   const to = assertEmail("recipient", input.to);
   const from = assertEmail("sender", input.from);
   const senderName = encodedPhrase(input.senderName);
@@ -146,22 +157,24 @@ export function buildWarmReconnectCampaignMime(
     input.oneClickUnsubscribeUrl
   );
   assertCapabilityBoundary(preferencesUrl, oneClickUrl);
-  if (!String(input.plainText || "").trim() || !String(input.html || "").trim()) {
+  if (contentMode === "plain_text" && input.html !== "") {
+    throw new Error("Plain-text campaign message must not contain HTML");
+  }
+  if (typeof input.plainText !== "string" || !input.plainText.trim()) {
+    throw new Error("Campaign message requires nonempty plain text");
+  }
+  if (contentMode === "artwork_html" && !String(input.html || "").trim()) {
     throw new Error("Campaign message requires plain-text and HTML alternatives");
   }
   if (
     !input.plainText.includes(preferencesUrl) ||
-    !input.html.includes(preferencesUrl) ||
+    (contentMode === "artwork_html" && !input.html.includes(preferencesUrl)) ||
     input.plainText.includes(oneClickUrl) ||
-    input.html.includes(oneClickUrl)
+    (contentMode === "artwork_html" && input.html.includes(oneClickUrl))
   ) {
     throw new Error("Visible unsubscribe must use the human preference URL");
   }
 
-  const boundary = `warm_${createHash("sha256")
-    .update(`${messageId}|${to}|${WARM_RECONNECT_MIME_VERSION}`)
-    .digest("hex")
-    .slice(0, 32)}`;
   const headers = [
     `From: ${senderName} <${from}>`,
     `To: ${to}`,
@@ -171,8 +184,23 @@ export function buildWarmReconnectCampaignMime(
     "MIME-Version: 1.0",
     `List-Unsubscribe: <${oneClickUrl}>`,
     "List-Unsubscribe-Post: List-Unsubscribe=One-Click",
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
   ];
+  if (contentMode === "plain_text") {
+    return [
+      ...headers,
+      "Content-Type: text/plain; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      base64Lines(input.plainText),
+      "",
+    ].join("\r\n");
+  }
+
+  const boundary = `warm_${createHash("sha256")
+    .update(`${messageId}|${to}|${WARM_RECONNECT_MIME_VERSION}`)
+    .digest("hex")
+    .slice(0, 32)}`;
+  headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
   const body = [
     `--${boundary}`,
     "Content-Type: text/plain; charset=utf-8",

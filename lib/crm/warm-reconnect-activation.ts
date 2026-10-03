@@ -3,7 +3,7 @@ import "server-only";
 import { ApiError } from "@/lib/api/handler";
 import { readBoundedRequestBody } from "@/lib/api/bounded-body";
 import { z } from "zod";
-import { ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
+import { ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE, RT_SOLUTIONS_SENDING_EMAIL, RT_SOLUTIONS_SENDING_PROFILE } from "@/lib/google/business-profiles";
 import {
   WARM_RECONNECT_APPROVAL_TTL_HOURS,
   WARM_RECONNECT_INITIAL_PILOT_SIZE,
@@ -22,6 +22,7 @@ import {
   WARM_RECONNECT_EMAIL_RENDERER_VERSION,
   WARM_RECONNECT_RENDERER_CONTRACT_VERSION,
   renderWarmReconnectEmail,
+  resolveWarmReconnectContentMode,
   warmReconnectRendererImplementationFingerprint,
 } from "@/lib/crm/warm-reconnect-email-renderer";
 import {
@@ -108,16 +109,17 @@ const DELIVERY_ARTIFACT_CONTRACT = {
   subject: "A quick hello from Marcus",
   alternateSubject: "Would you like to stay in touch?",
   preheader:
-    "A personal note, and an easy way to choose what you’d like to hear about.",
+    "Choose updates from Rosser Gallery, RT.Solutions, or both.",
   greeting: "Hi {{first_name | there}},",
   paragraphs: [
-    "I’m reaching out personally because our paths crossed at some point through my art, business, or community work here in New Orleans. I’m bringing those relationships together more thoughtfully, and I wanted to ask before I send you anything else.",
-    "If you’d like to stay connected, you’ll be able to choose what you want to hear about. That could be new work and events from Rosser Gallery, practical technology and business updates from RT.Solutions, or an occasional personal note from me.",
+    "It's Marcus Rosser. I wanted to say hello and share a simple way to stay connected with my work.",
+    "Rosser Gallery updates cover art, exhibitions, workshops, and community events. RT.Solutions updates cover practical technology, business systems, and project news.",
+    "If either sounds useful, you can choose Rosser Gallery, RT.Solutions, or both below.",
   ],
-  ctaLabel: "Choose what you’d like to hear about",
+  ctaLabel: "Choose your updates",
   postCtaParagraphs: [
-    "If now isn’t the right time, no pressure. I’ll respect that.",
-    "Thank you for being part of my story in some way. I’m grateful our paths crossed.",
+    "This invitation doesn't subscribe you to anything. You'll only receive the updates you choose, and you can unsubscribe at any time. If neither is for you, no pressure.",
+    "Thanks for taking a look.",
   ],
   signature: ["Marcus Rosser", "New Orleans, Louisiana"],
   artworkSha256:
@@ -135,7 +137,7 @@ const DELIVERY_ARTIFACT_CONTRACT = {
 function exactDeliveryTemplateFingerprint(
   pilot: Pick<
     WarmReconnectPilot,
-    "sender" | "preferenceContract"
+    "sender" | "preferenceContract" | "contentMode"
   >
 ): string {
   const preferenceToken = "p".repeat(43);
@@ -157,6 +159,7 @@ function exactDeliveryTemplateFingerprint(
   } as never;
   const rendered = renderWarmReconnectEmail({
     campaign,
+    contentMode: resolveWarmReconnectContentMode(pilot.contentMode),
     firstName: "<reviewed first name>",
     senderName: pilot.sender.senderName,
     legalEntity: pilot.sender.legalEntity,
@@ -166,6 +169,7 @@ function exactDeliveryTemplateFingerprint(
     publicOrigin: pilot.preferenceContract.origin,
   });
   const mime = buildWarmReconnectCampaignMime({
+    contentMode: rendered.contentMode,
     to: "reviewed-recipient@example.invalid",
     from: pilot.sender.fromEmail,
     senderName: pilot.sender.senderName,
@@ -197,6 +201,7 @@ export function computeWarmReconnectPilotFingerprints(
     | "legacyDncOrgId"
     | "campaignPreviewFingerprint"
     | "sender"
+    | "contentMode"
     | "artworkEmailApproval"
     | "preferenceContract"
     | "recipients"
@@ -209,6 +214,14 @@ export function computeWarmReconnectPilotFingerprints(
     mime: warmReconnectMimeImplementationFingerprint(),
   }
 ) {
+  const contentMode = resolveWarmReconnectContentMode(pilot.contentMode);
+  if (
+    (contentMode === "plain_text" && pilot.artworkEmailApproval !== null) ||
+    (contentMode === "artwork_html" &&
+      (!pilot.artworkEmailApproval?.attested || !pilot.artworkEmailApproval.evidenceNote?.trim()))
+  ) {
+    throw new ApiError(409, "Artwork approval must match the reviewed content mode.");
+  }
   const artifactFingerprint = warmReconnectFingerprint({
     contract: "warm-reconnect-artifact.v1",
     campaignId: WARM_RECONNECT_CAMPAIGN_ID,
@@ -216,9 +229,13 @@ export function computeWarmReconnectPilotFingerprints(
     campaignPreviewFingerprint: pilot.campaignPreviewFingerprint,
     legacyDncOrgId: pilot.legacyDncOrgId,
     sender: pilot.sender,
+    contentMode,
     artworkEmailApproval: pilot.artworkEmailApproval,
     preferenceContract: pilot.preferenceContract,
-    exactDeliveryArtifact: DELIVERY_ARTIFACT_CONTRACT,
+    exactDeliveryArtifact: {
+      ...DELIVERY_ARTIFACT_CONTRACT,
+      artworkSha256: contentMode === "artwork_html" ? DELIVERY_ARTIFACT_CONTRACT.artworkSha256 : null,
+    },
     exactRenderedDeliveryTemplateFingerprint: exactDeliveryTemplateFingerprint(pilot),
     deliveryImplementation,
     fromPolicy: "selected_google_profile_with_exact_sender_display_name.v1",
@@ -426,7 +443,7 @@ function allRecipientsAttested(pilot: WarmReconnectPilot): boolean {
 }
 
 function buildGates(input: {
-  pilot: Pick<WarmReconnectPilot, "sender" | "artworkEmailApproval" | "recipients">;
+  pilot: Pick<WarmReconnectPilot, "sender" | "contentMode" | "artworkEmailApproval" | "recipients">;
   googleReady: boolean;
   confirmations?: ApprovalConfirmations;
 }): WarmReconnectActivationGateState[] {
@@ -439,7 +456,7 @@ function buildGates(input: {
   const pending = (ready: boolean): WarmReconnectActivationGateState["status"] =>
     ready ? "pending_approval" : "missing";
 
-  return [
+  const gates: WarmReconnectActivationGateState[] = [
     {
       id: "sender_legal_identity",
       label: "Sender legal identity",
@@ -515,7 +532,7 @@ function buildGates(input: {
       label: "Artwork email-channel approval",
       status: confirmed?.artworkApprovedForEmail
         ? "verified"
-        : pending(input.pilot.artworkEmailApproval.attested),
+        : pending(Boolean(input.pilot.artworkEmailApproval?.attested)),
       reason: confirmed?.artworkApprovedForEmail
         ? "The artwork is approved for this exact email artifact."
         : "Confirm the artwork's use in this exact email campaign.",
@@ -529,6 +546,9 @@ function buildGates(input: {
         : "Connect the selected Google profile with Gmail capability.",
     },
   ];
+  return resolveWarmReconnectContentMode(input.pilot.contentMode) === "plain_text"
+    ? gates.filter((gate) => gate.id !== "artwork_email_channel_approval")
+    : gates;
 }
 
 export function isWarmReconnectApprovalCurrent(
@@ -589,6 +609,15 @@ export function createWarmReconnectPilot(input: {
   accountId: string;
   legacyDncOrgId: string;
 }): WarmReconnectPilot {
+  const contentMode = resolveWarmReconnectContentMode(input.request.contentMode);
+  if (
+    (contentMode === "plain_text" && input.request.artworkEmailApproval !== undefined) ||
+    (contentMode === "artwork_html" &&
+      (!input.request.artworkEmailApproval?.approvedForThisEmailCampaign ||
+        !input.request.artworkEmailApproval.evidenceNote?.trim()))
+  ) {
+    throw new ApiError(400, "Artwork mode requires artwork approval; plain text must omit it.");
+  }
   if (
     input.request.tranche !== "initial_5" ||
     input.request.recipientCap !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
@@ -607,16 +636,16 @@ export function createWarmReconnectPilot(input: {
     input.request.sender.businessId === "rosser_nft_gallery"
       ? ROSSER_GALLERY_SENDING_PROFILE.profileId
       : input.request.sender.businessId === "rt_solutions"
-        ? "rt_solutions_work"
+        ? RT_SOLUTIONS_SENDING_PROFILE.profileId
         : null;
   if (!expectedProfile || input.request.sender.profileId !== expectedProfile) {
     throw new ApiError(400, "The Google business and profile selection do not match.");
   }
-  if (
-    expectedProfile === ROSSER_GALLERY_SENDING_PROFILE.profileId &&
-    input.fromEmail !== ROSSER_GALLERY_SENDING_EMAIL
-  ) {
-    throw new ApiError(400, "Gallery sending requires its verified dedicated Google account.");
+  const expectedEmail = expectedProfile === ROSSER_GALLERY_SENDING_PROFILE.profileId
+    ? ROSSER_GALLERY_SENDING_EMAIL
+    : RT_SOLUTIONS_SENDING_EMAIL;
+  if (input.fromEmail !== expectedEmail) {
+    throw new ApiError(400, "Sending requires the selected business's verified dedicated Google account.");
   }
 
   const now = (input.now || new Date()).toISOString();
@@ -655,15 +684,16 @@ export function createWarmReconnectPilot(input: {
     tranche: "initial_5" as const,
     recipientCap: WARM_RECONNECT_INITIAL_PILOT_SIZE,
     campaignPreviewFingerprint: input.request.campaignPreviewFingerprint,
+    contentMode,
     sender: {
       ...input.request.sender,
       fromEmail: input.fromEmail,
       accountId: input.accountId,
     },
-    artworkEmailApproval: {
+    artworkEmailApproval: contentMode === "artwork_html" ? {
       attested: true as const,
-      evidenceNote: input.request.artworkEmailApproval.evidenceNote,
-    },
+      evidenceNote: input.request.artworkEmailApproval!.evidenceNote,
+    } : null,
     preferenceContract: {
       origin: input.preferenceOrigin,
       path: "/preferences" as const,
@@ -814,6 +844,12 @@ export function decideWarmReconnectPilotApproval(input: {
   }
   if (!allRecipientsAttested(input.pilot)) {
     throw new ApiError(409, "All five recipient relationships must be attested first.");
+  }
+  if (
+    resolveWarmReconnectContentMode(input.pilot.contentMode) === "plain_text" &&
+    input.request.confirmations.artworkApprovedForEmail !== undefined
+  ) {
+    throw new ApiError(400, "Plain-text approval must omit artwork confirmation.");
   }
   if (!input.googleReady) {
     throw new ApiError(409, "The selected Google profile is not Gmail-ready.");

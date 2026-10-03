@@ -52,6 +52,36 @@ describe("Google OAuth callback feedback", () => {
     expect(JSON.stringify(feedback)).not.toContain("<script>");
   });
 
+  it("labels RT sending success separately and gives its own pinned account on mismatch", () => {
+    const params = new URLSearchParams({
+      google: "connected", googleBusiness: "rt_solutions", googleProfile: "rt_solutions_send",
+    });
+    const success = getGoogleOAuthCallbackFeedback(params);
+    expect(success?.title).toBe("RT.Solutions sending Google connection completed");
+    expect(success?.description).toContain("existing Drive, Calendar, and inbox connection is unchanged");
+    expect(success?.description).toContain("No campaign was approved, launched, or sent");
+    params.set("google", "error");
+    params.set("googleError", "sending_account_mismatch");
+    const failure = getGoogleOAuthCallbackFeedback(params);
+    expect(failure?.description).toContain("mrosser@rt.solutions");
+    expect(failure?.description).not.toContain("mrosser@rossergallery.com");
+  });
+
+  it.each([
+    {},
+    { googleBusiness: "rosser_nft_gallery", googleProfile: "rt_solutions_send" },
+    { googleProfile: "rt_solutions_send" },
+    { googleBusiness: "rt_solutions", googleProfile: "rt_solutions_work" },
+    { googleBusiness: "RT_SOLUTIONS", googleProfile: "rt_solutions_send" },
+    { googleBusiness: "rt_solutions", googleProfile: " rt_solutions_send " },
+  ])("does not guess a sender account without an exact sending profile pair: %j", (context) => {
+    const params = new URLSearchParams({ google: "error", googleError: "sending_account_mismatch" });
+    Object.entries(context).forEach(([key, value]) => params.set(key, value));
+    const feedback = getGoogleOAuthCallbackFeedback(params);
+    expect(feedback?.description).toContain("confirmed Google account");
+    expect(feedback?.description).not.toContain("mrosser@");
+  });
+
   it("uses generic trusted copy for an unknown error code", () => {
     const feedback = getGoogleOAuthCallbackFeedback(
       new URLSearchParams({

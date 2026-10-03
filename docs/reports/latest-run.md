@@ -1,5 +1,14 @@
 # Latest Verification Run
 
+## 2026-10-03 Calendar reviewed event creation
+
+- Isolated from production/main `fc4e827`. Calendar now selects an existing work profile and a concrete calendar, verifies Google identity/permissions, and saves an immutable review before owner approval and execution. Existing account defaults, scope grants, sender profiles and service credentials are preserved.
+- Owner approval requires a revoked-token check, active owner membership, trusted app Origin and fresh app reauthentication after review preparation. A durable transaction claim, stable event ID and read-only reconciliation prevent repeating an attempted insert after timeout or receipt failure. Existing direct API and shared helper booking paths reject before provider writes.
+- Full unit/smoke: 1,577 tests across 246 files passed. Whole-checkout TypeScript passed. Full lint: zero errors, three existing warnings. Official-registry dependency audit passes the unchanged high threshold, with zero high/critical and 16 existing moderate entries; dependency manifests are unchanged.
+- Independent backend/UI review corrected untitled event listing, lost-response recovery, account switching and late-draft acceptance; final review has no remaining actionable findings. Final synthetic Chromium: 13/13 passed with one worker and no retries; all API/provider traffic mocked or blocked, isolated port 3092 stopped. The first final run had a test-only ambiguous alert locator; it was corrected and all 13 cases rerun successfully.
+- Deployed Firestore rules were read and fully compared: they match the reviewed base apart from one unrelated redundant deny block and already default-deny this collection. No rules change is needed. Scoped Gitleaks passed with no findings; production build passed, including the final account-verification copy. Protected PR/main release and post-deployment verification follow this validated candidate.
+- No live calendar event, invitation, owner OAuth grant or owner credential was created. OpenClaw receives an untrusted draft-link contract and receiving UI, without calendar service authority. Workflow and limits: `docs/calendar-event-review.md`; plan: `docs/execplans/2026-10-03-calendar-event-review.md`.
+
 ## 2026-10-03 dependency repair for the dedicated sender release
 
 - Isolated from PR #53 head `ad9d776`; original repositories and contact-site deployment unchanged. Official-registry audit now passes the unchanged high threshold with zero high/critical and 16 moderate package entries. The earlier pre-repair zero-finding audit is superseded, not reused as evidence.

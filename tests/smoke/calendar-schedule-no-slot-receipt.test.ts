@@ -1,97 +1,102 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { POST } from "@/app/api/calendar/schedule/route";
-import { requireFirebaseAuth } from "@/lib/api/auth";
-import { getAccessTokenForUser } from "@/lib/google/oauth";
-import { listBusyIntervals } from "@/lib/google/calendar";
-import { recordLeadActionReceipt } from "@/lib/lead-runs/receipts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+import { POST as schedule } from "@/app/api/calendar/schedule/route";
+import { POST as createEvent } from "@/app/api/calendar/create-event/route";
+import { ApiError } from "@/lib/api/handler";
 
-vi.mock("@/lib/api/auth", () => ({
-  requireFirebaseAuth: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  verifyIdToken: vi.fn(), registry: vi.fn(), oauth: vi.fn(), listBusy: vi.fn(),
+  createMeeting: vi.fn(), receipt: vi.fn(), idempotencyKey: vi.fn(), idempotency: vi.fn(),
+  resolveContext: vi.fn(), insertReviewed: vi.fn(), availability: vi.fn(),
 }));
-
-vi.mock("@/lib/google/oauth", () => ({
-  getAccessTokenForUser: vi.fn(),
+vi.mock("@/lib/firebase-admin", () => ({ getAdminAuth: () => ({ verifyIdToken: mocks.verifyIdToken }) }));
+vi.mock("@/lib/crm/portfolio-registry", () => ({ assertPortfolioRegistryAccess: mocks.registry }));
+vi.mock("@/lib/google/oauth", () => ({ getAccessTokenForUser: mocks.oauth }));
+vi.mock("@/lib/google/calendar", () => ({ listBusyIntervals: mocks.listBusy, createMeetingWithAvailabilityCheck: mocks.createMeeting }));
+vi.mock("@/lib/lead-runs/receipts", () => ({ recordLeadActionReceipt: mocks.receipt }));
+vi.mock("@/lib/api/idempotency", () => ({ getIdempotencyKey: mocks.idempotencyKey, withIdempotency: mocks.idempotency }));
+vi.mock("@/lib/calendar/google-calendar-context", () => ({
+  resolveCalendarContext: mocks.resolveContext, insertReviewedCalendarEvent: mocks.insertReviewed,
+  checkSelectedCalendarAvailability: mocks.availability,
 }));
+vi.mock("@/lib/telemetry/store", () => ({ storeTelemetryErrorEvent: vi.fn() }));
 
-vi.mock("@/lib/google/calendar", () => ({
-  listBusyIntervals: vi.fn(),
-  createMeetingWithAvailabilityCheck: vi.fn(),
-}));
-
-vi.mock("@/lib/lead-runs/receipts", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/lead-runs/receipts")>(
-    "@/lib/lead-runs/receipts"
-  );
-  return {
-    ...actual,
-    recordLeadActionReceipt: vi.fn(),
-  };
-});
-
-const requireAuthMock = vi.mocked(requireFirebaseAuth);
-const getAccessTokenMock = vi.mocked(getAccessTokenForUser);
-const listBusyMock = vi.mocked(listBusyIntervals);
-const recordReceiptMock = vi.mocked(recordLeadActionReceipt);
-
-function createContext(params: Record<string, string>) {
-  return { params: Promise.resolve(params) };
+const booking = {
+  profileId: "rt_solutions_work", calendarId: "work@example.test", runId: "run-1", leadDocId: "lead-1",
+  receiptActionId: "calendar.booking", idempotencyKey: "old-booking-key", durationMinutes: 30,
+  candidateStarts: ["2026-10-05T14:00:00Z"],
+  event: { summary: "Discovery Call", start: { dateTime: "2026-10-05T14:00:00Z" }, end: { dateTime: "2026-10-05T14:30:00Z" } },
+};
+function request(path: string, init: NonNullable<ConstructorParameters<typeof NextRequest>[1]> = {}) {
+  return new NextRequest(`http://localhost/api/calendar/${path}`, {
+    method: "POST", headers: { Authorization: "Bearer owner-token", "Content-Type": "application/json", "Idempotency-Key": "old-booking-key" },
+    body: JSON.stringify(booking), ...init,
+  });
 }
-
-describe("calendar schedule route", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    requireAuthMock.mockResolvedValue({ uid: "user-1" } as unknown as Awaited<ReturnType<typeof requireFirebaseAuth>>);
-    getAccessTokenMock.mockResolvedValue("access-token");
-    recordReceiptMock.mockResolvedValue(undefined);
-  });
-
-  it("records a skipped receipt when no slot is available", async () => {
-    // Mark the entire window as busy so no candidate can be selected.
-    listBusyMock.mockResolvedValue([
-      {
-        start: "2026-02-14T00:00:00.000Z",
-        end: "2026-02-15T00:00:00.000Z",
-      },
-    ]);
-
-    const req = new Request("http://localhost/api/calendar/schedule", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer test",
-      },
-      body: JSON.stringify({
-        runId: "run-1",
-        leadDocId: "lead-1",
-        receiptActionId: "calendar.booking",
-        durationMinutes: 30,
-        candidateStarts: [
-          "2026-02-14T16:00:00.000Z",
-          "2026-02-14T16:30:00.000Z",
-        ],
-        event: {
-          summary: "Discovery Call - Acme",
-        },
-      }),
-    });
-
-    const res = await POST(
-      req as unknown as Parameters<typeof POST>[0],
-      createContext({}) as unknown as Parameters<typeof POST>[1]
-    );
-    const data = await res.json();
-
-    expect(res.status).toBe(409);
-    expect(data.error).toContain("No available slot");
-    expect(recordReceiptMock).toHaveBeenCalledTimes(1);
-    expect(recordReceiptMock.mock.calls[0]?.[0]).toMatchObject({
-      runId: "run-1",
-      leadDocId: "lead-1",
-      actionId: "calendar.booking",
-      status: "skipped",
-      dryRun: false,
-      data: expect.objectContaining({ reason: "no_slot" }),
-    });
-  });
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("Unexpected network call"); }));
+  mocks.verifyIdToken.mockResolvedValue({ uid: "workspace-owner" });
+  mocks.registry.mockResolvedValue({ workspaceId: "workspace_default_workspace-owner", role: "owner" });
+});
+afterEach(() => {
+  for (const forbidden of [mocks.oauth, mocks.listBusy, mocks.createMeeting, mocks.receipt,
+    mocks.idempotencyKey, mocks.idempotency, mocks.resolveContext, mocks.insertReviewed, mocks.availability, vi.mocked(fetch)]) {
+    expect(forbidden).not.toHaveBeenCalled();
+  }
+  vi.unstubAllGlobals();
 });
 
+describe.each([
+  { path: "schedule", route: schedule },
+  { path: "create-event", route: createEvent },
+])("retired calendar $path route", ({ path, route }) => {
+  async function invoke(req: NextRequest) {
+    const response = await route(req, { params: Promise.resolve({}) });
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(req.bodyUsed).toBe(false);
+    return response;
+  }
+  it.each([false, true])("requires event review even with dryRun=%s and receipt/idempotency inputs", async (dryRun) => {
+    const response = await invoke(request(path, { body: JSON.stringify({ ...booking, dryRun }) }));
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toContain("/dashboard/calendar");
+    expect(body).not.toHaveProperty("success");
+    expect(body).not.toHaveProperty("event");
+    expect(mocks.verifyIdToken).toHaveBeenCalledWith("owner-token", true);
+    expect(mocks.registry).toHaveBeenCalledWith("workspace-owner");
+  });
+  it.each([
+    ["malformed", "{broken"], ["empty", ""], ["oversized", "a".repeat(64 * 1024)],
+  ])("returns retirement guidance without parsing an authenticated %s body", async (_label, body) => {
+    const response = await invoke(request(path, { body }));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("/dashboard/calendar");
+  });
+  it("does not require JSON to reject this retired operation", async () => {
+    const response = await invoke(request(path, { headers: { Authorization: "Bearer owner-token", "Content-Type": "text/plain" }, body: "legacy form" }));
+    expect(response.status).toBe(409);
+  });
+  it("rejects missing authentication before returning operation guidance", async () => {
+    const response = await invoke(request(path, { headers: {}, body: "{broken" }));
+    expect(response.status).toBe(401);
+    expect(mocks.verifyIdToken).not.toHaveBeenCalled();
+    expect(mocks.registry).not.toHaveBeenCalled();
+  });
+  it("rejects a revoked owner token", async () => {
+    mocks.verifyIdToken.mockRejectedValue(new Error("revoked token"));
+    const response = await invoke(request(path));
+    expect(response.status).toBe(401);
+    expect(mocks.verifyIdToken).toHaveBeenCalledWith("owner-token", true);
+    expect(mocks.registry).not.toHaveBeenCalled();
+  });
+  it("rejects an administrator rather than bypassing owner access", async () => {
+    mocks.registry.mockResolvedValue({ workspaceId: "workspace_default_workspace-owner", role: "admin" });
+    expect((await invoke(request(path))).status).toBe(403);
+  });
+  it("propagates inactive workspace access denial", async () => {
+    mocks.registry.mockRejectedValue(new ApiError(403, "Inactive workspace."));
+    expect((await invoke(request(path))).status).toBe(403);
+  });
+});

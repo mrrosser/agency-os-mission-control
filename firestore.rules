@@ -52,6 +52,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Only server routes may record exact calendar approvals and execution receipts.
+    match /calendar_event_requests/{requestId} {
+      allow read, write: if false;
+    }
+
     // Allow authenticated users to submit feedback
     match /feedback/{feedbackId} {
       allow create: if isSignedIn();

@@ -1,7 +1,9 @@
 import { callGoogleAPI } from "./tokens";
+import { ApiError } from "@/lib/api/handler";
 import type { Logger } from "@/lib/logging";
 
 const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
+const LEGACY_MUTATION_DISABLED = "Legacy calendar mutations are disabled. Use the reviewed calendar workflow.";
 
 export interface CalendarEvent {
     id: string;
@@ -84,64 +86,37 @@ export async function listEvents(
 }
 
 /**
- * Create a new calendar event
+ * Retained for caller compatibility; calendar writes require the reviewed workflow.
  */
 export async function createEvent(
-    accessToken: string,
-    event: CreateEventInput,
-    log?: Logger
+    _accessToken: string,
+    _event: CreateEventInput,
+    _log?: Logger
 ): Promise<CalendarEvent> {
-    const response = await callGoogleAPI<CalendarEvent>(
-        `${CALENDAR_API_BASE}/calendars/primary/events`,
-        accessToken,
-        {
-            method: 'POST',
-            body: JSON.stringify(event),
-        },
-        log
-    );
-
-    return response;
+    throw new ApiError(409, LEGACY_MUTATION_DISABLED);
 }
 
 /**
- * Update an existing calendar event
+ * Retained for caller compatibility; legacy calendar updates are disabled.
  */
 export async function updateEvent(
-    accessToken: string,
-    eventId: string,
-    event: Partial<CreateEventInput>,
-    log?: Logger
+    _accessToken: string,
+    _eventId: string,
+    _event: Partial<CreateEventInput>,
+    _log?: Logger
 ): Promise<CalendarEvent> {
-    const response = await callGoogleAPI<CalendarEvent>(
-        `${CALENDAR_API_BASE}/calendars/primary/events/${eventId}`,
-        accessToken,
-        {
-            method: 'PATCH',
-            body: JSON.stringify(event),
-        },
-        log
-    );
-
-    return response;
+    throw new ApiError(409, LEGACY_MUTATION_DISABLED);
 }
 
 /**
- * Delete a calendar event
+ * Retained for caller compatibility; legacy calendar deletion is disabled.
  */
 export async function deleteEvent(
-    accessToken: string,
-    eventId: string,
-    log?: Logger
+    _accessToken: string,
+    _eventId: string,
+    _log?: Logger
 ): Promise<void> {
-    await callGoogleAPI(
-        `${CALENDAR_API_BASE}/calendars/primary/events/${eventId}`,
-        accessToken,
-        {
-            method: 'DELETE',
-        },
-        log
-    );
+    throw new ApiError(409, LEGACY_MUTATION_DISABLED);
 }
 
 interface FreeBusyResponse {
@@ -226,39 +201,13 @@ export interface CreateMeetingResult {
 }
 
 /**
- * Create a meeting only if the time slot is available.
+ * Retained for caller compatibility; reviewed creation owns availability and writes.
  */
 export async function createMeetingWithAvailabilityCheck(
-    accessToken: string,
-    event: CreateEventInput,
-    calendarId: string = "primary",
-    log?: Logger
+    _accessToken: string,
+    _event: CreateEventInput,
+    _calendarId: string = "primary",
+    _log?: Logger
 ): Promise<CreateMeetingResult> {
-    const startTime = event.start.dateTime || event.start.date;
-    const endTime = event.end.dateTime || event.end.date;
-
-    if (!startTime || !endTime) {
-        return { success: false, error: "Missing start or end time" };
-    }
-
-    const start = new Date(startTime);
-    const end = new Date(endTime);
-
-    const available = await checkAvailability(accessToken, start, end, calendarId, log);
-    if (!available) {
-        return { success: false, error: "Calendar conflict" };
-    }
-
-    const conferenceParam = event.conferenceData ? "?conferenceDataVersion=1" : "";
-    const response = await callGoogleAPI<CalendarEvent>(
-        `${CALENDAR_API_BASE}/calendars/${encodeURIComponent(calendarId)}/events${conferenceParam}`,
-        accessToken,
-        {
-            method: "POST",
-            body: JSON.stringify(event),
-        },
-        log
-    );
-
-    return { success: true, event: response };
+    throw new ApiError(409, LEGACY_MUTATION_DISABLED);
 }

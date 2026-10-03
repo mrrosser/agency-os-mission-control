@@ -1,38 +1,31 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
-import { withApiHandler, ApiError } from "@/lib/api/handler";
-import { parseJson } from "@/lib/api/validation";
-import { requireFirebaseAuth } from "@/lib/api/auth";
-import { getAccessTokenForUser } from "@/lib/google/oauth";
-import { checkAvailability } from "@/lib/google/calendar";
+import { withApiHandler } from "@/lib/api/handler";
+import { CalendarWorkProfileSchema } from "@/lib/calendar/event-contract";
+import { calendarJson, parseCalendarJson, requireCalendarOwner } from "@/lib/calendar/request-auth";
+import { checkSelectedCalendarAvailability, resolveCalendarContext } from "@/lib/calendar/google-calendar-context";
 
 const bodySchema = z.object({
-  startTime: z.string(),
-  endTime: z.string(),
-  calendarId: z.string().optional(),
-});
+  profileId: CalendarWorkProfileSchema,
+  calendarId: z.string().min(1).max(1024).refine(
+    (value) => !/\s|[\u0000-\u001f\u007f]/.test(value) && !["primary", ".", ".."].includes(value.toLowerCase()),
+    "Select a concrete calendar ID.",
+  ),
+  startTime: z.string().max(64).datetime({ offset: true }),
+  endTime: z.string().max(64).datetime({ offset: true }),
+}).strict().refine((value) => {
+  const duration = Date.parse(value.endTime) - Date.parse(value.startTime);
+  return duration > 0 && duration <= 7 * 24 * 60 * 60_000;
+}, "Choose a positive time range of no more than seven days.");
 
 export const POST = withApiHandler(
   async ({ request, log }) => {
-    const body = await parseJson(request, bodySchema);
-    const user = await requireFirebaseAuth(request, log);
-    const accessToken = await getAccessTokenForUser(user.uid, log);
-
-    const start = new Date(body.startTime);
-    const end = new Date(body.endTime);
-    if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf())) {
-      throw new ApiError(400, "Invalid startTime or endTime");
-    }
-
-    const isAvailable = await checkAvailability(
-      accessToken,
-      start,
-      end,
-      body.calendarId || "primary",
-      log
+    const user = await requireCalendarOwner(request);
+    const body = await parseCalendarJson(request, bodySchema);
+    const context = await resolveCalendarContext(user.uid, body.profileId, log);
+    const available = await checkSelectedCalendarAvailability(
+      context, body.calendarId, body.startTime, body.endTime, log,
     );
-
-    return NextResponse.json({ available: isAvailable });
+    return calendarJson({ available });
   },
-  { route: "calendar.availability" }
+  { route: "calendar.availability" },
 );

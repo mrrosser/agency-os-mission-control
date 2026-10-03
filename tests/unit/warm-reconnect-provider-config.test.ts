@@ -41,7 +41,7 @@ describe("warm reconnect runtime provider capability", () => {
     [undefined, false], ["", false], ["false", false], ["0", false], ["yes", false],
     ["true", true], [" TRUE ", true],
   ])("reads %s with the unchanged executor policy", (value, expected) => {
-    expect(isWarmReconnectProviderSendEnabled({ [WARM_RECONNECT_PROVIDER_SEND_FLAG]: value }))
+    expect(isWarmReconnectProviderSendEnabled({ NODE_ENV: "test", [WARM_RECONNECT_PROVIDER_SEND_FLAG]: value }))
       .toBe(expected);
     expect(executorSendEnabled).toBe(isWarmReconnectProviderSendEnabled);
   });

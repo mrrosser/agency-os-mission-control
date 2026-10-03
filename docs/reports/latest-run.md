@@ -1,5 +1,14 @@
 # Latest Verification Run
 
+## 2026-10-03 dependency repair for the dedicated sender release
+
+- Isolated from PR #53 head `ad9d776`; original repositories and contact-site deployment unchanged. Official-registry audit now passes the unchanged high threshold with zero high/critical and 16 moderate package entries. The earlier pre-repair zero-finding audit is superseded, not reused as evidence.
+- Published Busboy/Axios/brace-expansion fixes; explicit gRPC 1.14.5 override validated with actual Firebase Node SDK loopback calls. Scoped Next lint dependency replacement removes braces/micromatch, with a final configuration guard against unsupported custom roots; all 21 current Next rules/severities remain active.
+- Full suite 1,278/1,278 across 241 files, production build and lint pass (zero errors, three existing warnings). Focused suites: eight gRPC and ten lint-boundary tests pass. Final standalone TypeScript and 26 focused tests pass; fresh independent review found no consequential issues. Proof limits remain explicit in the linked report.
+- No workflow/audit exception, credential change, OAuth grant, campaign send or live CRM mutation. The additional HTTP test agent was blocked by automatic cybersecurity filtering; those tests are not claimed passed. Published patch/source verification, official audit and existing route/worker tests are documented substitutes.
+- Full scope, compatibility restrictions, validation limits, remaining advisories and rollback: `docs/reports/2026-10-03-dependency-repair.md`.
+
+
 ## 2026-10-03 dedicated RT sender and two-business plain-text invitation (scoped release candidate)
 
 - Isolated release branch from verified production/main `7eb058c185d290ceb351f975ec176a42cc48f1ec`; only the reviewed RT sender/copy/preferences/plain-text patch applied; original checkout unchanged. No CRM deployment, OAuth grant, credential write, subscription or campaign send.

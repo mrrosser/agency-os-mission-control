@@ -110,6 +110,10 @@
     "next": {
       "postcss": "8.5.23"
     },
-    "sharp": "$sharp"
+    "sharp": "$sharp",
+    "@grpc/grpc-js": "1.14.5",
+    "@next/eslint-plugin-next@15.5.25": {
+      "fast-glob": "npm:tinyglobby@0.2.17"
+    }
   }
 }

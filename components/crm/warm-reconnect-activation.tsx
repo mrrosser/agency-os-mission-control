@@ -25,6 +25,7 @@ import type {
   WarmReconnectActivationGateState,
   WarmReconnectActivationResponse,
   WarmReconnectCandidate,
+  WarmReconnectContentMode,
   WarmReconnectGoogleProfileId,
   WarmReconnectPilotApprovalRequest,
   WarmReconnectPilotLaunchRequest,
@@ -34,7 +35,7 @@ import type {
   WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
-import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL } from "@/lib/google/business-profiles";
+import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL, RT_SOLUTIONS_SENDING_EMAIL } from "@/lib/google/business-profiles";
 
 const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation";
 
@@ -49,6 +50,12 @@ const APPROVAL_CONFIRMATIONS = [
   ["exactAudienceReviewed", "Exact five-person audience"],
 ] as const;
 
+function requiredConfirmations(contentMode?: WarmReconnectContentMode) {
+  return APPROVAL_CONFIRMATIONS.filter(([key]) =>
+    contentMode !== "plain_text" || key !== "artworkApprovedForEmail",
+  );
+}
+
 type ConfirmationKey = (typeof APPROVAL_CONFIRMATIONS)[number][0];
 type MutationAction = "create" | "decision" | "approval" | "launch" | "stop";
 
@@ -62,6 +69,7 @@ type SenderForm = {
   replyTo: string;
   physicalPostalAddress: string;
   profileId: WarmReconnectGoogleProfileId;
+  contentMode: WarmReconnectContentMode;
   artworkEvidenceNote: string;
   artworkApproved: boolean;
 };
@@ -76,6 +84,7 @@ const INITIAL_SENDER_FORM: SenderForm = {
   replyTo: "",
   physicalPostalAddress: "",
   profileId: "rosser_gallery_send",
+  contentMode: "plain_text",
   artworkEvidenceNote: "",
   artworkApproved: false,
 };
@@ -266,10 +275,13 @@ export function WarmReconnectActivation({ campaign }: Props) {
         businessId: profile.businessId,
         profileId: profile.profileId,
       },
-      artworkEmailApproval: {
-        approvedForThisEmailCampaign: true,
-        evidenceNote: sender.artworkEvidenceNote.trim(),
-      },
+      contentMode: sender.contentMode,
+      ...(sender.contentMode === "artwork_html" ? {
+        artworkEmailApproval: {
+          approvedForThisEmailCampaign: true as const,
+          evidenceNote: sender.artworkEvidenceNote.trim(),
+        },
+      } : {}),
     };
 
     setMutation({ action: "create" });
@@ -327,7 +339,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
 
   async function approvePilot(pilot: WarmReconnectPilotView) {
     if (!pilot.availableActions.canApprove || mutation || !approvalNote.trim()) return;
-    if (!APPROVAL_CONFIRMATIONS.every(([key]) => confirmations[key])) return;
+    if (!requiredConfirmations(pilot.contentMode).every(([key]) => confirmations[key])) return;
 
     const payload: WarmReconnectPilotApprovalRequest = {
       decision: "approve",
@@ -342,7 +354,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        artworkApprovedForEmail: true,
+        ...(pilot.contentMode === "plain_text" ? {} : { artworkApprovedForEmail: true as const }),
         exactAudienceReviewed: true,
       },
       note: approvalNote.trim(),
@@ -411,7 +423,19 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const activePilot = activation?.pilots.find((pilot) =>
     !["stopped", "rejected", "stale"].includes(pilot.status),
   ) || null;
-  const allConfirmationsChecked = APPROVAL_CONFIRMATIONS.every(([key]) => confirmations[key]);
+  const providerExecutionEnabled = error ? undefined : activation?.constraints?.providerExecutionEnabled;
+  const providerStatus = providerExecutionEnabled === true
+    ? "Provider execution is enabled."
+    : providerExecutionEnabled === false
+      ? "Provider execution is currently disabled."
+      : "Provider execution status is unknown until live controls load.";
+  const providerLaunchLabel = providerExecutionEnabled === true
+    ? "provider enabled"
+    : providerExecutionEnabled === false
+      ? "provider currently disabled"
+      : "provider status unknown";
+  const visibleConfirmations = requiredConfirmations(activePilot?.contentMode);
+  const allConfirmationsChecked = visibleConfirmations.every(([key]) => confirmations[key]);
   const selectedProfile = activation?.googleProfiles.find((profile) => profile.profileId === sender.profileId);
   const createReady = Boolean(
     selectedRecipientIds.length === 5 &&
@@ -423,8 +447,8 @@ export function WarmReconnectActivation({ campaign }: Props) {
     sender.legalEntity.trim() &&
     sender.replyTo.trim() &&
     sender.physicalPostalAddress.trim() &&
-    sender.artworkApproved &&
-    sender.artworkEvidenceNote.trim() &&
+    (sender.contentMode === "plain_text" ||
+      (sender.artworkApproved && sender.artworkEvidenceNote.trim())) &&
     !activePilot,
   );
   const verifiedGates = useMemo(
@@ -496,12 +520,12 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       <p className="mt-1 text-[11px] text-zinc-500">
                         {ready ? "Gmail send connected" : titleCase(profile.state)}
                       </p>
-                      {isRosserGallerySendingProfile(profile.profileId) && (
-                        <p className="mt-2 text-xs leading-5 text-zinc-300">
-                          Separate send-only connection for {ROSSER_GALLERY_SENDING_EMAIL}.
-                          Your existing Gallery Drive, Calendar, and inbox connection stays unchanged.
-                        </p>
-                      )}
+                      <p className="mt-2 text-xs leading-5 text-zinc-300">
+                        Separate send-only connection for {isRosserGallerySendingProfile(profile.profileId)
+                          ? ROSSER_GALLERY_SENDING_EMAIL
+                          : RT_SOLUTIONS_SENDING_EMAIL}.
+                        Your existing work connection stays unchanged.
+                      </p>
                       {profile.accountEmail ? (
                         <p className="mt-1 truncate text-[11px] text-zinc-400">
                           Verified sender: {profile.accountEmail}
@@ -589,11 +613,28 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     <select aria-label="Sending Google profile" value={sender.profileId} onChange={(event) => setSender((current) => ({ ...current, profileId: event.target.value as SenderForm["profileId"] }))} className="w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
                       {(activation?.googleProfiles || []).map((profile) => <option key={profile.profileId} value={profile.profileId}>{profile.label}</option>)}
                     </select>
+                    <label className="block text-xs text-zinc-300">
+                      Email format
+                      <select aria-label="Email format" value={sender.contentMode} onChange={(event) => setSender((current) => ({ ...current, contentMode: event.target.value as WarmReconnectContentMode }))} className="mt-1 w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
+                        <option value="plain_text">Plain text</option>
+                        <option value="artwork_html">Email with artwork</option>
+                      </select>
+                    </label>
+                    {sender.contentMode === "plain_text" && <details className="rounded-md border border-white/10 p-3 text-xs leading-5 text-zinc-300">
+                      <summary className="cursor-pointer font-semibold">Preview plain-text invitation</summary>
+                      <p className="mt-2 font-semibold">Subject: {campaign?.copy.subject}</p>
+                      <pre className="mt-2 whitespace-pre-wrap font-sans">{campaign?.copy.plainText}</pre>
+                      <p className="mt-3">{sender.legalEntity || "[Legal sender entity required]"}</p>
+                      <p className="whitespace-pre-wrap">{sender.physicalPostalAddress || "[Postal address required]"}</p>
+                      <p className="mt-2">The final email includes your recipient&apos;s preference and unsubscribe links.</p>
+                    </details>}
+                    {sender.contentMode === "artwork_html" && <>
                     <textarea aria-label="Artwork approval evidence" value={sender.artworkEvidenceNote} onChange={(event) => setSender((current) => ({ ...current, artworkEvidenceNote: event.target.value }))} placeholder="Why this artwork is approved for this exact email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <label className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
                       <input type="checkbox" checked={sender.artworkApproved} onChange={(event) => setSender((current) => ({ ...current, artworkApproved: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" />
                       I approve this owned artwork for this exact email campaign.
                     </label>
+                    </>}
                     <Button type="button" disabled={!createReady || Boolean(mutation)} onClick={() => void createPilot()} className="w-full bg-cyan-200 text-[#061012] hover:bg-cyan-100">
                       {mutation?.action === "create" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <UsersRound aria-hidden="true" />}
                       Prepare exact five-person review
@@ -659,7 +700,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
             <div className="min-w-0 flex-1">
               <h3 className="font-semibold text-white">4. Approve, then request launch</h3>
               <p className="mt-1 text-xs leading-5 text-zinc-400">
-                Approval binds the exact five people, copy, sender account, and fingerprints for 24 hours. Launch is the separate action that authorizes those five Gmail sends. Provider execution stays disabled until the production send switch is deliberately enabled.
+                Approval binds the exact five people, copy, sender account, and fingerprints for 24 hours. Launch is the separate action that authorizes those five Gmail sends. {providerStatus} The provider setting does not approve or launch a pilot.
               </p>
 
               {activePilot ? (
@@ -683,7 +724,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       <>
                         <fieldset className="space-y-2">
                           <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Exact approval confirmations</legend>
-                          {APPROVAL_CONFIRMATIONS.map(([key, label]) => (
+                          {visibleConfirmations.map(([key, label]) => (
                             <label key={key} className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
                               <input type="checkbox" checked={confirmations[key]} onChange={(event) => setConfirmations((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" /> {label}
                             </label>
@@ -696,6 +737,21 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       </>
                     )}
 
+                    <div className="rounded-lg border border-white/10 p-3 text-xs leading-5 text-zinc-300">
+                      <p className="font-semibold">Saved email format: {activePilot.contentMode === "plain_text" ? "Plain text" : "Email with artwork"}</p>
+                      {activePilot.contentMode === "plain_text" && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer">Review saved invitation and footer</summary>
+                          <p className="mt-2 font-semibold">Subject: {campaign.copy.subject}</p>
+                          <pre className="mt-2 whitespace-pre-wrap font-sans">{campaign.copy.plainText}</pre>
+                          <p className="mt-3">{activePilot.sender.legalEntity}</p>
+                          <p className="whitespace-pre-wrap">{activePilot.sender.physicalPostalAddress}</p>
+                          <p className="mt-2">From: {activePilot.sender.fromEmail} · Reply to: {activePilot.sender.replyTo}</p>
+                          <p>The final email includes each recipient&apos;s preference and unsubscribe links.</p>
+                        </details>
+                      )}
+                    </div>
+
                     {activePilot.approval && (
                       <div className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.07] p-3 text-xs leading-5 text-emerald-100">
                         Approved until {new Date(activePilot.approval.expiresAt).toLocaleString()}. Any material drift returns this pilot to review.
@@ -703,7 +759,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     )}
 
                     <Button type="button" disabled={!activePilot.availableActions.canLaunch || !activePilot.approval || Boolean(mutation)} onClick={() => void launchPilot(activePilot)} className="w-full bg-emerald-300 text-emerald-950 hover:bg-emerald-200">
-                      {mutation?.action === "launch" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MailCheck aria-hidden="true" />} Authorize exact five-email launch · provider currently disabled
+                      {mutation?.action === "launch" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MailCheck aria-hidden="true" />} Authorize exact five-email launch · {providerLaunchLabel}
                     </Button>
                     <input aria-label="Stop reason" value={stopReason} onChange={(event) => setStopReason(event.target.value)} placeholder="Reason to stop this pilot" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-red-200/50" />
                     <Button type="button" variant="outline" disabled={!activePilot.availableActions.canStop || !stopReason.trim() || Boolean(mutation)} onClick={() => void stopPilot(activePilot)} className="w-full border-red-300/25 bg-red-300/[0.04] text-red-100 hover:bg-red-300/10 hover:text-red-50">

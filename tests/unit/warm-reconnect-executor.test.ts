@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   WARM_RECONNECT_EXECUTION_POLICY,
+  assertWarmReconnectPilotFingerprints,
   createWarmReconnectPilot,
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/crm/warm-reconnect-activation";
 import type {
   WarmReconnectCandidate,
+  WarmReconnectContentMode,
   WarmReconnectPilot,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import {
@@ -74,7 +76,8 @@ function candidate(index: number): WarmReconnectCandidate {
 
 function launchedPilot(
   pilotId = "wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  approvalId = "approval-1"
+  approvalId = "approval-1",
+  contentMode: WarmReconnectContentMode = "artwork_html"
 ): WarmReconnectPilot {
   let pilot = createWarmReconnectPilot({
     pilotId,
@@ -101,10 +104,13 @@ function launchedPilot(
         businessId: "rosser_nft_gallery",
         profileId: "rosser_gallery_send",
       },
-      artworkEmailApproval: {
-        approvedForThisEmailCampaign: true,
-        evidenceNote: "Approved for this exact email campaign.",
-      },
+      contentMode,
+      ...(contentMode === "artwork_html" ? {
+        artworkEmailApproval: {
+          approvedForThisEmailCampaign: true as const,
+          evidenceNote: "Approved for this exact email campaign.",
+        },
+      } : {}),
     },
     candidates: [1, 2, 3, 4, 5].map(candidate),
     googleReady: true,
@@ -146,7 +152,7 @@ function launchedPilot(
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        artworkApprovedForEmail: true,
+        ...(contentMode === "artwork_html" ? { artworkApprovedForEmail: true as const } : {}),
         exactAudienceReviewed: true,
       },
       note: "Approved for the exact five-person pilot.",
@@ -235,12 +241,13 @@ function dependencies(
     markCapabilitiesPrepared: vi.fn(async () => undefined),
     beginProviderAttempt: vi.fn(async () => ({ ready: true as const })),
     resolveAccessToken: vi.fn(async () => "ephemeral-access-token"),
-    renderMessage: vi.fn(() => ({
+    renderMessage: vi.fn((input) => ({
+      contentMode: input.contentMode || "artwork_html",
       rendererVersion: "warm-reconnect-email-renderer.v1" as const,
       subject: "A quick hello from Marcus",
       plainText: "plain",
-      html: "<p>html</p>",
-      artworkUrl: "https://leadflow-review.web.app/art.webp",
+      html: input.contentMode === "plain_text" ? "" : "<p>html</p>",
+      artworkUrl: input.contentMode === "plain_text" ? "" : "https://leadflow-review.web.app/art.webp",
       contractFingerprint: `sha256:${"f".repeat(64)}`,
     })),
     sendMessage: vi.fn(async () => ({ id: "gmail-message-1", threadId: "thread-1" })),
@@ -580,6 +587,32 @@ describe("warm reconnect provider executor", () => {
     );
     expect(deps.recordSent).toHaveBeenCalledOnce();
     expect(deps.recordDeliveryUnknown).not.toHaveBeenCalled();
+  });
+
+  it("executes a reviewed plain-text pilot without an artwork attestation", async () => {
+    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-plain", "plain_text");
+    expect(pilot.artworkEmailApproval).toBeNull();
+    expect(pilot.gates.some((gate) => gate.id === "artwork_email_channel_approval")).toBe(false);
+    const deps = dependencies({
+      claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim: claimFor(pilot) })),
+    });
+    const result = await runWarmReconnectPilotExecutor({
+      uid: "owner-1", pilotId: pilot.pilotId, correlationId: "plain-test", log, db,
+      now: RUN_AT, dependencies: deps,
+    });
+    expect(result).toMatchObject({ outcome: "sent", providerCalled: true });
+    expect(deps.sendMessage).toHaveBeenCalledOnce();
+    expect(deps.renderMessage).toHaveBeenCalledWith(expect.objectContaining({ contentMode: "plain_text" }));
+    expect(deps.sendMessage).toHaveBeenCalledWith("ephemeral-access-token", expect.objectContaining({
+      contentMode: "plain_text", html: "",
+    }), undefined);
+  });
+
+  it("invalidates the approved fingerprints when a plain-text pilot changes to artwork", () => {
+    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-plain", "plain_text");
+    expect(() => assertWarmReconnectPilotFingerprints(pilot)).not.toThrow();
+    pilot.contentMode = "artwork_html";
+    expect(() => assertWarmReconnectPilotFingerprints(pilot)).toThrow();
   });
 
   it("stops before Gmail when the frozen preview or sender readiness drifts", async () => {

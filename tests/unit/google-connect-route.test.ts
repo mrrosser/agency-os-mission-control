@@ -202,6 +202,64 @@ describe("google connect route", () => {
     );
   });
 
+  it("creates an isolated RT sending attempt using only gmail_send", async () => {
+    const response = await POST(connectRequest({
+      returnTo: "/dashboard/crm",
+      scopePreset: "gmail_send",
+      businessId: "rt_solutions",
+      profileId: "rt_solutions_send",
+    }), {} as never);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      businessId: "rt_solutions", profileId: "rt_solutions_send",
+    });
+    expect(transactionCreateMock).toHaveBeenCalledOnce();
+    expect(transactionCreateMock.mock.calls[0]?.[1]).toMatchObject({
+      businessId: "rt_solutions", profileId: "rt_solutions_send", scopePreset: "gmail_send",
+    });
+    expect(transactionSetMock).toHaveBeenCalledOnce();
+    expect(transactionSetMock.mock.calls[0]?.[1]).toMatchObject({
+      businessId: "rt_solutions", profileId: "rt_solutions_send", status: "pending",
+    });
+    expect(transactionDeleteMock).not.toHaveBeenCalled();
+    expect(getGoogleAuthUrlMock).toHaveBeenCalledWith(expect.any(String), {
+      scopePreset: "gmail_send",
+      codeChallenge: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
+  });
+
+  it.each(["core", "drive", "calendar", "gmail", "full"])(
+    "rejects the %s preset for RT sending before creating OAuth state",
+    async (scopePreset) => {
+      const response = await POST(connectRequest({
+        scopePreset, businessId: "rt_solutions", profileId: "rt_solutions_send",
+      }), {} as never);
+      expect(response.status).toBe(400);
+      expect(runTransactionMock).not.toHaveBeenCalled();
+      expect(getGoogleAuthUrlMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects RT sending under the Gallery business before creating OAuth state", async () => {
+    const response = await POST(connectRequest({
+      scopePreset: "gmail_send", businessId: "rosser_nft_gallery", profileId: "rt_solutions_send",
+    }), {} as never);
+    expect(response.status).toBe(400);
+    expect(runTransactionMock).not.toHaveBeenCalled();
+    expect(getGoogleAuthUrlMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a business-only RT connection on its ordinary work profile", async () => {
+    const response = await POST(connectRequest({
+      scopePreset: "drive", businessId: "rt_solutions",
+    }), {} as never);
+    expect(response.status).toBe(200);
+    expect(transactionCreateMock.mock.calls[0]?.[1]).toMatchObject({
+      profileId: "rt_solutions_work", scopePreset: "drive",
+    });
+  });
+
   it("rejects a newer connect while the exact profile callback is processing", async () => {
     transactionGetMock.mockResolvedValue({
       exists: true,

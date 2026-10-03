@@ -122,6 +122,18 @@ function callbackRequest(query: string, cookie = `${COOKIE_NAME}=${VERIFIER}`) {
   );
 }
 
+function mockRtSendingState(overrides: Record<string, unknown> = {}) {
+  const profileId = "rt_solutions_send";
+  const businessId = "rt_solutions";
+  const attemptDocumentId = createHash("sha256")
+    .update(`7:uid-123:${profileId.length}:${profileId}`).digest("hex");
+  transactionGetMock.mockImplementation(async (reference: { collection: string }) =>
+    reference.collection === "google_oauth_state"
+      ? stateSnapshot(stateData({ profileId, businessId, attemptDocumentId, returnTo: "/dashboard/crm", ...overrides }))
+      : attemptSnapshot({ profileId, businessId, ...attemptRecord.current })
+  );
+}
+
 describe("google callback route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -248,6 +260,70 @@ describe("google callback route", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toContain("google=connected");
     expect(getTokenInfoMock).toHaveBeenCalledWith("access-token");
+  });
+
+  it.each([
+    ["mrosser@rt.solutions", true],
+    ["mrosser@rossergallery.com", false],
+    ["personal@example.com", false],
+  ])("pins RT sending to the confirmed Google identity: %s", async (email, allowed) => {
+    mockRtSendingState();
+    fetchGoogleAccountIdentityMock.mockResolvedValue({ email, subject: "rt-sending-subject" });
+    const response = await GET(callbackRequest(`code=abc123&state=${STATE}`), {} as never);
+    const location = new URL(response.headers.get("location")!);
+    expect(response.status).toBe(303);
+    expect(location.pathname).toBe("/dashboard/crm");
+    expect(location.searchParams.get("googleBusiness")).toBe("rt_solutions");
+    expect(location.searchParams.get("googleProfile")).toBe("rt_solutions_send");
+    expect(location.searchParams.has("code")).toBe(false);
+    expect(location.searchParams.has("state")).toBe(false);
+    if (allowed) {
+      expect(location.searchParams.get("google")).toBe("connected");
+      expect(storeGoogleProfileTokensMock).toHaveBeenCalledExactlyOnceWith(
+        "uid-123", "rt_solutions_send",
+        expect.objectContaining({ account_email: email, account_subject: "rt-sending-subject", scope: LIVE_SCOPE }),
+        "gmail_send", expect.anything()
+      );
+    } else {
+      expect(location.searchParams.get("googleError")).toBe("sending_account_mismatch");
+      expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["core", "drive", "calendar", "gmail", "full"])(
+    "rejects an RT sending callback with the %s preset before storing credentials",
+    async (scopePreset) => {
+      mockRtSendingState({ scopePreset });
+      const response = await GET(callbackRequest(`code=abc123&state=${STATE}`), {} as never);
+      expect(response.headers.get("location")).toContain("googleError=scope_not_allowed");
+      expect(fetchGoogleAccountIdentityMock).not.toHaveBeenCalled();
+      expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects broader grants for RT sending without accessing identity or storage", async () => {
+    mockRtSendingState();
+    getTokenMock.mockResolvedValue({
+      tokens: {
+        access_token: "access-token", refresh_token: "refresh-token",
+        scope: `${LIVE_SCOPE} https://www.googleapis.com/auth/drive.file`,
+      },
+    });
+    const response = await GET(callbackRequest(`code=abc123&state=${STATE}`), {} as never);
+    expect(response.headers.get("location")).toContain("googleError=scope_not_allowed");
+    expect(fetchGoogleAccountIdentityMock).not.toHaveBeenCalled();
+    expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched RT sending state without reflecting unvalidated profile context", async () => {
+    mockRtSendingState({ businessId: "rosser_nft_gallery" });
+    const response = await GET(callbackRequest(`code=abc123&state=${STATE}`), {} as never);
+    const location = new URL(response.headers.get("location")!);
+    expect(location.searchParams.get("googleError")).toBe("connection_session_invalid");
+    expect(location.searchParams.has("googleBusiness")).toBe(false);
+    expect(location.searchParams.has("googleProfile")).toBe(false);
+    expect(getTokenMock).not.toHaveBeenCalled();
+    expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
   });
 
   it("redirects invalid runtime configuration without exposing callback parameters", async () => {

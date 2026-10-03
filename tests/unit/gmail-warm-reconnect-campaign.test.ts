@@ -34,6 +34,147 @@ const message = {
 };
 
 describe("warm reconnect campaign Gmail MIME", () => {
+  it("keeps the legacy multipart output when artwork mode is explicit", () => {
+    expect(
+      buildWarmReconnectCampaignMime({ ...message, contentMode: "artwork_html" })
+    ).toBe(buildWarmReconnectCampaignMime(message));
+  });
+
+  it.each([undefined, "artwork_html"] as const)(
+    "requires the HTML alternative in artwork mode: %s",
+    (contentMode) => {
+      expect(() =>
+        buildWarmReconnectCampaignMime({ ...message, contentMode, html: "" })
+      ).toThrow("Campaign message requires plain-text and HTML alternatives");
+    }
+  );
+
+  it("builds a single plain-text part with the exact footer and preference controls", () => {
+    const plainText = [
+      "Hi Alex,",
+      "A quick hello from Marcus.",
+      "Marcus Rosser",
+      "RT Solutions LLC | 123 Example Street, New Orleans, LA 70112",
+      `Update preferences: ${preferencesUrl}`,
+      `Unsubscribe from all messages: ${preferencesUrl}`,
+    ].join("\n\n");
+    const mime = buildWarmReconnectCampaignMime({
+      ...message,
+      contentMode: "plain_text",
+      plainText,
+      html: "",
+    });
+    const [headers, encodedBody] = mime.split("\r\n\r\n");
+    const decodedBody = Buffer.from(encodedBody, "base64").toString("utf8");
+
+    expect(headers).toContain("Content-Type: text/plain; charset=utf-8");
+    expect(headers).toContain("Content-Transfer-Encoding: base64");
+    expect(headers).toContain(`List-Unsubscribe: <${oneClickUnsubscribeUrl}>`);
+    expect(headers).toContain("List-Unsubscribe-Post: List-Unsubscribe=One-Click");
+    expect(headers).toContain("To: friend@example.com\r\n");
+    expect(headers).toContain("Reply-To: reply@example.org\r\n");
+    expect(headers).not.toContain(preferencesUrl);
+    expect(mime).not.toContain("multipart/");
+    expect(mime).not.toContain("text/html");
+    expect(mime).not.toContain("boundary=");
+    expect(decodedBody).toBe(plainText);
+    expect(decodedBody).not.toContain(oneClickUnsubscribeUrl);
+    expect(decodedBody).not.toContain("<img");
+  });
+
+  it.each(["<p>Injected HTML</p>", " ", undefined])(
+    "rejects HTML or an omitted HTML field in explicit plain-text mode: %s",
+    (html) => {
+      expect(() =>
+        buildWarmReconnectCampaignMime({
+          ...message,
+          contentMode: "plain_text",
+          html: html as string,
+        })
+      ).toThrow("Plain-text campaign message must not contain HTML");
+    }
+  );
+
+  it.each(["", "  \n", undefined])(
+    "rejects empty plain-text content: %s",
+    (plainText) => {
+      expect(() =>
+        buildWarmReconnectCampaignMime({
+          ...message,
+          contentMode: "plain_text",
+          html: "",
+          plainText: plainText as string,
+        })
+      ).toThrow("Campaign message requires nonempty plain text");
+    }
+  );
+
+  it.each(["plain", "", null])("rejects an unknown content mode: %s", (contentMode) => {
+    expect(() =>
+      buildWarmReconnectCampaignMime({ ...message, contentMode: contentMode as never })
+    ).toThrow("Invalid campaign content mode");
+  });
+
+  it("requires the human preference link and hides the one-click capability in plain-text mode", () => {
+    for (const plainText of [
+      "No preference link here.",
+      `Preferences: ${preferencesUrl}\nUnsubscribe: ${oneClickUnsubscribeUrl}`,
+    ]) {
+      expect(() =>
+        buildWarmReconnectCampaignMime({
+          ...message,
+          contentMode: "plain_text",
+          html: "",
+          plainText,
+        })
+      ).toThrow("Visible unsubscribe must use the human preference URL");
+    }
+  });
+
+  it.each([
+    `http://leadflow-review.web.app/preferences#token=${preferenceToken}`,
+    `https://leadflow-review.web.app/preferences?token=${preferenceToken}`,
+    "https://leadflow-review.web.app/preferences#token=short",
+  ])("rejects a malformed preference URL in plain-text mode: %s", (invalidUrl) => {
+    expect(() =>
+      buildWarmReconnectCampaignMime({
+        ...message,
+        contentMode: "plain_text",
+        html: "",
+        preferencesUrl: invalidUrl,
+        plainText: `Preferences: ${invalidUrl}`,
+      })
+    ).toThrow("Invalid preferences URL");
+  });
+
+  it.each([
+    `http://leadflow-review.web.app/api/crm/warm-reconnect/unsubscribe/${unsubscribeOnlyToken}`,
+    `${oneClickUnsubscribeUrl}#token=unexpected`,
+    `https://other.example/api/crm/warm-reconnect/unsubscribe/${unsubscribeOnlyToken}`,
+    "https://leadflow-review.web.app/api/crm/warm-reconnect/unsubscribe/short",
+  ])("rejects an unsafe one-click URL in plain-text mode: %s", (invalidUrl) => {
+    expect(() =>
+      buildWarmReconnectCampaignMime({
+        ...message,
+        contentMode: "plain_text",
+        html: "",
+        oneClickUnsubscribeUrl: invalidUrl,
+      })
+    ).toThrow("Invalid one-click unsubscribe URL");
+  });
+
+  it("rejects reused capabilities in plain-text mode", () => {
+    expect(() =>
+      buildWarmReconnectCampaignMime({
+        ...message,
+        contentMode: "plain_text",
+        html: "",
+        oneClickUnsubscribeUrl:
+          `https://leadflow-review.web.app/api/crm/warm-reconnect/unsubscribe/${preferenceToken}`,
+      })
+    ).toThrow("must be distinct");
+  });
+
   it("builds one-recipient multipart mail with visible preference and one-click headers", () => {
     const mime = buildWarmReconnectCampaignMime(message);
 

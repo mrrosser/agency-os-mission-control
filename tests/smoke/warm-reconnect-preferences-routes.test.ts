@@ -26,8 +26,7 @@ function expectedResult(overrides: Record<string, unknown> = {}) {
     canUnsubscribe: true,
     globallyUnsubscribed: false,
     topics: {
-      marcus_rosser_art: true,
-      rosser_gallery: false,
+      rosser_gallery: true,
       rt_solutions: false,
     },
     ...overrides,
@@ -48,6 +47,7 @@ function expectPrivacyHeaders(response: Response) {
 describe("public warm reconnect preference routes", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     processMock.mockResolvedValue(expectedResult());
     unsubscribeMock.mockResolvedValue(expectedResult({ globallyUnsubscribed: true }));
     vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -103,6 +103,47 @@ describe("public warm reconnect preference routes", () => {
     expect(malformed.status).toBe(unknown.status);
     expect(await malformed.json()).toMatchObject({ ok: true, available: false });
     expect(await unknown.json()).toMatchObject({ ok: true, available: false });
+  });
+
+  it("accepts explicit choices for exactly the two current businesses", async () => {
+    const mutation = {
+      action: "save_preferences",
+      token,
+      requestId: "two-business-choice-1",
+      topics: { rosser_gallery: true, rt_solutions: true },
+    };
+    const response = await preferencesPost(
+      new Request("http://localhost/api/crm/warm-reconnect/preferences", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(mutation),
+      }) as never
+    );
+    expect(response.status).toBe(200);
+    expect(processMock).toHaveBeenCalledWith(mutation);
+    expectPrivacyHeaders(response);
+  });
+
+  it.each([
+    { rosser_gallery: true, rt_solutions: false, marcus_rosser_art: true },
+    { rosser_gallery: true, rt_solutions: false, marcus_rosser_art: false },
+    { rosser_gallery: true },
+    { rosser_gallery: "true", rt_solutions: false },
+    { rosser_gallery: true, rt_solutions: false, unknown: true },
+  ])("rejects retired, extra, missing, or non-boolean choices: %j", async (topics) => {
+    const response = await preferencesPost(
+      new Request("http://localhost/api/crm/warm-reconnect/preferences", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "save_preferences", token, requestId: "invalid-topics-1", topics }),
+      }) as never
+    );
+    expect(processMock).not.toHaveBeenCalled();
+    expect(await response.json()).toMatchObject({
+      available: false,
+      topics: { rosser_gallery: false, rt_solutions: false },
+    });
+    expectPrivacyHeaders(response);
   });
 
   it("processes human unsubscribe tokens from POST bodies without reflecting capability data", async () => {

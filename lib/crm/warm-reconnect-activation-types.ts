@@ -1,4 +1,4 @@
-import { ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
+import { ROSSER_GALLERY_SENDING_PROFILE, RT_SOLUTIONS_SENDING_PROFILE } from "@/lib/google/business-profiles";
 
 export const WARM_RECONNECT_ACTIVATION_SCHEMA_VERSION =
   "crm.warm-reconnect-activation.v1" as const;
@@ -8,11 +8,7 @@ export const WARM_RECONNECT_PILOT_SCHEMA_VERSION =
 
 export const WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES = [
   ROSSER_GALLERY_SENDING_PROFILE,
-  {
-    businessId: "rt_solutions",
-    profileId: "rt_solutions_work",
-    label: "RT.Solutions",
-  },
+  RT_SOLUTIONS_SENDING_PROFILE,
 ] as const;
 
 export const WARM_RECONNECT_APPROVAL_TTL_HOURS = 24 as const;
@@ -194,6 +190,8 @@ export interface WarmReconnectPilotAvailableActions {
   launchAuthorizesExactProviderExecution: true;
 }
 
+export type WarmReconnectContentMode = "artwork_html" | "plain_text";
+
 export interface WarmReconnectPilot {
   schemaVersion: typeof WARM_RECONNECT_PILOT_SCHEMA_VERSION;
   pilotId: string;
@@ -205,10 +203,11 @@ export interface WarmReconnectPilot {
   recipientCap: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
   campaignPreviewFingerprint: string;
   sender: WarmReconnectPilotSenderConfiguration;
+  contentMode?: WarmReconnectContentMode;
   artworkEmailApproval: {
     attested: true;
     evidenceNote: string;
-  };
+  } | null;
   preferenceContract: {
     origin: string;
     path: "/preferences";
@@ -269,7 +268,7 @@ export interface WarmReconnectActivationResponse {
     expandedPilotRequiresNewApproval: true;
     approvalTtlHours: typeof WARM_RECONNECT_APPROVAL_TTL_HOURS;
     launchAuthorizesExactProviderExecution: true;
-    providerExecutionEnabled: false;
+    providerExecutionEnabled: boolean;
   };
 }
 
@@ -280,7 +279,8 @@ export interface CreateWarmReconnectPilotRequest {
   recipientCap: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
   candidateRecipientIds: [string, string, string, string, string];
   sender: WarmReconnectPilotSenderInput;
-  artworkEmailApproval: {
+  contentMode?: WarmReconnectContentMode;
+  artworkEmailApproval?: {
     approvedForThisEmailCampaign: true;
     evidenceNote: string;
   };
@@ -315,7 +315,7 @@ export type WarmReconnectPilotApprovalRequest =
         suppressionLedgerVerified: true;
         spfDkimDmarcVerified: true;
         replyToMonitored: true;
-        artworkApprovedForEmail: true;
+        artworkApprovedForEmail?: true;
         exactAudienceReviewed: true;
       };
       note: string;

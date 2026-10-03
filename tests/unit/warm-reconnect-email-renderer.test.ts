@@ -52,6 +52,34 @@ const oneClickUrl =
   `https://leadflow-review.web.app/api/crm/warm-reconnect/unsubscribe/${unsubscribeOnlyToken}`;
 
 describe("warm reconnect email renderer", () => {
+  it("renders explicit plain text without reading artwork while preserving the real footer and preferences", () => {
+    const campaign = buildWarmReconnectCampaignDraft(summary);
+    const base = {
+      campaign, firstName: "Ari", senderName: "Marcus Rosser", legalEntity: "RT.Solutions",
+      physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117", preferencesUrl,
+      unsubscribeUrl: oneClickUrl, publicOrigin: "https://leadflow-review.web.app",
+    };
+    const artwork = renderWarmReconnectEmail(base);
+    const plain = renderWarmReconnectEmail({ ...base, contentMode: "plain_text" });
+    expect(plain.contentMode).toBe("plain_text");
+    expect(plain.html).toBe("");
+    expect(plain.artworkUrl).toBe("");
+    expect(plain.plainText).toBe(artwork.plainText);
+    expect(plain.plainText).toContain("RT.Solutions");
+    expect(plain.plainText).toContain(base.physicalPostalAddress);
+    expect(plain.plainText).toContain(`Unsubscribe from all messages: ${preferencesUrl}`);
+    expect(plain.plainText).not.toContain(oneClickUrl);
+    expect(plain.contractFingerprint).not.toBe(artwork.contractFingerprint);
+    expect(() => renderWarmReconnectEmail({
+      ...base, contentMode: "plain_text", campaign: { ...campaign, artwork: undefined } as never,
+    })).not.toThrow();
+    expect(() => renderWarmReconnectEmail({ ...base, contentMode: "unknown" as never }))
+      .toThrow("Invalid warm reconnect content mode");
+    expect(() => renderWarmReconnectEmail({
+      ...base, contentMode: "plain_text", preferencesUrl: "https://other.example/preferences#token=" + preferenceToken,
+    })).toThrow("Invalid preferences URL");
+  });
+
   it("renders live text, a pinned artwork URL, postal address, and both preference controls", () => {
     const campaign = buildWarmReconnectCampaignDraft(summary);
     const rendered = renderWarmReconnectEmail({

@@ -10,7 +10,6 @@ import {
 } from "@/lib/crm/warm-reconnect-dedupe";
 
 export const WARM_RECONNECT_TOPICS = [
-  "marcus_rosser_art",
   "rosser_gallery",
   "rt_solutions",
 ] as const;
@@ -104,7 +103,6 @@ export type WarmReconnectIssuedCapabilities = {
 
 function emptyTopics(): WarmReconnectTopics {
   return {
-    marcus_rosser_art: false,
     rosser_gallery: false,
     rt_solutions: false,
   };
@@ -113,10 +111,21 @@ function emptyTopics(): WarmReconnectTopics {
 function normalizeTopics(value: unknown): WarmReconnectTopics {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
-    marcus_rosser_art: source.marcus_rosser_art === true,
     rosser_gallery: source.rosser_gallery === true,
     rt_solutions: source.rt_solutions === true,
   };
+}
+
+function requestedBusinessTopics(value: unknown): WarmReconnectTopics | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const source = value as Record<string, unknown>;
+  if (
+    Object.keys(source).sort().join(",") !== [...WARM_RECONNECT_TOPICS].sort().join(",") ||
+    WARM_RECONNECT_TOPICS.some((topic) => typeof source[topic] !== "boolean")
+  ) {
+    return null;
+  }
+  return normalizeTopics(source);
 }
 
 function genericResult(): WarmReconnectPreferenceResult {
@@ -472,8 +481,8 @@ async function savePreferences(
   const rawToken = safeRawToken(mutation.token);
   if (!rawToken || !IDENTIFIER_PATTERN.test(mutation.requestId)) return genericResult();
   const digest = digestWarmReconnectToken(rawToken);
-  const requestedTopics = normalizeTopics(mutation.topics);
-  if (!Object.values(requestedTopics).some(Boolean)) return genericResult();
+  const requestedTopics = requestedBusinessTopics(mutation.topics);
+  if (!requestedTopics || !Object.values(requestedTopics).some(Boolean)) return genericResult();
 
   let outcome = genericResult();
   await db.runTransaction(async (transaction) => {
@@ -509,7 +518,8 @@ async function savePreferences(
     const contactData = contactSnapshot.data() || {};
     if (!contactSnapshot.exists || !contactMatchesToken(contactData, tokenDocument)) return;
     const expired = tokenDocument.capabilityExpiresAtMs <= observedNowMs;
-    const suppressed = suppressionSnapshot.exists;
+    const suppressed = suppressionSnapshot.exists ||
+      (stateSnapshot.data() as PreferenceStateDocument | undefined)?.globallyUnsubscribed === true;
     if (expired || suppressed) {
       outcome = {
         ...genericResult(),
@@ -574,6 +584,8 @@ async function savePreferences(
       },
       { merge: true }
     );
+    // Firestore merges the two named topic fields. Retired topic fields and
+    // earlier permission events remain historical evidence, never new consent.
     // Topic choices are intentionally not promoted to the contact point's
     // global default permission. Future sends must evaluate the topic ledger.
     outcome = {

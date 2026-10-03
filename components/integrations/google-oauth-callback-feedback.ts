@@ -1,4 +1,7 @@
-import { GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
+import {
+  getGoogleSendingProfile,
+  resolveGoogleBusinessProfileContext,
+} from "@/lib/google/business-profiles";
 
 export type GoogleOAuthCallbackFeedback = {
   kind: "success" | "error";
@@ -54,7 +57,7 @@ const ERROR_COPY: Readonly<
     showHelpLink: false,
   },
   sending_account_mismatch: {
-    description: `Choose ${ROSSER_GALLERY_SENDING_EMAIL} for Gallery sending. No sending credentials were saved, and the existing Gallery work connection was not changed.`,
+    description: "Choose the confirmed Google account for the intended sending profile. No sending credentials were saved, and the existing work connection was not changed.",
     showHelpLink: false,
   },
   account_already_connected: {
@@ -93,10 +96,15 @@ function resolveCallbackProfile(searchParams: SearchParamsReader) {
   const businessId = searchParams.get("googleBusiness");
   const profileId = searchParams.get("googleProfile");
 
-  return [...GOOGLE_BUSINESS_PROFILES, ROSSER_GALLERY_SENDING_PROFILE].find(
-    (profile) =>
-      profile.businessId === businessId && profile.profileId === profileId
-  );
+  if (!businessId || !profileId) return null;
+  try {
+    const profile = resolveGoogleBusinessProfileContext({ businessId, profileId });
+    return profile?.businessId === businessId && profile.profileId === profileId
+      ? profile
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveSupportId(searchParams: SearchParamsReader): string | undefined {
@@ -111,14 +119,15 @@ export function getGoogleOAuthCallbackFeedback(
   if (result !== "connected" && result !== "error") return null;
 
   const profile = resolveCallbackProfile(searchParams);
+  const sendingProfile = getGoogleSendingProfile(profile?.profileId);
   const subject = profile ? `${profile.label} Google connection` : "Google connection";
 
   if (result === "connected") {
     return {
       kind: "success",
       title: `${subject} completed`,
-      description: profile?.profileId === ROSSER_GALLERY_SENDING_PROFILE.profileId
-        ? "Gallery sending is connected separately. Its existing Drive, Calendar, and inbox connection is unchanged. No campaign was approved, launched, or sent."
+      description: sendingProfile
+        ? `${sendingProfile.label} is connected separately. Its existing Drive, Calendar, and inbox connection is unchanged. No campaign was approved, launched, or sent.`
         : profile
         ? `${profile.label} is connected only to its ${profile.profileId} workspace profile.`
         : "The account is connected. Review each organization profile below before using Google tools.",
@@ -138,7 +147,9 @@ export function getGoogleOAuthCallbackFeedback(
   const feedback: GoogleOAuthCallbackFeedback = {
     kind: "error",
     title: `${subject} was not completed`,
-    description: copy.description,
+    description: code === "sending_account_mismatch" && sendingProfile
+      ? `Choose ${sendingProfile.accountEmail} for ${sendingProfile.label}. No sending credentials were saved, and the existing work connection was not changed.`
+      : copy.description,
     showHelpLink: copy.showHelpLink,
   };
   const supportId = resolveSupportId(searchParams);

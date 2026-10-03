@@ -85,6 +85,36 @@ describe("Google profile disconnect route", () => {
     expect(finishDisconnectMock).not.toHaveBeenCalled();
   });
 
+  it("disconnects only RT sending and leaves the RT work binding alone", async () => {
+    beginDisconnectMock.mockResolvedValue({
+      profileId: "rt_solutions_send",
+      accountId: "profile-rt_solutions_send",
+      operationId: OPERATION_ID,
+      localCredentialDeletionRequired: true,
+    });
+    const response = await POST(request({
+      businessId: "rt_solutions", profileId: "rt_solutions_send",
+    }), {} as never);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      businessId: "rt_solutions", profileId: "rt_solutions_send",
+      disconnectScope: "local_profile_only", providerRevocationAttempted: false,
+    });
+    expect(beginDisconnectMock).toHaveBeenCalledExactlyOnceWith("uid-123", "rt_solutions_send");
+    expect(finishDisconnectMock).toHaveBeenCalledExactlyOnceWith(
+      "uid-123", "rt_solutions_send", "profile-rt_solutions_send", OPERATION_ID
+    );
+  });
+
+  it("rejects a mismatched business for RT sending before disconnecting", async () => {
+    const response = await POST(request({
+      businessId: "rosser_nft_gallery", profileId: "rt_solutions_send",
+    }), {} as never);
+    expect(response.status).toBe(400);
+    expect(beginDisconnectMock).not.toHaveBeenCalled();
+    expect(finishDisconnectMock).not.toHaveBeenCalled();
+  });
+
   it("rejects no-context and mismatched disconnect requests", async () => {
     const missing = await POST(request({}), {} as never);
     const mismatch = await POST(request({

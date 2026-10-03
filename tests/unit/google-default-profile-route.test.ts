@@ -92,6 +92,24 @@ describe("Google default profile route", () => {
     expect(setGoogleDefaultProfileIdMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["rt_solutions", "rt_solutions_send"],
+    ["rosser_nft_gallery", "rosser_gallery_send"],
+  ])("rejects %s dedicated sending before changing the default", async (businessId, profileId) => {
+    const response = await POST(request({ businessId, profileId }), {} as never);
+    expect(response.status).toBe(400);
+    expect(setGoogleDefaultProfileIdMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves ordinary RT work default selection", async () => {
+    setGoogleDefaultProfileIdMock.mockResolvedValue("rt_solutions_work");
+    const response = await POST(request({
+      businessId: "rt_solutions", profileId: "rt_solutions_work",
+    }), {} as never);
+    expect(response.status).toBe(200);
+    expect(setGoogleDefaultProfileIdMock).toHaveBeenCalledExactlyOnceWith("uid-123", "rt_solutions_work");
+  });
+
   it("fails closed when the selected profile is unmapped or changing", async () => {
     setGoogleDefaultProfileIdMock.mockRejectedValue(
       new Error("Google account profile needs to be reconnected")

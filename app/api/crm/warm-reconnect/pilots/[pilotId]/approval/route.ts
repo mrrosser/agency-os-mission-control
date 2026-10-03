@@ -31,7 +31,7 @@ const bodySchema = z.discriminatedUnion("decision", [
           suppressionLedgerVerified: z.literal(true),
           spfDkimDmarcVerified: z.literal(true),
           replyToMonitored: z.literal(true),
-          artworkApprovedForEmail: z.literal(true),
+          artworkApprovedForEmail: z.literal(true).optional(),
           exactAudienceReviewed: z.literal(true),
         })
         .strict(),

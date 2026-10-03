@@ -128,9 +128,40 @@ describe("warm reconnect approved Google account binding", () => {
     if (kind === "work-profile") changed.sender.profileId = "rosser_gallery_work" as never;
     else changed.sender.fromEmail = "personal@example.com";
     await expect(resolveWarmReconnectGmailAccessToken({ uid: "owner-1", pilot: changed }))
-      .rejects.toThrow(/dedicated Gallery sending account/);
+      .rejects.toThrow(/dedicated sending account/);
     expect(resolveGoogleAccountTokensMock).not.toHaveBeenCalled();
     expect(getAccessTokenForUserMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["work-profile", "wrong-from", "wrong-business"])("blocks RT %s before reading or refreshing credentials", async (kind) => {
+    const changed = pilot();
+    changed.sender.businessId = "rt_solutions";
+    changed.sender.profileId = "rt_solutions_send";
+    changed.sender.fromEmail = "mrosser@rt.solutions";
+    if (kind === "work-profile") changed.sender.profileId = "rt_solutions_work" as never;
+    if (kind === "wrong-from") changed.sender.fromEmail = "personal@example.com";
+    if (kind === "wrong-business") changed.sender.businessId = "rosser_nft_gallery";
+    await expect(resolveWarmReconnectGmailAccessToken({ uid: "owner-1", pilot: changed }))
+      .rejects.toThrow(/dedicated sending account/);
+    expect(resolveGoogleAccountTokensMock).not.toHaveBeenCalled();
+    expect(getAccessTokenForUserMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves only the dedicated RT credential before and after refresh", async () => {
+    const rtPilot = pilot();
+    rtPilot.sender.businessId = "rt_solutions";
+    rtPilot.sender.profileId = "rt_solutions_send";
+    rtPilot.sender.fromEmail = "mrosser@rt.solutions";
+    const rtResolution = resolution("google-account-approved");
+    rtResolution.record.profileId = "rt_solutions_send";
+    rtResolution.record.tokens.accountEmail = "mrosser@rt.solutions";
+    resolveGoogleAccountTokensMock.mockResolvedValue(rtResolution);
+    getAccessTokenForUserMock.mockResolvedValue("rt-access-token");
+    await expect(resolveWarmReconnectGmailAccessToken({ uid: "owner-1", pilot: rtPilot }))
+      .resolves.toBe("rt-access-token");
+    expect(resolveGoogleAccountTokensMock).toHaveBeenCalledTimes(2);
+    expect(resolveGoogleAccountTokensMock).toHaveBeenNthCalledWith(1, "owner-1", "rt_solutions_send");
+    expect(resolveGoogleAccountTokensMock).toHaveBeenNthCalledWith(2, "owner-1", "rt_solutions_send");
   });
 
   it("returns access only when the opaque account binding remains exact", async () => {

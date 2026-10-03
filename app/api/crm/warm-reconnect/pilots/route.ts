@@ -19,14 +19,14 @@ const senderSchema = z
     replyTo: z.string().trim().email().max(254),
     physicalPostalAddress: humanText(300),
     businessId: z.enum(["rosser_nft_gallery", "rt_solutions"]),
-    profileId: z.enum(["rosser_gallery_send", "rt_solutions_work"]),
+    profileId: z.enum(["rosser_gallery_send", "rt_solutions_send"]),
   })
   .strict()
   .superRefine((sender, context) => {
     const expected =
       sender.businessId === "rosser_nft_gallery"
         ? "rosser_gallery_send"
-        : "rt_solutions_work";
+        : "rt_solutions_send";
     if (sender.profileId !== expected) {
       context.addIssue({
         code: "custom",
@@ -45,14 +45,25 @@ const bodySchema = z
       .tuple([identifier, identifier, identifier, identifier, identifier])
       .refine((values) => new Set(values).size === 5, "Candidate ids must be distinct"),
     sender: senderSchema,
+    contentMode: z.enum(["artwork_html", "plain_text"]).optional(),
     artworkEmailApproval: z
       .object({
         approvedForThisEmailCampaign: z.literal(true),
         evidenceNote: humanText(500),
       })
-      .strict(),
+      .strict().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((body, context) => {
+    const artworkMode = (body.contentMode ?? "artwork_html") === "artwork_html";
+    if (artworkMode ? !body.artworkEmailApproval : body.artworkEmailApproval !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["artworkEmailApproval"],
+        message: "Artwork mode requires artwork approval; plain text must omit it.",
+      });
+    }
+  });
 
 function noStore(response: NextResponse): NextResponse {
   response.headers.set("Cache-Control", "private, no-store, max-age=0");

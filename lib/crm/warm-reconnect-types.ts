@@ -2,7 +2,7 @@ import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-t
 
 export const WARM_RECONNECT_SCHEMA_VERSION = 1 as const;
 export const WARM_RECONNECT_CAMPAIGN_ID = "marcus-warm-reconnect" as const;
-export const WARM_RECONNECT_CAMPAIGN_VERSION = "2026-08-12.1" as const;
+export const WARM_RECONNECT_CAMPAIGN_VERSION = "2026-10-03.1" as const;
 
 export const WARM_RECONNECT_ACTIVATION_GATE_IDS = [
   "sender_legal_identity",
@@ -46,7 +46,7 @@ export interface WarmReconnectCampaignDraft {
   state: "review_only";
   owner: {
     senderName: "Marcus Rosser";
-    brands: readonly ["Marcus Rosser", "Rosser Gallery", "RT.Solutions"];
+    brands: readonly ["Rosser Gallery", "RT.Solutions"];
   };
   intent: "warm_reconnect_preferences_invitation";
   source: {
@@ -76,15 +76,15 @@ export interface WarmReconnectCampaignDraft {
   copy: {
     subject: "A quick hello from Marcus";
     alternateSubject: "Would you like to stay in touch?";
-    preheader: "A personal note, and an easy way to choose what you’d like to hear about.";
+    preheader: "Choose updates from Rosser Gallery, RT.Solutions, or both.";
     greeting: "Hi {{first_name | there}},";
-    paragraphs: readonly [string, string];
+    paragraphs: readonly [string, string, string];
     postCtaParagraphs: readonly [string, string];
     signature: readonly ["Marcus Rosser", "New Orleans, Louisiana"];
     plainText: string;
   };
   primaryCta: {
-    label: "Choose what you’d like to hear about";
+    label: "Choose your updates";
     purpose: "preferences_and_unsubscribe";
     state: "missing";
     enabled: false;

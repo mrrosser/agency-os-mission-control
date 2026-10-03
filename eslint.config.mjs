@@ -2,6 +2,7 @@ import { FlatCompat } from "@eslint/eslintrc";
 import { defineConfig, globalIgnores } from "eslint/config";
 import path from "path";
 import { fileURLToPath } from "url";
+import { assertDefaultNextRootDirectory } from "./scripts/eslint-next-root-boundary.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,7 +10,7 @@ const __dirname = path.dirname(__filename);
 // eslint-config-next is still "extends"-based; adapt it for ESLint flat config.
 const compat = new FlatCompat({ baseDirectory: __dirname });
 
-export default defineConfig([
+const config = defineConfig([
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   // Keep build artifacts out of lint scope (and preserve Next's defaults).
   globalIgnores([
@@ -40,3 +41,5 @@ export default defineConfig([
     },
   },
 ]);
+
+export default assertDefaultNextRootDirectory(config);

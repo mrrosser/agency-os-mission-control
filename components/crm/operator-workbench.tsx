@@ -4,6 +4,7 @@ import { AfroGlyph, type AfroGlyphVariant } from "@/components/branding/AfroGlyp
 import { CRM_WORKSPACES, nextCrmWorkspace, type CrmWorkspace } from "@/lib/crm/workbench";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 import type { RefObject } from "react";
+import Link from "next/link";
 
 const WORKSPACE_LABELS: Record<CrmWorkspace, { label: string; glyph: AfroGlyphVariant }> = {
   people: { label: "People", glyph: "people" },
@@ -44,6 +45,7 @@ export function OperatorWorkbench({ active, onChange, onAdd, registry, loading, 
           <p className="crm-eyebrow">Rosser Gallery · RT Solutions</p>
           <h1>Your next conversation.</h1>
           <p className="crm-intro-copy">Keep your people close. Make the next step easy.</p>
+          <Link href="/dashboard/crm/test-email" className="mt-4 inline-flex min-h-11 items-center rounded-lg border border-amber-200/50 bg-amber-200/10 px-4 py-2 text-sm font-semibold text-amber-100">Test one email</Link>
         </div>
         <a href="/dashboard/integrations" className="crm-settings-link">Connections &amp; settings ↗</a>
       </div>

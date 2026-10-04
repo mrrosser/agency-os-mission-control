@@ -677,6 +677,7 @@ export default function CRMPage() {
       </div>
 
       <div id="crm-panel-outreach" role="tabpanel" aria-labelledby="crm-tab-outreach" hidden={workspace !== "outreach"} className="crm-panel">
+      <WarmReconnectOwnerTest />
       <details className="crm-registry-detail">
       <summary>Imported registry and permission evidence</summary>
       <PortfolioRegistrySummary
@@ -693,7 +694,6 @@ export default function CRMPage() {
       />
 
       <WarmReconnectActivation campaign={warmReconnectCampaign} />
-      <WarmReconnectOwnerTest />
       </div>
 
       <div id="crm-panel-share" role="tabpanel" aria-labelledby="crm-tab-share" hidden={workspace !== "share"} className="crm-panel">

@@ -34,7 +34,7 @@ async function persistUser(page: Page, uid: string) {
   }, { key: `firebase:authUser:${API_KEY}:[DEFAULT]`, user });
 }
 
-async function fixture(page: Page, baseURL: string, outcome: "sent" | "delivery_unknown" | "network_error" = "sent", holdPrepare = false) {
+async function fixture(page: Page, baseURL: string, outcome: "sent" | "delivery_unknown" | "network_error" = "sent", holdPrepare = false, target = "/dashboard/crm", fillInbox = true) {
   const origin = new URL(baseURL).origin;
   expect(["localhost", "127.0.0.1"]).toContain(new URL(origin).hostname);
   const calls: { method: string; path: string; body: Record<string, unknown> | null; uid: string | null }[] = [];
@@ -66,21 +66,48 @@ async function fixture(page: Page, baseURL: string, outcome: "sent" | "delivery_
   await page.context().routeWebSocket("**", socket => socket.close());
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await persistUser(page, "qa-owner-a");
-  await page.goto("/dashboard/crm", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Your next conversation.", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.goto(target, { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: target.endsWith("/test-email") ? "Test your outreach email" : "Your next conversation.", exact: true })).toBeVisible({ timeout: 20_000 });
   const tour = page.getByTestId("first-scan-tour");
   if (await tour.isVisible().catch(() => false)) await tour.getByTitle("Dismiss").click();
-  await page.getByRole("tab", { name: "Outreach", exact: true }).click();
+  if (!target.endsWith("/test-email")) await page.getByRole("tab", { name: "Outreach", exact: true }).click();
   const panel = page.getByTestId("warm-reconnect-owner-test");
   await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeDisabled();
-  await panel.getByLabel("Approved test inbox").fill(review.recipient);
-  await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeEnabled();
+  if (fillInbox) {
+    await panel.getByLabel("Approved test inbox").fill(review.recipient);
+    await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeEnabled();
+  }
   return { calls, panel, release: () => release?.() };
 }
 
 test.describe("owner-only test panel with local synthetic authentication", () => {
   test.setTimeout(60_000);
   test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), "Synthetic authentication must never run against a deployed service.");
+
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct private test is visible without campaign setup at ${viewport.width}px`, async ({ page, baseURL }) => {
+    await page.setViewportSize(viewport);
+    const { calls, panel } = await fixture(page, baseURL!, "sent", false, "/dashboard/crm/test-email", false);
+    await expect(panel.getByLabel("Approved test inbox")).toBeInViewport();
+    await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Prepare exact five-person review" })).toHaveCount(0);
+    expect(calls).toEqual([]);
+    const width = await page.evaluate(() => ({ content: document.documentElement.scrollWidth, viewport: innerWidth }));
+    expect(width.content).toBeLessThanOrEqual(width.viewport + 1);
+    await panel.getByLabel("Approved test inbox").fill(review.recipient);
+    await panel.getByRole("button", { name: "Prepare private test" }).click();
+    await expect(panel.getByRole("button", { name: "Send one test" })).toBeDisabled();
+    expect(calls.filter(call => call.path.endsWith("/send"))).toHaveLength(0);
+  });
+
+  test("CRM offers a direct test link and places the private panel before the campaign", async ({ page, baseURL }) => {
+    const { calls, panel } = await fixture(page, baseURL!);
+    await expect(page.getByRole("link", { name: "Test one email", exact: true })).toHaveAttribute("href", "/dashboard/crm/test-email");
+    expect(await page.locator("#crm-panel-outreach > :first-child").getAttribute("data-testid")).toBe("warm-reconnect-owner-test");
+    await page.getByRole("link", { name: "Test one email", exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard\/crm\/test-email$/);
+    await expect(panel.getByLabel("Approved test inbox")).toBeVisible();
+    expect(calls).toEqual([]);
+  });
 
   test("requires review and explicit send, then reads back test-only choices", async ({ page, baseURL }) => {
     const { calls, panel } = await fixture(page, baseURL!);

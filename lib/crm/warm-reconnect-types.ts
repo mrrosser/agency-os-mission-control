@@ -2,7 +2,7 @@ import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-t
 
 export const WARM_RECONNECT_SCHEMA_VERSION = 1 as const;
 export const WARM_RECONNECT_CAMPAIGN_ID = "marcus-warm-reconnect" as const;
-export const WARM_RECONNECT_CAMPAIGN_VERSION = "2026-10-03.1" as const;
+export const WARM_RECONNECT_CAMPAIGN_VERSION = "2026-10-04.1" as const;
 
 export const WARM_RECONNECT_ACTIVATION_GATE_IDS = [
   "sender_legal_identity",

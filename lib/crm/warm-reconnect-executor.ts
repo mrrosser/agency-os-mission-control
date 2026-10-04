@@ -698,7 +698,7 @@ function assertFrozenLaunchPilot(
   }
   const gateIds = new Set(pilot.gates.map((gate) => gate.id));
   const expectedGateIds = new Set([...EXPECTED_GATE_IDS].filter((id) =>
-    resolveWarmReconnectContentMode(pilot.contentMode) !== "plain_text" ||
+    resolveWarmReconnectContentMode(pilot.contentMode) === "artwork_html" ||
     id !== "artwork_email_channel_approval"
   ));
   if (

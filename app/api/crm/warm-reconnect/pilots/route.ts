@@ -45,7 +45,7 @@ const bodySchema = z
       .tuple([identifier, identifier, identifier, identifier, identifier])
       .refine((values) => new Set(values).size === 5, "Candidate ids must be distinct"),
     sender: senderSchema,
-    contentMode: z.enum(["artwork_html", "plain_text"]).optional(),
+    contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons"]).optional(),
     artworkEmailApproval: z
       .object({
         approvedForThisEmailCampaign: z.literal(true),
@@ -60,7 +60,7 @@ const bodySchema = z
       context.addIssue({
         code: "custom",
         path: ["artworkEmailApproval"],
-        message: "Artwork mode requires artwork approval; plain text must omit it.",
+        message: "Artwork mode requires artwork approval; formats without artwork must omit it.",
       });
     }
   });

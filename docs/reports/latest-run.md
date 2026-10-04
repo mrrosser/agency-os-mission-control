@@ -1,5 +1,12 @@
 # Latest Verification Run
 
+## 2026-10-04 Preference buttons and isolated owner test (local candidate)
+
+- Three explicit Gallery / RT.Solutions / Both choices, first-name greetings, multipart text fallback, accepted postal footer and both websites. URL fetch/load never grants consent; explicit confirmation is required.
+- Fixed-recipient owner QA uses existing owner auth and Gallery sender, isolated QA storage and a durable one-attempt send claim. The CRM Outreach panel provides exact review, explicit send and receipt readback. No production contact or newsletter writes.
+- Final privacy-corrected source: 47 focused QA tests / three files, production build, TypeScript, scoped backend/panel lint and 12/12 offline Chromium cases passed; logs use `crm-owner-qa-privacy-*`. Earlier 1,685-test suite, 33-case QA run and 12-case panel run are pre-privacy supporting evidence only. Earlier full lint has zero errors / two existing warnings; unchanged audit zero high/critical / 16 moderate. All 35 changed files and 196 built public JS chunks passed the personal-address scan. Final patch checks are recorded in the external manifest. Independent review has no blocking source finding.
+- Local only: no deployment, QA capability issuance or email send. Single owner test already authorized; new release scope awaits parent review, and this tool session lacks a usable existing owner session. Five-person campaign still unapproved; domain/automatic-execution readiness unresolved. Details: `docs/reports/2026-10-04-preference-buttons-owner-test.md`.
+
 ## 2026-10-04 Google connection recovery (local candidate)
 
 - Restores Firebase Hosting-compatible browser binding without changing OAuth scopes, account pins or campaign gates; adds bounded CRM waits, explicit recovery and owner-bound callback feedback.

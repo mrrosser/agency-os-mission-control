@@ -52,6 +52,43 @@ const oneClickUrl =
   `https://leadflow-review.web.app/api/crm/warm-reconnect/unsubscribe/${unsubscribeOnlyToken}`;
 
 describe("warm reconnect email renderer", () => {
+  it("keeps owner QA capabilities separate from normal campaign capabilities", () => {
+    const campaign = buildWarmReconnectCampaignDraft(summary);
+    const input = { campaign, firstName: "Marcus", senderName: "Marcus Rosser", legalEntity: "Marcus Rosser / Rosser Gallery",
+      physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117", publicOrigin: "https://leadflow-review.web.app",
+      contentMode: "preference_buttons" as const, preferencesUrl: `${preferencesUrl}&mode=qa`,
+      unsubscribeUrl: oneClickUrl.replace("/unsubscribe/", "/qa/unsubscribe/") };
+    const qa = renderWarmReconnectEmail({ ...input, purpose: "owner_qa" });
+    expect(qa.html).toContain("&amp;mode=qa&amp;choice=both");
+    expect(qa.html).not.toContain("/qa/unsubscribe/");
+    expect(() => renderWarmReconnectEmail(input)).toThrow("Invalid preferences URL");
+    expect(() => renderWarmReconnectEmail({ ...input, purpose: "owner_qa", preferencesUrl })).toThrow("Invalid preferences URL");
+    expect(() => renderWarmReconnectEmail({ ...input, purpose: "owner_qa", unsubscribeUrl: oneClickUrl })).toThrow("Invalid unsubscribe URL");
+  });
+  it("renders three private choice buttons without artwork and retains the plain-text fallback", () => {
+    const campaign = buildWarmReconnectCampaignDraft(summary);
+    const rendered = renderWarmReconnectEmail({
+      campaign: { ...campaign, artwork: undefined } as never,
+      contentMode: "preference_buttons", firstName: "Cody", senderName: "Marcus Rosser",
+      legalEntity: "Marcus Rosser / Rosser Gallery", physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
+      preferencesUrl, unsubscribeUrl: oneClickUrl, publicOrigin: "https://leadflow-review.web.app",
+    });
+    expect(rendered.artworkUrl).toBe("");
+    expect(rendered.html).not.toMatch(/<img|<form|<script|<iframe/i);
+    expect(rendered.plainText).toContain("Hi Cody,");
+    for (const choice of ["rosser_gallery", "rt_solutions", "both"]) {
+      expect(rendered.html).toContain(`${preferencesUrl}&amp;choice=${choice}`);
+      expect(rendered.plainText).toContain(`${preferencesUrl}&choice=${choice}`);
+    }
+    expect(rendered.html).toContain("confirm your choice on the next page");
+    expect(rendered.html).toContain("2505 N Tonti St");
+    expect(rendered.html).toContain('href="https://rossergallery.com"');
+    expect(rendered.html).toContain('href="https://rt.solutions"');
+    expect(rendered.html).not.toContain(oneClickUrl);
+    expect(rendered.plainText).not.toContain(oneClickUrl);
+    expect(rendered.html).toContain(`href="${preferencesUrl}" style="color:inherit">Unsubscribe from all messages`);
+  });
+
   it("renders explicit plain text without reading artwork while preserving the real footer and preferences", () => {
     const campaign = buildWarmReconnectCampaignDraft(summary);
     const base = {

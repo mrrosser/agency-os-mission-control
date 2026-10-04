@@ -1,13 +1,12 @@
 import { createHash } from "crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const {
   transactionGetMock,
   transactionDeleteMock,
   transactionUpdateMock,
   attemptRecord,
-  runTransactionMock,
   getAdminDbMock,
   getTokenMock,
   getTokenInfoMock,
@@ -65,6 +64,11 @@ vi.mock("@/lib/google/oauth", async () => {
 
 import { GET } from "@/app/api/google/callback/route";
 import { GoogleAccountProfileReplacementRequiresDisconnectError } from "@/lib/google/account-token-store";
+import {
+  createGoogleOAuthBrowserBinding,
+  googleOAuthAttemptDocumentId,
+  setGoogleOAuthBrowserCookie,
+} from "@/lib/google/oauth-state";
 
 const STATE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const VERIFIER = "v".repeat(43);
@@ -134,9 +138,42 @@ function mockRtSendingState(overrides: Record<string, unknown> = {}) {
   );
 }
 
+function currentBrowserBinding(state = STATE, existingCookie = "") {
+  const binding = createGoogleOAuthBrowserBinding(callbackRequest("", existingCookie), state);
+  const response = NextResponse.json({ ok: true });
+  setGoogleOAuthBrowserCookie(response, binding.browserSecret);
+  const cookie = response.cookies.get("__session")!;
+  return { ...binding, cookie: `${cookie.name}=${cookie.value}` };
+}
+
+function mockStoredAttempts(entries: Array<{ state: string; data: ReturnType<typeof stateData> }>) {
+  const states = new Map(entries.map(({ state, data }) => [state, data]));
+  const attempts = new Map<string, Record<string, unknown>>();
+  for (const { state, data } of entries) {
+    attempts.set(data.attemptDocumentId, {
+      uid: data.uid, businessId: data.businessId, profileId: data.profileId,
+      latestState: state, status: "pending",
+    });
+  }
+  transactionGetMock.mockImplementation(async (reference: { collection: string; id: string }) => {
+    const value = reference.collection === "google_oauth_state"
+      ? states.get(reference.id) : attempts.get(reference.id);
+    return { exists: value !== undefined, data: () => value };
+  });
+  transactionUpdateMock.mockImplementation((reference: { id: string }, update: Record<string, unknown>) => {
+    Object.assign(attempts.get(reference.id)!, update);
+  });
+  transactionDeleteMock.mockImplementation((reference: { collection: string; id: string }) => {
+    if (reference.collection === "google_oauth_state") states.delete(reference.id);
+    else attempts.delete(reference.id);
+  });
+  return { states, attempts };
+}
+
 describe("google callback route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    transactionDeleteMock.mockReset();
     attemptRecord.current = {};
     process.env.MISSION_CONTROL_PUBLIC_ORIGIN = "https://leadflow-review.web.app";
     transactionGetMock.mockImplementation(async (reference: { collection: string }) =>
@@ -459,5 +496,162 @@ describe("google callback route", () => {
     );
     expect(getTokenMock).not.toHaveBeenCalled();
     expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+  });
+
+  it("finishes an older legacy attempt without overwriting a newer profile's browser anchor", async () => {
+    const current = currentBrowserBinding("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    const response = await GET(callbackRequest(`code=legacy-code&state=${STATE}`, `${current.cookie}; ${COOKIE_NAME}=${VERIFIER}`), {} as never);
+    expect(response.headers.get("location")).toContain("google=connected");
+    expect(getTokenMock).toHaveBeenCalledExactlyOnceWith({ code: "legacy-code", codeVerifier: VERIFIER });
+    expect(storeGoogleProfileTokensMock).toHaveBeenCalledTimes(1);
+    expect(response.cookies.get("__session")).toBeUndefined();
+  });
+
+  it.each(["scoped-first", "root-first"])(
+    "exchanges the current browser-bound verifier alongside a framework cookie (%s)", async (order) => {
+      const binding = currentBrowserBinding();
+      const cookies = [binding.cookie, "__session=synthetic.firebase.jwt"];
+      if (order === "root-first") cookies.reverse();
+      mockStoredAttempts([{ state: STATE, data: stateData({ codeChallenge: binding.challenge }) }]);
+
+      const response = await GET(callbackRequest(`code=current-code&state=${STATE}`, cookies.join("; ")), {} as never);
+
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toContain("google=connected");
+      expect(getTokenMock).toHaveBeenCalledExactlyOnceWith({ code: "current-code", codeVerifier: binding.verifier });
+      expect(storeGoogleProfileTokensMock).toHaveBeenCalledTimes(1);
+      expect(response.cookies.get("__session")).toBeUndefined();
+      expect(response.headers.get("location")).not.toContain(binding.browserSecret);
+      expect(response.headers.get("location")).not.toContain(binding.verifier);
+    }
+  );
+
+  it.each(["missing", "wrong-browser", "wrong-state", "malformed", "duplicate", "oversized"])(
+    "rejects a %s current binding before exchange or consuming state", async (kind) => {
+      const binding = currentBrowserBinding();
+      const other = currentBrowserBinding("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+      let cookie = binding.cookie;
+      if (kind === "missing") cookie = "__session=synthetic.firebase.jwt";
+      if (kind === "wrong-browser") cookie = other.cookie;
+      if (kind === "malformed") cookie = "__session=mc-google-oauth-v1.short";
+      if (kind === "duplicate") cookie += `; ${binding.cookie}`;
+      if (kind === "oversized") cookie += `; extra=${"x".repeat(16_384)}`;
+      const wrongStateBinding = currentBrowserBinding("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", binding.cookie);
+      mockStoredAttempts([{ state: STATE, data: stateData({
+        codeChallenge: kind === "wrong-state" ? wrongStateBinding.challenge : binding.challenge,
+      }) }]);
+
+      const response = await GET(callbackRequest(`code=current-code&state=${STATE}`, cookie), {} as never);
+
+      expect(response.headers.get("location")).toContain("googleError=connection_session_invalid");
+      expect(getTokenMock).not.toHaveBeenCalled();
+      expect(storeGoogleProfileTokensMock).not.toHaveBeenCalled();
+      expect(transactionDeleteMock).not.toHaveBeenCalled();
+      expect(transactionUpdateMock).not.toHaveBeenCalled();
+      expect(response.cookies.get("__session")).toBeUndefined();
+    }
+  );
+
+  it.each(["expired", "stale-created", "missing-state"])(
+    "does not let a retained browser cookie revive %s server state", async (kind) => {
+      const binding = currentBrowserBinding();
+      const overrides: Record<string, unknown> = { codeChallenge: binding.challenge };
+      if (kind === "expired") overrides.expiresAt = new Date(Date.now() - 1_000);
+      if (kind === "stale-created") {
+        overrides.createdAt = new Date(Date.now() - 11 * 60_000);
+        overrides.expiresAt = new Date(Date.now() + 60_000);
+      }
+      mockStoredAttempts(kind === "missing-state" ? [] : [{ state: STATE, data: stateData(overrides) }]);
+
+      const response = await GET(callbackRequest(`code=current-code&state=${STATE}`, binding.cookie), {} as never);
+
+      expect(response.headers.get("location")).toContain("googleError=connection_session_invalid");
+      expect(getTokenMock).not.toHaveBeenCalled();
+      expect(transactionDeleteMock).not.toHaveBeenCalled();
+      expect(response.cookies.get("__session")).toBeUndefined();
+    }
+  );
+
+  it("rejects a superseded callback without disrupting its replacement, then rejects replay", async () => {
+    const newerState = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const older = currentBrowserBinding();
+    const newer = currentBrowserBinding(newerState, older.cookie);
+    const stored = mockStoredAttempts([
+      { state: STATE, data: stateData({ codeChallenge: older.challenge }) },
+      { state: newerState, data: stateData({ codeChallenge: newer.challenge }) },
+    ]);
+
+    const rejected = await GET(callbackRequest(`code=older-code&state=${STATE}`, newer.cookie), {} as never);
+    expect(rejected.headers.get("location")).toContain("googleError=connection_superseded");
+    expect(rejected.cookies.get("__session")).toBeUndefined();
+    expect(getTokenMock).not.toHaveBeenCalled();
+    expect(transactionDeleteMock).not.toHaveBeenCalled();
+    expect(stored.states.has(newerState)).toBe(true);
+
+    const accepted = await GET(callbackRequest(`code=newer-code&state=${newerState}`, newer.cookie), {} as never);
+    expect(accepted.headers.get("location")).toContain("google=connected");
+    expect(accepted.cookies.get("__session")).toBeUndefined();
+    const replay = await GET(callbackRequest(`code=newer-code&state=${newerState}`, newer.cookie), {} as never);
+    expect(replay.headers.get("location")).toContain("googleError=connection_session_invalid");
+    expect(getTokenMock).toHaveBeenCalledExactlyOnceWith({ code: "newer-code", codeVerifier: newer.verifier });
+    expect(storeGoogleProfileTokensMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports repeated sending-profile callbacks out of order without clearing their shared cookie", async () => {
+    const browser = currentBrowserBinding();
+    const states = [
+      [STATE, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+      ["cccccccc-cccc-4ccc-8ccc-cccccccccccc", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+    ];
+    const profiles = [
+      { businessId: "rt_solutions", profileId: "rt_solutions_send", email: "mrosser@rt.solutions" },
+      { businessId: "rosser_nft_gallery", profileId: "rosser_gallery_send", email: "mrosser@rossergallery.com" },
+    ];
+    for (const round of states) {
+      const bindings = round.map((state) => currentBrowserBinding(state, browser.cookie));
+      mockStoredAttempts(round.map((state, index) => ({
+        state,
+        data: stateData({
+          businessId: profiles[index].businessId, profileId: profiles[index].profileId,
+          attemptDocumentId: googleOAuthAttemptDocumentId("uid-123", profiles[index].profileId),
+          codeChallenge: bindings[index].challenge,
+        }),
+      })));
+      for (const index of [1, 0]) {
+        fetchGoogleAccountIdentityMock.mockResolvedValueOnce({ email: profiles[index].email, subject: `subject-${index}` });
+        const response = await GET(callbackRequest(`code=code-${round[index]}&state=${round[index]}`, browser.cookie), {} as never);
+        expect(response.headers.get("location")).toContain("google=connected");
+        expect(response.headers.get("location")).toContain(`googleProfile=${profiles[index].profileId}`);
+        expect(response.cookies.get("__session")).toBeUndefined();
+        expect(getTokenMock).toHaveBeenLastCalledWith({ code: `code-${round[index]}`, codeVerifier: bindings[index].verifier });
+        expect(bindings[index].browserSecret).toBe(browser.browserSecret);
+      }
+    }
+    expect(getTokenMock).toHaveBeenCalledTimes(4);
+    expect(storeGoogleProfileTokensMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("never exchanges the losing first-bootstrap callback and accepts the surviving profile", async () => {
+    const otherState = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const first = currentBrowserBinding();
+    const second = currentBrowserBinding(otherState);
+    const otherProfile = "rosser_gallery_work";
+    mockStoredAttempts([
+      { state: STATE, data: stateData({ codeChallenge: first.challenge }) },
+      { state: otherState, data: stateData({
+        businessId: "rosser_nft_gallery", profileId: otherProfile,
+        attemptDocumentId: googleOAuthAttemptDocumentId("uid-123", otherProfile),
+        codeChallenge: second.challenge,
+      }) },
+    ]);
+    const rejected = await GET(callbackRequest(`code=losing-code&state=${STATE}`, second.cookie), {} as never);
+    expect(rejected.headers.get("location")).toContain("googleError=connection_session_invalid");
+    expect(getTokenMock).not.toHaveBeenCalled();
+    expect(transactionDeleteMock).not.toHaveBeenCalled();
+    expect(rejected.cookies.get("__session")).toBeUndefined();
+
+    const accepted = await GET(callbackRequest(`code=surviving-code&state=${otherState}`, second.cookie), {} as never);
+    expect(accepted.headers.get("location")).toContain("google=connected");
+    expect(getTokenMock).toHaveBeenCalledExactlyOnceWith({ code: "surviving-code", codeVerifier: second.verifier });
   });
 });

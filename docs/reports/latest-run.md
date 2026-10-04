@@ -1,5 +1,11 @@
 # Latest Verification Run
 
+## 2026-10-04 Google connection recovery (local candidate)
+
+- Restores Firebase Hosting-compatible browser binding without changing OAuth scopes, account pins or campaign gates; adds bounded CRM waits, explicit recovery and owner-bound callback feedback.
+- Full unit/smoke: 1,635 tests / 248 files passed; TypeScript and production build passed; lint zero errors / two existing warnings; unchanged dependency audit zero high/critical / sixteen moderate; exact staged-patch Gitleaks passed. Seven sender recovery plus five final callback/owner-switch browser cases passed. Evidence is recorded in `docs/reports/2026-10-04-google-connection-recovery.md`.
+- Local isolated repair only. No live OAuth, credential changes, subscriptions, sends, policy changes, push or deployment. Authentication transport publication requires review of this exact candidate. Prior release entries below remain historical.
+
 ## 2026-10-03 Calendar reviewed event creation
 
 - Isolated from production/main `fc4e827`. Calendar now selects an existing work profile and a concrete calendar, verifies Google identity/permissions, and saves an immutable review before owner approval and execution. Existing account defaults, scope grants, sender profiles and service credentials are preserved.

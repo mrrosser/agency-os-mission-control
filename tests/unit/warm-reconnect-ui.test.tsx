@@ -9,6 +9,11 @@ import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 
 const hookState = vi.hoisted(() => ({ values: null as unknown[] | null, index: 0 }));
+const authState = vi.hoisted(() => ({ user: null as { uid: string } | null }));
+
+vi.mock("@/components/providers/auth-provider", () => ({
+  useAuth: () => authState,
+}));
 
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof import("react")>();
@@ -44,6 +49,11 @@ function activationFixture(providerExecutionEnabled: unknown, approved = false) 
 function launchButton(html: string): string | undefined {
   return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)
     ?.find((button) => button.includes("Authorize exact five-email launch"));
+}
+
+function loadedActivation(providerExecutionEnabled: unknown, approved = false, error: string | null = null) {
+  authState.user = { uid: "synthetic-owner" };
+  hookState.values = [activationFixture(providerExecutionEnabled, approved), authState.user.uid, false, error];
 }
 
 const summary: PortfolioCrmRegistrySummary = {
@@ -89,6 +99,7 @@ describe("warm reconnect campaign UI", () => {
   beforeEach(() => {
     hookState.values = null;
     hookState.index = 0;
+    authState.user = null;
   });
 
   it("renders the copy, owned artwork, exact aggregates, and zero-authority boundary", () => {
@@ -174,7 +185,7 @@ describe("warm reconnect campaign UI", () => {
   });
 
   it.each([true, false])("renders the loaded provider setting without granting launch authority: %s", (enabled) => {
-    hookState.values = [activationFixture(enabled), false, null];
+    loadedActivation(enabled);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
 
     expect(html).toContain(enabled
@@ -191,7 +202,7 @@ describe("warm reconnect campaign UI", () => {
   });
 
   it.each([true, false])("preserves the approved pilot's launch control when provider status is %s", (enabled) => {
-    hookState.values = [activationFixture(enabled, true), false, null];
+    loadedActivation(enabled, true);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
 
     expect(launchButton(html)).toBeDefined();
@@ -199,7 +210,7 @@ describe("warm reconnect campaign UI", () => {
   });
 
   it.each([undefined, null, "true"])("shows unknown for an absent or malformed provider setting: %s", (enabled) => {
-    hookState.values = [activationFixture(enabled), false, null];
+    loadedActivation(enabled);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
 
     expect(html).toContain("Provider execution status is unknown until live controls load.");
@@ -209,7 +220,7 @@ describe("warm reconnect campaign UI", () => {
   });
 
   it("shows unknown after an error instead of reusing the prior disabled status", () => {
-    hookState.values = [activationFixture(false), false, "Activation controls unavailable"];
+    loadedActivation(false, false, "Activation controls unavailable");
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
 
     expect(html).toContain("Activation controls unavailable");
@@ -218,19 +229,34 @@ describe("warm reconnect campaign UI", () => {
     expect(html).not.toContain("provider currently disabled");
   });
 
+  it("withholds a previously loaded owner's controls immediately after a user change", () => {
+    loadedActivation(true, true);
+    authState.user = { uid: "different-synthetic-owner" };
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+
+    expect(html).toContain("Provider execution status is unknown until live controls load.");
+    expect(html).toContain("No pilot exists. Approval and launch have zero authority.");
+    expect(launchButton(html)).toBeUndefined();
+    expect(html).not.toContain("fixture-pilot");
+  });
+
   it("keeps Google consent and pilot mutations on exact bounded routes", () => {
     const source = readFileSync(
       join(process.cwd(), "components", "crm", "warm-reconnect-activation.tsx"),
       "utf8"
     );
+    const connectionClient = readFileSync(
+      join(process.cwd(), "components", "crm", "google-sender-connection-client.ts"),
+      "utf8"
+    );
 
     expect(source).toContain('const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation"');
-    expect(source).toContain('scopePreset: "gmail_send"');
-    expect(source).toContain('returnTo: "/dashboard/crm"');
+    expect(connectionClient).toContain('scopePreset: "gmail_send"');
+    expect(connectionClient).toContain('returnTo: "/dashboard/crm"');
     expect(source).not.toContain(
       "profileId: profile.profileId,\n          idempotencyKey,"
     );
-    expect(source).toContain('authUrl.hostname !== "accounts.google.com"');
+    expect(connectionClient).toContain('authUrl.hostname !== "accounts.google.com"');
     expect(source).toContain("availableActions.canApprove");
     expect(source).toContain("availableActions.canLaunch");
     expect(source).toContain("acknowledgeLaunchAuthorizesExactFiveEmailSend: true");

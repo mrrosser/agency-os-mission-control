@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
 import { AlertTriangle, Calendar, CircleCheck } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -190,6 +190,7 @@ const DAILY_OUTCOME_STATUS_COLORS: Record<DailyOutcomeStatus, string> = {
 export default function CRMPage() {
   const { user } = useAuth();
   const [workspace, setWorkspace] = useState<CrmWorkspace>("people");
+  const showOAuthOutreach = useCallback(() => setWorkspace("outreach"), []);
   const [peopleQuery, setPeopleQuery] = useState("");
   const [brandFilter, setBrandFilter] = useState<CrmBrandFilter>("all");
   const addContactButtonRef = useRef<HTMLButtonElement>(null);
@@ -664,7 +665,7 @@ export default function CRMPage() {
       </div>
 
       <div className="mb-8 empty:hidden">
-        <GoogleOAuthCallbackFeedback />
+      <GoogleOAuthCallbackFeedback onResult={showOAuthOutreach} />
       </div>
 
       <div id="crm-panel-assistant" role="tabpanel" aria-labelledby="crm-tab-assistant" hidden={workspace !== "assistant"} className="crm-panel">

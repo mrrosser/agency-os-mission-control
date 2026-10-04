@@ -13,13 +13,13 @@ import {
 } from "@/lib/google/business-profiles";
 import { getGoogleAuthUrl, resolveMissionControlOrigin } from "@/lib/google/oauth";
 import {
-  createGoogleOAuthPkceBinding,
+  createGoogleOAuthBrowserBinding,
   GOOGLE_OAUTH_ATTEMPT_COLLECTION,
   GOOGLE_OAUTH_STATE_COLLECTION,
   GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS,
   googleOAuthAttemptDocumentId,
   isGoogleOAuthStateIdentifier,
-  setGoogleOAuthPkceCookie,
+  setGoogleOAuthBrowserCookie,
 } from "@/lib/google/oauth-state";
 
 const contextIdSchema = z.string().trim().min(1).max(64);
@@ -116,7 +116,12 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
   }
 
   const state = randomUUID();
-  const pkce = createGoogleOAuthPkceBinding();
+  let pkce: ReturnType<typeof createGoogleOAuthBrowserBinding>;
+  try {
+    pkce = createGoogleOAuthBrowserBinding(request, state);
+  } catch {
+    throw new ApiError(400, "The Google browser connection is ambiguous. Close other connection tabs and clear this site's cookies before retrying.");
+  }
   const expiresAt = Timestamp.fromMillis(
     Date.now() + GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS * 1000
   );
@@ -189,7 +194,7 @@ export const POST = withApiHandler(async ({ request, correlationId: requestCorre
     businessId: profileContext.businessId,
     profileId: profileContext.profileId,
   });
-  setGoogleOAuthPkceCookie(response, state, pkce.verifier);
+  setGoogleOAuthBrowserCookie(response, pkce.browserSecret);
   response.headers.set("cache-control", "private, no-store, max-age=0");
   response.headers.set("pragma", "no-cache");
   response.headers.set("referrer-policy", "no-referrer");

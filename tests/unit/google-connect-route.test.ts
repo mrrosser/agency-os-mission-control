@@ -136,8 +136,10 @@ describe("google connect route", () => {
       codeChallenge: stateData.codeChallenge,
     });
     expect(response.headers.get("set-cookie")).toMatch(
-      /__Host-mc-google-oauth-[0-9a-f]+=[A-Za-z0-9_-]{43}/i
+      /__session=mc-google-oauth-v1\.[A-Za-z0-9_-]{43}/i
     );
+    expect(response.headers.get("set-cookie")).toContain("Path=/api/google");
+    expect(response.headers.get("set-cookie")).not.toContain("Domain=");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
     expect(response.headers.get("set-cookie")).toContain("Secure");
     expect(response.headers.get("set-cookie")).toContain("SameSite=lax");

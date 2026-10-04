@@ -36,7 +36,7 @@ describe("GoogleWorkspaceSettingsNotice", () => {
       "utf8"
     );
 
-    expect(crmSource).toContain("<GoogleOAuthCallbackFeedback />");
+    expect(crmSource).toContain("<GoogleOAuthCallbackFeedback onResult={showOAuthOutreach} />");
     expect(integrationsSource).toContain("<GoogleOAuthCallbackFeedback />");
   });
 });

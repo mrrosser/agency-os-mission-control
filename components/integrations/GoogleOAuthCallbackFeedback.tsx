@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@/components/providers/auth-provider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,25 +14,42 @@ import {
 
 interface GoogleOAuthCallbackFeedbackProps {
   display?: boolean;
+  onResult?: () => void;
 }
 
-export function GoogleOAuthCallbackFeedback({
+export function GoogleOAuthCallbackFeedback(props: GoogleOAuthCallbackFeedbackProps) {
+  const { user } = useAuth();
+  // Wait for the authenticated owner before consuming callback metadata. A new
+  // owner gets a new result instance, so retained success cannot cross sessions.
+  return user ? <OwnerGoogleOAuthCallbackFeedback key={user.uid} {...props} /> : null;
+}
+
+function OwnerGoogleOAuthCallbackFeedback({
   display = true,
+  onResult,
 }: GoogleOAuthCallbackFeedbackProps) {
   const searchParams = useSearchParams();
-  const feedback = useMemo(
-    () => getGoogleOAuthCallbackFeedback(searchParams),
-    [searchParams]
-  );
+  // Retain the safe result while removing callback metadata from the address bar.
+  // Next's search-params snapshot can lag a replaceState. A new owner's mount
+  // must read the actual address bar, never revive already-consumed metadata.
+  const [feedback, setFeedback] = useState(() => getGoogleOAuthCallbackFeedback(
+    typeof window === "undefined" ? searchParams : new URLSearchParams(window.location.search)
+  ));
 
   useEffect(() => {
-    if (!hasGoogleOAuthCallbackParams(searchParams)) return;
+    const currentUrl = new URL(window.location.href);
+    if (!hasGoogleOAuthCallbackParams(currentUrl.searchParams)) return;
+    const currentFeedback = getGoogleOAuthCallbackFeedback(currentUrl.searchParams);
+    if (currentFeedback) {
+      setFeedback(currentFeedback);
+      onResult?.();
+    }
     window.history.replaceState(
       window.history.state,
       "",
-      buildGoogleOAuthCleanUrl(new URL(window.location.href))
+      buildGoogleOAuthCleanUrl(currentUrl)
     );
-  }, [searchParams]);
+  }, [onResult, searchParams]);
 
   if (!display || !feedback) return null;
 

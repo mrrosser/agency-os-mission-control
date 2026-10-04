@@ -36,6 +36,12 @@ import type {
 } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
 import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL, RT_SOLUTIONS_SENDING_EMAIL } from "@/lib/google/business-profiles";
+import {
+  assertGoogleConnectionActive,
+  GoogleConnectionCancelledError,
+  requestGoogleSenderConnection,
+  withGoogleConnectionDeadline,
+} from "./google-sender-connection-client";
 
 const ACTIVATION_ROUTE = "/api/crm/warm-reconnect/activation";
 
@@ -131,7 +137,9 @@ function selectedTuple(selected: string[]): [string, string, string, string, str
 
 export function WarmReconnectActivation({ campaign }: Props) {
   const { user } = useAuth();
-  const [activation, setActivation] = useState<WarmReconnectActivationResponse | null>(null);
+  const [activationData, setActivation] = useState<WarmReconnectActivationResponse | null>(null);
+  const [activationOwner, setActivationOwner] = useState<string | null>(null);
+  const activation = user && activationOwner === user.uid ? activationData : null;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
@@ -143,8 +151,14 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const [approvalNote, setApprovalNote] = useState("");
   const [stopReason, setStopReason] = useState("");
   const [connectingProfile, setConnectingProfile] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionNotice, setConnectionNotice] = useState<string | null>(null);
   const [mutation, setMutation] = useState<{ action: MutationAction; recipientId?: string } | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const connectionRef = useRef<{ controller: AbortController; ownerUid: string } | null>(null);
+  const mountedRef = useRef(true);
+  const currentOwnerRef = useRef(user?.uid);
+  currentOwnerRef.current = user?.uid;
 
   const loadActivation = useCallback(async () => {
     if (!user) return;
@@ -155,42 +169,89 @@ export function WarmReconnectActivation({ campaign }: Props) {
     setError(null);
 
     try {
-      const headers = await buildAuthHeaders(user);
-      const response = await fetch(ACTIVATION_ROUTE, {
-        method: "GET",
-        headers,
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      const body = await readApiJson<unknown>(response);
-      if (controller.signal.aborted || requestRef.current !== controller) return;
-      if (!response.ok) {
-        throw new Error(apiMessage(response, body, "Activation controls are unavailable"));
-      }
+      const body = await withGoogleConnectionDeadline(async (signal) => {
+        const headers = await buildAuthHeaders(user);
+        assertGoogleConnectionActive(signal);
+        if (currentOwnerRef.current !== user.uid) throw new GoogleConnectionCancelledError();
+        const response = await fetch(ACTIVATION_ROUTE, { method: "GET", headers, cache: "no-store", signal });
+        const result = await readApiJson<unknown>(response);
+        assertGoogleConnectionActive(signal);
+        if (!response.ok) throw new Error(apiMessage(response, result, "Activation controls are unavailable"));
+        return result;
+      }, { signal: controller.signal, timeoutMessage: "Connection status did not finish loading. Refresh connection status when you are ready." });
+      if (!mountedRef.current || currentOwnerRef.current !== user.uid || controller.signal.aborted || requestRef.current !== controller) return;
       if (!isActivationResponse(body)) {
         throw new Error("Activation controls returned an invalid fail-closed contract.");
       }
       setActivation(body);
+      setActivationOwner(user.uid);
       setSelectedRecipientIds((current) =>
         current.filter((recipientId) => body.candidates.some((candidate) => candidate.recipientId === recipientId)),
       );
     } catch (caught) {
-      if (caught instanceof Error && caught.name === "AbortError") return;
-      if (requestRef.current !== controller) return;
+      if (caught instanceof GoogleConnectionCancelledError || (caught instanceof Error && caught.name === "AbortError")) return;
+      if (!mountedRef.current || currentOwnerRef.current !== user.uid || requestRef.current !== controller) return;
       setActivation(null);
-      setError(caught instanceof Error ? caught.message : "Activation controls are unavailable");
+      setActivationOwner(null);
+      const message = caught instanceof Error ? caught.message : "Activation controls are unavailable";
+      setError(message);
+      setConnectionError(message);
     } finally {
-      if (requestRef.current === controller) {
+      if (mountedRef.current && requestRef.current === controller) {
         requestRef.current = null;
         setLoading(false);
       }
     }
   }, [user]);
 
+  const cancelConnection = useCallback(() => {
+    const attempt = connectionRef.current;
+    connectionRef.current = null;
+    attempt?.controller.abort();
+    if (mountedRef.current) setConnectingProfile(null);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      connectionRef.current?.controller.abort();
+      connectionRef.current = null;
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    cancelConnection();
+    setConnectionError(null);
+    setConnectionNotice(null);
+    return () => {
+      connectionRef.current?.controller.abort();
+      connectionRef.current = null;
+    };
+  }, [cancelConnection, user?.uid]);
+
+  const refreshConnectionStatus = useCallback(() => {
+    cancelConnection();
+    setConnectionError(null);
+    setConnectionNotice("Checking connection status only. Start a new connection yourself if it is still needed.");
+    void loadActivation();
+  }, [cancelConnection, loadActivation]);
+
+  useEffect(() => {
+    const restore = (event: PageTransitionEvent) => {
+      if (event.persisted) refreshConnectionStatus();
+    };
+    window.addEventListener("pageshow", restore);
+    return () => window.removeEventListener("pageshow", restore);
+  }, [refreshConnectionStatus]);
+
   useEffect(() => {
     if (!user) {
       requestRef.current?.abort();
       setActivation(null);
+      setActivationOwner(null);
       setSelectedRecipientIds([]);
       setError(null);
       return;
@@ -218,40 +279,44 @@ export function WarmReconnectActivation({ campaign }: Props) {
   }
 
   async function connectGoogle(profileId: WarmReconnectGoogleProfileId) {
-    if (!user || connectingProfile) return;
+    if (!user || loading || connectionRef.current) return;
     const profile = activation?.googleProfiles.find((item) => item.profileId === profileId);
     if (!profile) {
-      setError("The server did not authorize that Google profile.");
+      setConnectionError("The server did not authorize that Google profile. Refresh connection status before trying again.");
       return;
     }
 
+    const attempt = { controller: new AbortController(), ownerUid: user.uid };
+    connectionRef.current = attempt;
     setConnectingProfile(profileId);
+    setConnectionError(null);
+    setConnectionNotice(null);
     setError(null);
+    const isCurrent = () => mountedRef.current && connectionRef.current === attempt &&
+      currentOwnerRef.current === attempt.ownerUid && !attempt.controller.signal.aborted;
     try {
       const idempotencyKey = crypto.randomUUID();
-      const headers = await buildAuthHeaders(user, { idempotencyKey });
-      const response = await fetch("/api/google/connect", {
-        method: "POST",
-        headers,
-        cache: "no-store",
-        body: JSON.stringify({
-          returnTo: "/dashboard/crm",
-          scopePreset: "gmail_send",
-          businessId: profile.businessId,
-          profileId: profile.profileId,
-        }),
+      const authUrl = await requestGoogleSenderConnection({
+        profileId: profile.profileId,
+        businessId: profile.businessId,
+        signal: attempt.controller.signal,
+        getAuthHeaders: async () => {
+          const headers = await buildAuthHeaders(user, { idempotencyKey });
+          if (!isCurrent()) throw new GoogleConnectionCancelledError();
+          return headers;
+        },
       });
-      const body = await readApiJson<unknown>(response);
-      if (!response.ok) throw new Error(apiMessage(response, body, `Could not connect ${profile.label}`));
-      const row = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
-      const authUrl = new URL(typeof row.authUrl === "string" ? row.authUrl : "");
-      if (authUrl.protocol !== "https:" || authUrl.hostname !== "accounts.google.com") {
-        throw new Error("Google returned an unexpected authorization destination.");
-      }
-      window.location.assign(authUrl.toString());
+      if (!isCurrent()) return;
+      setConnectionNotice("Opening Google in this browser. If you return without finishing, refresh connection status before starting again.");
+      window.location.assign(authUrl);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not connect Google");
+      if (!isCurrent()) return;
+      connectionRef.current = null;
       setConnectingProfile(null);
+      if (caught instanceof GoogleConnectionCancelledError) return;
+      const message = caught instanceof Error ? caught.message : "Could not connect Google. Refresh connection status before trying again.";
+      setConnectionError(message);
+      setConnectionNotice(null);
     }
   }
 
@@ -497,7 +562,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
           </div>
         </article>
 
-        <article className="rounded-xl border border-white/10 bg-black/25 p-4">
+        <article className="rounded-xl border border-white/10 bg-black/25 p-4" data-testid="google-sender-connection-controls">
           <div className="flex items-start gap-3">
             <MailCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" aria-hidden="true" />
             <div className="min-w-0 flex-1">
@@ -505,6 +570,9 @@ export function WarmReconnectActivation({ campaign }: Props) {
               <p className="mt-1 text-xs leading-5 text-zinc-400">
                 Marcus completes Google&apos;s consent screen. Connecting an account does not approve, launch, draft, or send anything.
               </p>
+              {connectionError && <p role="alert" className="mt-3 rounded-lg border border-red-300/30 bg-red-300/[0.07] p-3 text-sm leading-6 text-red-100">{connectionError}</p>}
+              {connectionNotice && <p role="status" className="mt-3 text-xs leading-5 text-cyan-100">{connectionNotice}</p>}
+              {connectingProfile && <p role="status" className="mt-3 text-xs leading-5 text-zinc-300">Opening Google… You can refresh connection status below if this attempt was interrupted.</p>}
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {(activation?.googleProfiles || []).map((profile) => {
                   const ready = Boolean(
@@ -535,12 +603,12 @@ export function WarmReconnectActivation({ campaign }: Props) {
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={busy || loading}
+                        disabled={Boolean(connectingProfile) || loading}
                         onClick={() => void connectGoogle(profile.profileId)}
                         className="mt-3 w-full border-white/15 bg-black/20 text-zinc-100 hover:bg-white/10 hover:text-white"
                       >
                         {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <ExternalLink aria-hidden="true" />}
-                        {ready ? `Reconnect ${profile.label}` : `Connect ${profile.label}`}
+                        {busy ? "Opening Google…" : ready ? `Reconnect ${profile.label}` : `Connect ${profile.label}`}
                       </Button>
                     </div>
                   );
@@ -551,6 +619,9 @@ export function WarmReconnectActivation({ campaign }: Props) {
                   </p>
                 )}
               </div>
+              <Button type="button" variant="outline" size="sm" disabled={loading} onClick={refreshConnectionStatus} className="mt-3 border-white/15 bg-black/20 text-zinc-100 hover:bg-white/10 hover:text-white">
+                <RefreshCw className={loading ? "animate-spin" : ""} aria-hidden="true" /> Refresh connection status
+              </Button>
             </div>
           </div>
         </article>
@@ -788,7 +859,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
               <p>{activation ? `${activation.candidateSummary.returned} candidates returned · ${activation.candidateSummary.excluded} excluded · provider actions: none.` : "No activation contract loaded."}</p>
             )}
           </div>
-          <Button type="button" size="sm" variant="ghost" disabled={loading || Boolean(mutation)} onClick={() => void loadActivation()} className="self-start text-zinc-300 hover:bg-white/10 hover:text-white sm:self-auto">
+          <Button type="button" size="sm" variant="ghost" disabled={loading || Boolean(mutation)} onClick={refreshConnectionStatus} className="self-start text-zinc-300 hover:bg-white/10 hover:text-white sm:self-auto">
             <RefreshCw className={loading ? "animate-spin" : ""} aria-hidden="true" /> Refresh controls
           </Button>
         </div>

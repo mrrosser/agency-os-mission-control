@@ -1,6 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("@/components/providers/auth-provider", () => ({
+  useAuth: () => ({ user: { uid: "callback-ui-owner" } }),
+}));
+
 vi.mock("next/navigation", () => ({
   useSearchParams: () =>
     new URLSearchParams({

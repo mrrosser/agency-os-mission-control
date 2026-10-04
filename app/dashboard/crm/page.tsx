@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PortfolioRegistrySummary } from "@/components/crm/portfolio-registry-summary";
 import { WarmReconnectCampaign } from "@/components/crm/warm-reconnect-campaign";
 import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activation";
+import { WarmReconnectOwnerTest } from "@/components/crm/warm-reconnect-owner-test";
 import { GoogleOAuthCallbackFeedback } from "@/components/integrations/GoogleOAuthCallbackFeedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -692,6 +693,7 @@ export default function CRMPage() {
       />
 
       <WarmReconnectActivation campaign={warmReconnectCampaign} />
+      <WarmReconnectOwnerTest />
       </div>
 
       <div id="crm-panel-share" role="tabpanel" aria-labelledby="crm-tab-share" hidden={workspace !== "share"} className="crm-panel">

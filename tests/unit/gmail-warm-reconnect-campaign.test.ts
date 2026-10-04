@@ -34,6 +34,28 @@ const message = {
 };
 
 describe("warm reconnect campaign Gmail MIME", () => {
+  it("requires explicit owner QA purpose and its separate unsubscribe endpoint", () => {
+    const qaPreferences = `${preferencesUrl}&mode=qa`;
+    const qaMessage = { ...message, purpose: "owner_qa" as const, contentMode: "preference_buttons" as const,
+      preferencesUrl: qaPreferences, plainText: `Preferences: ${qaPreferences}`,
+      html: `<a href="${qaPreferences.replaceAll("&", "&amp;")}">Preferences</a>`,
+      oneClickUnsubscribeUrl: oneClickUnsubscribeUrl.replace("/unsubscribe/", "/qa/unsubscribe/") };
+    expect(buildWarmReconnectCampaignMime(qaMessage)).toContain(`List-Unsubscribe: <${qaMessage.oneClickUnsubscribeUrl}>`);
+    expect(() => buildWarmReconnectCampaignMime({ ...qaMessage, purpose: undefined })).toThrow("Invalid preferences URL");
+    expect(() => buildWarmReconnectCampaignMime({ ...qaMessage, oneClickUnsubscribeUrl })).toThrow("Invalid one-click unsubscribe URL");
+  });
+  it("carries preference buttons as multipart alternatives while preserving the unsubscribe-only header boundary", () => {
+    const mime = buildWarmReconnectCampaignMime({ ...message, contentMode: "preference_buttons" });
+    expect(mime).toContain("Content-Type: multipart/alternative");
+    expect(mime).toContain("Content-Type: text/plain; charset=utf-8");
+    expect(mime).toContain("Content-Type: text/html; charset=utf-8");
+    expect(mime).toContain(`List-Unsubscribe: <${oneClickUnsubscribeUrl}>`);
+    expect(() => buildWarmReconnectCampaignMime({ ...message, contentMode: "preference_buttons", html: "" }))
+      .toThrow("requires plain-text and HTML alternatives");
+    expect(() => buildWarmReconnectCampaignMime({ ...message, contentMode: "preference_buttons", html: message.html + oneClickUnsubscribeUrl }))
+      .toThrow("Visible unsubscribe must use the human preference URL");
+  });
+
   it("keeps the legacy multipart output when artwork mode is explicit", () => {
     expect(
       buildWarmReconnectCampaignMime({ ...message, contentMode: "artwork_html" })

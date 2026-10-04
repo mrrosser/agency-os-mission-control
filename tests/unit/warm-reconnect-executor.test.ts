@@ -243,11 +243,11 @@ function dependencies(
     resolveAccessToken: vi.fn(async () => "ephemeral-access-token"),
     renderMessage: vi.fn((input) => ({
       contentMode: input.contentMode || "artwork_html",
-      rendererVersion: "warm-reconnect-email-renderer.v1" as const,
+      rendererVersion: "warm-reconnect-email-renderer.v2" as const,
       subject: "A quick hello from Marcus",
       plainText: "plain",
       html: input.contentMode === "plain_text" ? "" : "<p>html</p>",
-      artworkUrl: input.contentMode === "plain_text" ? "" : "https://leadflow-review.web.app/art.webp",
+      artworkUrl: input.contentMode === "artwork_html" ? "https://leadflow-review.web.app/art.webp" : "",
       contractFingerprint: `sha256:${"f".repeat(64)}`,
     })),
     sendMessage: vi.fn(async () => ({ id: "gmail-message-1", threadId: "thread-1" })),
@@ -589,8 +589,8 @@ describe("warm reconnect provider executor", () => {
     expect(deps.recordDeliveryUnknown).not.toHaveBeenCalled();
   });
 
-  it("executes a reviewed plain-text pilot without an artwork attestation", async () => {
-    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-plain", "plain_text");
+  it.each(["plain_text", "preference_buttons"] as const)("executes a reviewed %s pilot without an artwork attestation", async (contentMode) => {
+    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-plain", contentMode);
     expect(pilot.artworkEmailApproval).toBeNull();
     expect(pilot.gates.some((gate) => gate.id === "artwork_email_channel_approval")).toBe(false);
     const deps = dependencies({
@@ -602,9 +602,9 @@ describe("warm reconnect provider executor", () => {
     });
     expect(result).toMatchObject({ outcome: "sent", providerCalled: true });
     expect(deps.sendMessage).toHaveBeenCalledOnce();
-    expect(deps.renderMessage).toHaveBeenCalledWith(expect.objectContaining({ contentMode: "plain_text" }));
+    expect(deps.renderMessage).toHaveBeenCalledWith(expect.objectContaining({ contentMode }));
     expect(deps.sendMessage).toHaveBeenCalledWith("ephemeral-access-token", expect.objectContaining({
-      contentMode: "plain_text", html: "",
+      contentMode, html: contentMode === "plain_text" ? "" : "<p>html</p>",
     }), undefined);
   });
 

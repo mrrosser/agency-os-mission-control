@@ -105,13 +105,13 @@ describe("warm reconnect review-only campaign", () => {
     expect(first.copy.paragraphs).toEqual([
       "It's Marcus Rosser. I wanted to say hello and share a simple way to stay connected with my work.",
       "Rosser Gallery updates cover art, exhibitions, workshops, and community events. RT.Solutions updates cover practical technology, business systems, and project news.",
-      "If either sounds useful, you can choose Rosser Gallery, RT.Solutions, or both below.",
+      "If either sounds useful, choose Rosser Gallery, RT.Solutions, or both below, then confirm your choice on the next page. No extra form to fill out.",
     ]);
     expect(first.copy.postCtaParagraphs).toEqual([
-      "This invitation doesn't subscribe you to anything. You'll only receive the updates you choose, and you can unsubscribe at any time. If neither is for you, no pressure.",
+      "This invitation doesn't subscribe you to anything. You'll only receive the updates you confirm, and you can unsubscribe at any time. If neither is for you, no pressure.",
       "Thanks for taking a look.",
     ]);
-    expect(first.campaignVersion).toBe("2026-10-03.1");
+    expect(first.campaignVersion).toBe("2026-10-04.1");
     expect(first.owner.brands).toEqual(["Rosser Gallery", "RT.Solutions"]);
     expect(first.copy.plainText).not.toMatch(/personal note|our paths crossed|part of my story/i);
     expect(first.copy.plainText).not.toContain("—");

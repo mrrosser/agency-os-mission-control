@@ -149,6 +149,27 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it("freezes capitalized first-name greetings without changing candidate names or permissions", () => {
+    const candidates = [1, 2, 3, 4, 5].map(candidate);
+    candidates[0].displayName = "cody lestelle w @Example";
+    const buttons = create({ candidates, request: request({ contentMode: "preference_buttons", artworkEmailApproval: undefined }) });
+    expect(buttons.recipients[0].greetingName).toBe("Cody");
+    expect(candidates[0].displayName).toBe("cody lestelle w @Example");
+    expect(buttons.recipients[0].decision.permissionState).toBe("unknown");
+    expect(buttons.recipients[0].decision.relationshipAttested).toBe(false);
+    expect(buttons.artworkEmailApproval).toBeNull();
+    expect(buttons.gates).toHaveLength(8);
+    expect(() => approve(buttons)).toThrow("All five recipient relationships");
+    const attested = attestAll(buttons);
+    for (const key of ["spfDkimDmarcVerified", "physicalPostalAddressVerified", "preferencesAndUnsubscribeVerified", "suppressionLedgerVerified", "replyToMonitored"]) {
+      expect(() => approve(attested, undefined, { [key]: undefined })).toThrow("Every activation gate must be verified");
+    }
+    const approved = approve(attested);
+    expect(approved.status).toBe("approved");
+    expect(approved.fingerprints.artifactFingerprint).not.toBe(create({ request: request({ contentMode: "plain_text", artworkEmailApproval: undefined }) }).fingerprints.artifactFingerprint);
+    expect(() => create({ request: request({ contentMode: "preference_buttons" }) })).toThrow("formats without artwork must omit it");
+    expect(() => approve(attested, undefined, { artworkApprovedForEmail: true })).toThrow("must omit artwork confirmation");
+  });
   it("creates and approves plain text without an artwork attestation, retaining every other gate", () => {
     const plain = create({ request: request({ contentMode: "plain_text", artworkEmailApproval: undefined }) });
     expect(plain.contentMode).toBe("plain_text");
@@ -175,7 +196,7 @@ describe("warm reconnect activation state machine", () => {
         .toThrow("Artwork mode requires artwork approval");
     }
     expect(() => create({ request: request({ contentMode: "plain_text" }) }))
-      .toThrow("plain text must omit it");
+      .toThrow("formats without artwork must omit it");
     expect(() => create({ request: request({ contentMode: "unknown" as never }) }))
       .toThrow("Invalid warm reconnect content mode");
   });
@@ -186,7 +207,7 @@ describe("warm reconnect activation state machine", () => {
       .toThrow("Every activation gate must be verified");
     const plain = attestAll(create({ request: request({ contentMode: "plain_text", artworkEmailApproval: undefined }) }));
     expect(() => approve(plain, undefined, { artworkApprovedForEmail: true }))
-      .toThrow("Plain-text approval must omit artwork confirmation");
+      .toThrow("Approval for a format without artwork must omit artwork confirmation");
     for (const confirmation of ["suppressionLedgerVerified", "preferencesAndUnsubscribeVerified", "physicalPostalAddressVerified", "exactAudienceReviewed"]) {
       expect(() => approve(plain, undefined, { [confirmation]: undefined }))
         .toThrow("Every activation gate must be verified");

@@ -58,7 +58,7 @@ const APPROVAL_CONFIRMATIONS = [
 
 function requiredConfirmations(contentMode?: WarmReconnectContentMode) {
   return APPROVAL_CONFIRMATIONS.filter(([key]) =>
-    contentMode !== "plain_text" || key !== "artworkApprovedForEmail",
+    (contentMode ?? "artwork_html") === "artwork_html" || key !== "artworkApprovedForEmail",
   );
 }
 
@@ -90,7 +90,7 @@ const INITIAL_SENDER_FORM: SenderForm = {
   replyTo: "",
   physicalPostalAddress: "",
   profileId: "rosser_gallery_send",
-  contentMode: "plain_text",
+  contentMode: "preference_buttons",
   artworkEvidenceNote: "",
   artworkApproved: false,
 };
@@ -419,7 +419,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        ...(pilot.contentMode === "plain_text" ? {} : { artworkApprovedForEmail: true as const }),
+        ...((pilot.contentMode ?? "artwork_html") !== "artwork_html" ? {} : { artworkApprovedForEmail: true as const }),
         exactAudienceReviewed: true,
       },
       note: approvalNote.trim(),
@@ -512,7 +512,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     sender.legalEntity.trim() &&
     sender.replyTo.trim() &&
     sender.physicalPostalAddress.trim() &&
-    (sender.contentMode === "plain_text" ||
+    (sender.contentMode !== "artwork_html" ||
       (sender.artworkApproved && sender.artworkEvidenceNote.trim())) &&
     !activePilot,
   );
@@ -687,17 +687,18 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     <label className="block text-xs text-zinc-300">
                       Email format
                       <select aria-label="Email format" value={sender.contentMode} onChange={(event) => setSender((current) => ({ ...current, contentMode: event.target.value as WarmReconnectContentMode }))} className="mt-1 w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
+                        <option value="preference_buttons">Preference buttons (no artwork)</option>
                         <option value="plain_text">Plain text</option>
                         <option value="artwork_html">Email with artwork</option>
                       </select>
                     </label>
-                    {sender.contentMode === "plain_text" && <details className="rounded-md border border-white/10 p-3 text-xs leading-5 text-zinc-300">
-                      <summary className="cursor-pointer font-semibold">Preview plain-text invitation</summary>
+                    {sender.contentMode !== "artwork_html" && <details className="rounded-md border border-white/10 p-3 text-xs leading-5 text-zinc-300">
+                      <summary className="cursor-pointer font-semibold">Preview invitation text and footer</summary>
                       <p className="mt-2 font-semibold">Subject: {campaign?.copy.subject}</p>
                       <pre className="mt-2 whitespace-pre-wrap font-sans">{campaign?.copy.plainText}</pre>
                       <p className="mt-3">{sender.legalEntity || "[Legal sender entity required]"}</p>
                       <p className="whitespace-pre-wrap">{sender.physicalPostalAddress || "[Postal address required]"}</p>
-                      <p className="mt-2">The final email includes your recipient&apos;s preference and unsubscribe links.</p>
+                      <p className="mt-2">The final email includes your recipient&apos;s preference and unsubscribe links. Preference buttons open a selected choice; the recipient must confirm on the page. Rosser Gallery: https://rossergallery.com · RT.Solutions: https://rt.solutions</p>
                     </details>}
                     {sender.contentMode === "artwork_html" && <>
                     <textarea aria-label="Artwork approval evidence" value={sender.artworkEvidenceNote} onChange={(event) => setSender((current) => ({ ...current, artworkEvidenceNote: event.target.value }))} placeholder="Why this artwork is approved for this exact email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
@@ -809,8 +810,8 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     )}
 
                     <div className="rounded-lg border border-white/10 p-3 text-xs leading-5 text-zinc-300">
-                      <p className="font-semibold">Saved email format: {activePilot.contentMode === "plain_text" ? "Plain text" : "Email with artwork"}</p>
-                      {activePilot.contentMode === "plain_text" && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
+                      <p className="font-semibold">Saved email format: {activePilot.contentMode === "preference_buttons" ? "Preference buttons (no artwork)" : activePilot.contentMode === "plain_text" ? "Plain text" : "Email with artwork"}</p>
+                      {(activePilot.contentMode ?? "artwork_html") !== "artwork_html" && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
                         <details className="mt-2">
                           <summary className="cursor-pointer">Review saved invitation and footer</summary>
                           <p className="mt-2 font-semibold">Subject: {campaign.copy.subject}</p>
@@ -818,7 +819,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                           <p className="mt-3">{activePilot.sender.legalEntity}</p>
                           <p className="whitespace-pre-wrap">{activePilot.sender.physicalPostalAddress}</p>
                           <p className="mt-2">From: {activePilot.sender.fromEmail} · Reply to: {activePilot.sender.replyTo}</p>
-                          <p>The final email includes each recipient&apos;s preference and unsubscribe links.</p>
+                          <p>The final email includes each recipient&apos;s preference and unsubscribe links. Preference buttons require confirmation on the page. Rosser Gallery: https://rossergallery.com · RT.Solutions: https://rt.solutions</p>
                         </details>
                       )}
                     </div>

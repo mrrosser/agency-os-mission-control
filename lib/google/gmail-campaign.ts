@@ -6,7 +6,7 @@ const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 const MESSAGE_ID_PATTERN = /^<[a-z0-9._-]+@[a-z0-9.-]+>$/i;
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43,128}$/;
 
-export const WARM_RECONNECT_MIME_VERSION = "warm-reconnect-mime.v1" as const;
+export const WARM_RECONNECT_MIME_VERSION = "warm-reconnect-mime.v2" as const;
 
 export function warmReconnectMimeImplementationFingerprint(): string {
   return `sha256:${createHash("sha256")
@@ -29,7 +29,8 @@ export function warmReconnectMimeImplementationFingerprint(): string {
 }
 
 export interface WarmReconnectCampaignMessage {
-  contentMode?: "artwork_html" | "plain_text";
+  purpose?: "campaign" | "owner_qa";
+  contentMode?: "artwork_html" | "plain_text" | "preference_buttons";
   to: string;
   from: string;
   senderName: string;
@@ -44,9 +45,9 @@ export interface WarmReconnectCampaignMessage {
 
 function resolveContentMode(
   value: WarmReconnectCampaignMessage["contentMode"]
-): "artwork_html" | "plain_text" {
+): "artwork_html" | "plain_text" | "preference_buttons" {
   if (value === undefined) return "artwork_html";
-  if (value === "artwork_html" || value === "plain_text") return value;
+  if (value === "artwork_html" || value === "plain_text" || value === "preference_buttons") return value;
   throw new Error("Invalid campaign content mode");
 }
 
@@ -87,18 +88,27 @@ function assertHttpsUrl(
   return url.toString();
 }
 
-function assertCapabilityBoundary(preferencesValue: string, oneClickValue: string): void {
+function assertCapabilityBoundary(
+  preferencesValue: string,
+  oneClickValue: string,
+  purpose?: "campaign" | "owner_qa"
+): void {
   const preferences = new URL(preferencesValue);
   const oneClick = new URL(oneClickValue);
   const preferenceParams = new URLSearchParams(preferences.hash.slice(1));
   const preferenceToken = preferenceParams.get("token");
-  const oneClickMatch = oneClick.pathname.match(
-    /^\/api\/crm\/warm-reconnect\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/
-  );
+  const ownerQa = purpose === "owner_qa";
+  if (purpose !== undefined && purpose !== "campaign" && !ownerQa) {
+    throw new Error("Invalid email purpose");
+  }
+  const oneClickMatch = oneClick.pathname.match(ownerQa
+    ? /^\/api\/crm\/warm-reconnect\/qa\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/
+    : /^\/api\/crm\/warm-reconnect\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/);
   if (
     preferences.pathname !== "/preferences" ||
     preferences.search ||
-    [...preferenceParams.keys()].length !== 1 ||
+    [...preferenceParams.keys()].length !== (ownerQa ? 2 : 1) ||
+    (ownerQa && preferenceParams.get("mode") !== "qa") ||
     !preferenceToken ||
     !CAPABILITY_PATTERN.test(preferenceToken)
   ) {
@@ -156,21 +166,21 @@ export function buildWarmReconnectCampaignMime(
     "one-click unsubscribe URL",
     input.oneClickUnsubscribeUrl
   );
-  assertCapabilityBoundary(preferencesUrl, oneClickUrl);
+  assertCapabilityBoundary(preferencesUrl, oneClickUrl, input.purpose);
   if (contentMode === "plain_text" && input.html !== "") {
     throw new Error("Plain-text campaign message must not contain HTML");
   }
   if (typeof input.plainText !== "string" || !input.plainText.trim()) {
     throw new Error("Campaign message requires nonempty plain text");
   }
-  if (contentMode === "artwork_html" && !String(input.html || "").trim()) {
+  if (contentMode !== "plain_text" && !String(input.html || "").trim()) {
     throw new Error("Campaign message requires plain-text and HTML alternatives");
   }
   if (
     !input.plainText.includes(preferencesUrl) ||
-    (contentMode === "artwork_html" && !input.html.includes(preferencesUrl)) ||
+    (contentMode !== "plain_text" && !input.html.includes(preferencesUrl.replace(/&/g, "&amp;"))) ||
     input.plainText.includes(oneClickUrl) ||
-    (contentMode === "artwork_html" && input.html.includes(oneClickUrl))
+    (contentMode !== "plain_text" && input.html.includes(oneClickUrl))
   ) {
     throw new Error("Visible unsubscribe must use the human preference URL");
   }

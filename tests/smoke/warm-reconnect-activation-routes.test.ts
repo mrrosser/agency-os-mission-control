@@ -99,6 +99,16 @@ describe("warm reconnect activation routes", () => {
     } as never);
   });
 
+  it("accepts preference buttons only without artwork approval", async () => {
+    const body = { ...pilotRequest, contentMode: "preference_buttons", artworkEmailApproval: undefined };
+    const accepted = await postPilot(jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", body) as never, context() as never);
+    expect(accepted.status).toBe(201);
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ contentMode: "preference_buttons" }) }));
+    const rejected = await postPilot(jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", { ...body, artworkEmailApproval: pilotRequest.artworkEmailApproval }) as never, context() as never);
+    expect(rejected.status).toBe(400);
+    expect(createMock).toHaveBeenCalledTimes(1);
+  });
+
   it("returns authenticated activation data with private no-store headers", async () => {
     const response = await getActivation(
       new Request("http://localhost/api/crm/warm-reconnect/activation", {

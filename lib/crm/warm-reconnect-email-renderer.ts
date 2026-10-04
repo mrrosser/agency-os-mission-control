@@ -3,13 +3,18 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
 import type { WarmReconnectContentMode } from "@/lib/crm/warm-reconnect-activation-types";
+import {
+  WARM_RECONNECT_CHOICES,
+  warmReconnectChoiceUrl,
+} from "@/lib/crm/warm-reconnect-preference-choice";
 
 export const WARM_RECONNECT_EMAIL_RENDERER_VERSION =
-  "warm-reconnect-email-renderer.v1" as const;
+  "warm-reconnect-email-renderer.v2" as const;
 export const WARM_RECONNECT_RENDERER_CONTRACT_VERSION =
   "warm-reconnect-renderer-contract.v1" as const;
 
 export interface WarmReconnectEmailRenderInput {
+  purpose?: "campaign" | "owner_qa";
   campaign: WarmReconnectCampaignDraft;
   contentMode?: WarmReconnectContentMode;
   firstName: string | null;
@@ -64,6 +69,8 @@ export function warmReconnectRendererImplementationFingerprint(): string {
         httpsUrl.toString(),
         assertPreferenceAndUnsubscribeUrls.toString(),
         escapeHtml.toString(),
+        JSON.stringify(WARM_RECONNECT_CHOICES),
+        warmReconnectChoiceUrl.toString(),
         renderWarmReconnectEmail.toString(),
       ].join("\n---\n")
     )
@@ -73,7 +80,7 @@ export function warmReconnectRendererImplementationFingerprint(): string {
 /** Stored pilots without a mode retain their original artwork approval boundary. */
 export function resolveWarmReconnectContentMode(value: unknown): WarmReconnectContentMode {
   if (value === undefined || value === "artwork_html") return "artwork_html";
-  if (value === "plain_text") return "plain_text";
+  if (value === "plain_text" || value === "preference_buttons") return value;
   throw new Error("Invalid warm reconnect content mode");
 }
 
@@ -110,18 +117,24 @@ function assertPreferenceAndUnsubscribeUrls(input: {
   preferencesUrl: URL;
   unsubscribeUrl: URL;
   publicOrigin: URL;
+  purpose?: "campaign" | "owner_qa";
 }): void {
   const { preferencesUrl, unsubscribeUrl, publicOrigin } = input;
   const preferenceParams = new URLSearchParams(preferencesUrl.hash.slice(1));
   const preferenceToken = preferenceParams.get("token");
-  const oneClickMatch = unsubscribeUrl.pathname.match(
-    /^\/api\/crm\/warm-reconnect\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/
-  );
+  const ownerQa = input.purpose === "owner_qa";
+  if (input.purpose !== undefined && input.purpose !== "campaign" && !ownerQa) {
+    throw new Error("Invalid email purpose");
+  }
+  const oneClickMatch = unsubscribeUrl.pathname.match(ownerQa
+    ? /^\/api\/crm\/warm-reconnect\/qa\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/
+    : /^\/api\/crm\/warm-reconnect\/unsubscribe\/([A-Za-z0-9_-]{43,128})$/);
   if (
     preferencesUrl.origin !== publicOrigin.origin ||
     preferencesUrl.pathname !== "/preferences" ||
     preferencesUrl.search ||
-    [...preferenceParams.keys()].length !== 1 ||
+    [...preferenceParams.keys()].length !== (ownerQa ? 2 : 1) ||
+    (ownerQa && preferenceParams.get("mode") !== "qa") ||
     !preferenceToken ||
     !CAPABILITY_PATTERN.test(preferenceToken)
   ) {
@@ -171,6 +184,7 @@ export function renderWarmReconnectEmail(
     preferencesUrl,
     unsubscribeUrl,
     publicOrigin,
+    purpose: input.purpose,
   });
   const artworkUrl = contentMode === "artwork_html"
     ? new URL(input.campaign.artwork.url, publicOrigin).toString()
@@ -178,14 +192,23 @@ export function renderWarmReconnectEmail(
   const paragraphs = [...input.campaign.copy.paragraphs];
   const postCta = [...input.campaign.copy.postCtaParagraphs];
   const greeting = `Hi ${firstName},`;
+  const choices = WARM_RECONNECT_CHOICES.map((choice) => ({
+    ...choice,
+    url: warmReconnectChoiceUrl(preferencesUrl.toString(), choice.id),
+  }));
+  const websiteText = "Rosser Gallery: https://rossergallery.com\nRT.Solutions: https://rt.solutions";
+  const websiteHtml = '<a href="https://rossergallery.com" style="color:inherit">Rosser Gallery</a> · <a href="https://rt.solutions" style="color:inherit">RT.Solutions</a>';
 
   const plainText = [
     greeting,
     ...paragraphs,
-    `${input.campaign.primaryCta.label}: ${preferencesUrl.toString()}`,
+    contentMode === "preference_buttons"
+      ? choices.map((choice) => `${choice.label}: ${choice.url}`).join("\n")
+      : `${input.campaign.primaryCta.label}: ${preferencesUrl.toString()}`,
     ...postCta,
     senderName,
     "New Orleans, Louisiana",
+    websiteText,
     "",
     `${legalEntity} · ${postalAddress}`,
     `Update preferences: ${preferencesUrl.toString()}`,
@@ -198,7 +221,18 @@ export function renderWarmReconnectEmail(
   const postCtaHtml = postCta
     .map((paragraph) => `<p style="margin:0 0 18px">${escapeHtml(paragraph)}</p>`)
     .join("");
-  const html = contentMode === "plain_text" ? "" : [
+  const html = contentMode === "plain_text" ? "" : contentMode === "preference_buttons" ? [
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>',
+    '<body style="margin:0;background:#ffffff;color:#242424;font-family:Arial,sans-serif">',
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="padding:28px 20px">',
+    '<div style="max-width:600px;margin:0 auto;font-size:16px;line-height:1.6">',
+    `<p style="margin:0 0 18px">${escapeHtml(greeting)}</p>${paragraphHtml}`,
+    `<p style="margin:24px 0">${choices.map((choice) => `<a href="${escapeHtml(choice.url)}" style="display:inline-block;margin:0 8px 10px 0;padding:12px 18px;border-radius:6px;background:#174a47;color:#ffffff;font-weight:bold;text-decoration:none">${escapeHtml(choice.label)}</a>`).join("")}</p>`,
+    `${postCtaHtml}<p>${escapeHtml(senderName)}<br>New Orleans, Louisiana</p>`,
+    `<p style="font-size:13px">${websiteHtml}</p>`,
+    `<p style="margin-top:28px;font-size:12px;color:#555555">${escapeHtml(legalEntity)} · ${escapeHtml(postalAddress)}<br><a href="${escapeHtml(preferencesUrl.toString())}" style="color:inherit">Update preferences</a> · <a href="${escapeHtml(preferencesUrl.toString())}" style="color:inherit">Unsubscribe from all messages</a></p>`,
+    "</div></td></tr></table></body></html>",
+  ].join("") : [
     "<!doctype html>",
     '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>',
     '<body style="margin:0;background:#0b0b0a;color:#f8f1e2;font-family:Arial,sans-serif">',
@@ -211,6 +245,7 @@ export function renderWarmReconnectEmail(
     `<div style="font-size:16px;line-height:1.65;color:#eee5d2"><p style="margin:0 0 18px">${escapeHtml(greeting)}</p>${paragraphHtml}</div>`,
     `<p style="margin:26px 0"><a href="${escapeHtml(preferencesUrl.toString())}" style="display:inline-block;border-radius:999px;background:#8ee8ef;color:#071011;padding:13px 22px;font-weight:bold;text-decoration:none">${escapeHtml(input.campaign.primaryCta.label)}</a></p>`,
     `<div style="font-size:16px;line-height:1.65;color:#eee5d2">${postCtaHtml}<p style="margin:0">${escapeHtml(senderName)}<br>New Orleans, Louisiana</p></div>`,
+    `<p style="font-size:13px;color:#9eeaf1">${websiteHtml}</p>`,
     '<hr style="margin:28px 0 18px;border:0;border-top:1px solid #423d32">',
     `<p style="margin:0;font-size:12px;line-height:1.6;color:#aaa18f">${escapeHtml(legalEntity)} · ${escapeHtml(postalAddress)}<br><a href="${escapeHtml(preferencesUrl.toString())}" style="color:#9eeaf1">Update preferences</a> · <a href="${escapeHtml(preferencesUrl.toString())}" style="color:#9eeaf1">Unsubscribe</a></p>`,
     "</td></tr></table></td></tr></table></body></html>",

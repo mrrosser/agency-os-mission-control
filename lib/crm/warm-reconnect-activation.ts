@@ -114,11 +114,11 @@ const DELIVERY_ARTIFACT_CONTRACT = {
   paragraphs: [
     "It's Marcus Rosser. I wanted to say hello and share a simple way to stay connected with my work.",
     "Rosser Gallery updates cover art, exhibitions, workshops, and community events. RT.Solutions updates cover practical technology, business systems, and project news.",
-    "If either sounds useful, you can choose Rosser Gallery, RT.Solutions, or both below.",
+    "If either sounds useful, choose Rosser Gallery, RT.Solutions, or both below, then confirm your choice on the next page. No extra form to fill out.",
   ],
   ctaLabel: "Choose your updates",
   postCtaParagraphs: [
-    "This invitation doesn't subscribe you to anything. You'll only receive the updates you choose, and you can unsubscribe at any time. If neither is for you, no pressure.",
+    "This invitation doesn't subscribe you to anything. You'll only receive the updates you confirm, and you can unsubscribe at any time. If neither is for you, no pressure.",
     "Thanks for taking a look.",
   ],
   signature: ["Marcus Rosser", "New Orleans, Louisiana"],
@@ -216,7 +216,7 @@ export function computeWarmReconnectPilotFingerprints(
 ) {
   const contentMode = resolveWarmReconnectContentMode(pilot.contentMode);
   if (
-    (contentMode === "plain_text" && pilot.artworkEmailApproval !== null) ||
+    (contentMode !== "artwork_html" && pilot.artworkEmailApproval !== null) ||
     (contentMode === "artwork_html" &&
       (!pilot.artworkEmailApproval?.attested || !pilot.artworkEmailApproval.evidenceNote?.trim()))
   ) {
@@ -546,7 +546,7 @@ function buildGates(input: {
         : "Connect the selected Google profile with Gmail capability.",
     },
   ];
-  return resolveWarmReconnectContentMode(input.pilot.contentMode) === "plain_text"
+  return resolveWarmReconnectContentMode(input.pilot.contentMode) !== "artwork_html"
     ? gates.filter((gate) => gate.id !== "artwork_email_channel_approval")
     : gates;
 }
@@ -611,12 +611,12 @@ export function createWarmReconnectPilot(input: {
 }): WarmReconnectPilot {
   const contentMode = resolveWarmReconnectContentMode(input.request.contentMode);
   if (
-    (contentMode === "plain_text" && input.request.artworkEmailApproval !== undefined) ||
+    (contentMode !== "artwork_html" && input.request.artworkEmailApproval !== undefined) ||
     (contentMode === "artwork_html" &&
       (!input.request.artworkEmailApproval?.approvedForThisEmailCampaign ||
         !input.request.artworkEmailApproval.evidenceNote?.trim()))
   ) {
-    throw new ApiError(400, "Artwork mode requires artwork approval; plain text must omit it.");
+    throw new ApiError(400, "Artwork mode requires artwork approval; formats without artwork must omit it.");
   }
   if (
     input.request.tranche !== "initial_5" ||
@@ -663,7 +663,8 @@ export function createWarmReconnectPilot(input: {
         .trim()
         .split(/\s+/)[0]
         ?.replace(/[\0\r\n<>]/g, "")
-        .slice(0, 80) || "there",
+        .slice(0, 80)
+        .replace(/^./, (letter) => letter.toUpperCase()) || "there",
     decision: {
       status: "pending_review",
       decisionId: null,
@@ -846,10 +847,10 @@ export function decideWarmReconnectPilotApproval(input: {
     throw new ApiError(409, "All five recipient relationships must be attested first.");
   }
   if (
-    resolveWarmReconnectContentMode(input.pilot.contentMode) === "plain_text" &&
+    resolveWarmReconnectContentMode(input.pilot.contentMode) !== "artwork_html" &&
     input.request.confirmations.artworkApprovedForEmail !== undefined
   ) {
-    throw new ApiError(400, "Plain-text approval must omit artwork confirmation.");
+    throw new ApiError(400, "Approval for a format without artwork must omit artwork confirmation.");
   }
   if (!input.googleReady) {
     throw new ApiError(409, "The selected Google profile is not Gmail-ready.");

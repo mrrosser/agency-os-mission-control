@@ -190,7 +190,7 @@ export interface WarmReconnectPilotAvailableActions {
   launchAuthorizesExactProviderExecution: true;
 }
 
-export type WarmReconnectContentMode = "artwork_html" | "plain_text";
+export type WarmReconnectContentMode = "artwork_html" | "plain_text" | "preference_buttons";
 
 export interface WarmReconnectPilot {
   schemaVersion: typeof WARM_RECONNECT_PILOT_SCHEMA_VERSION;

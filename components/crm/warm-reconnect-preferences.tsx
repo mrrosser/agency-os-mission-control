@@ -6,6 +6,12 @@ import type {
   WarmReconnectPreferenceResult,
   WarmReconnectTopics,
 } from "@/lib/crm/warm-reconnect-preferences";
+import {
+  parseWarmReconnectPreferenceFragment,
+  isWarmReconnectQaFragment,
+  warmReconnectChoiceTopics,
+  type WarmReconnectChoice,
+} from "@/lib/crm/warm-reconnect-preference-choice";
 
 const EMPTY_TOPICS: WarmReconnectTopics = {
   rosser_gallery: false,
@@ -36,17 +42,17 @@ function businessTopics(value?: Partial<WarmReconnectTopics>): WarmReconnectTopi
   };
 }
 
-function fragmentToken(): string | null {
-  const raw = window.location.hash.slice(1);
-  const token = raw.startsWith("token=")
-    ? new URLSearchParams(raw).get("token")
-    : raw;
+function fragmentSelection() {
+  const fragment = window.location.hash.slice(1);
+  const selection = { ...parseWarmReconnectPreferenceFragment(fragment), ownerQa: isWarmReconnectQaFragment(fragment) };
   window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-  return token && /^[A-Za-z0-9_-]{43,128}$/.test(token) ? token : null;
+  return selection;
 }
 
-async function postPreference(body: Record<string, unknown>): Promise<WarmReconnectPreferenceResult> {
-  const response = await fetch("/api/crm/warm-reconnect/preferences", {
+type PreferenceResult = WarmReconnectPreferenceResult & { testMode?: boolean; confirmationNonce?: string };
+
+async function postPreference(body: Record<string, unknown>, ownerQa = false): Promise<PreferenceResult> {
+  const response = await fetch(ownerQa ? "/api/crm/warm-reconnect/qa/preferences" : "/api/crm/warm-reconnect/preferences", {
     method: "POST",
     credentials: "omit",
     cache: "no-store",
@@ -54,12 +60,14 @@ async function postPreference(body: Record<string, unknown>): Promise<WarmReconn
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return (await response.json()) as WarmReconnectPreferenceResult;
+  return (await response.json()) as PreferenceResult;
 }
 
 export function WarmReconnectPreferences() {
   const tokenRef = useRef<string | null>(null);
-  const [result, setResult] = useState<WarmReconnectPreferenceResult | null>(null);
+  const choiceRef = useRef<WarmReconnectChoice | null>(null);
+  const qaRef = useRef(false);
+  const [result, setResult] = useState<PreferenceResult | null>(null);
   const [topics, setTopics] = useState<WarmReconnectTopics>(EMPTY_TOPICS);
   const [busy, setBusy] = useState(true);
   const [confirmUnsubscribe, setConfirmUnsubscribe] = useState(false);
@@ -67,18 +75,26 @@ export function WarmReconnectPreferences() {
 
   useEffect(() => {
     const controller = new AbortController();
-    tokenRef.current ||= fragmentToken();
+    if (!tokenRef.current) {
+      const selection = fragmentSelection();
+      tokenRef.current = selection.token;
+      choiceRef.current = selection.choice;
+      qaRef.current = selection.ownerQa;
+    }
     const token = tokenRef.current;
     if (!token) {
       setBusy(false);
       return () => controller.abort();
     }
 
-    void postPreference({ action: "inspect", token })
+    void postPreference({ action: "inspect", token }, qaRef.current)
       .then((next) => {
         if (controller.signal.aborted) return;
         setResult(next);
-        setTopics(businessTopics(next.topics));
+        // A fragment choice only changes the visible selection. Never save on load.
+        setTopics(next.canUpdatePreferences && !next.globallyUnsubscribed && choiceRef.current
+          ? warmReconnectChoiceTopics(choiceRef.current)
+          : businessTopics(next.topics));
       })
       .catch(() => {
         if (!controller.signal.aborted) setResult(null);
@@ -103,7 +119,8 @@ export function WarmReconnectPreferences() {
         token,
         requestId: crypto.randomUUID(),
         topics,
-      });
+        ...(qaRef.current ? { confirmationNonce: result?.confirmationNonce } : {}),
+      }, qaRef.current);
       setResult(next);
       setTopics(businessTopics(next.topics || topics));
       setNotice(next.message);
@@ -120,7 +137,9 @@ export function WarmReconnectPreferences() {
     setBusy(true);
     setNotice(null);
     try {
-      const next = await postPreference({ action: "unsubscribe", token });
+      const next = await postPreference({ action: "unsubscribe", token,
+        ...(qaRef.current ? { confirmationNonce: result?.confirmationNonce, requestId: crypto.randomUUID() } : {}),
+      }, qaRef.current);
       setResult(next);
       setTopics(EMPTY_TOPICS);
       setConfirmUnsubscribe(false);
@@ -134,7 +153,8 @@ export function WarmReconnectPreferences() {
 
   const available = result?.available === true;
   const globallyUnsubscribed = result?.globallyUnsubscribed === true;
-  const canUpdate = result?.canUpdatePreferences === true;
+  const qaReady = !qaRef.current || (result?.testMode === true && Boolean(result?.confirmationNonce));
+  const canUpdate = result?.canUpdatePreferences === true && qaReady;
 
   return (
     <main
@@ -146,6 +166,9 @@ export function WarmReconnectPreferences() {
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(191,151,83,0.14),transparent_28%),radial-gradient(circle_at_85%_70%,rgba(91,181,186,0.1),transparent_30%),linear-gradient(115deg,transparent_0_48%,rgba(255,255,255,0.025)_49%,transparent_50%)]"
       />
       <div className="relative mx-auto max-w-3xl">
+        {qaRef.current && <p role="note" className="mb-6 rounded-xl border border-amber-300/40 bg-amber-300/10 p-4 text-sm text-amber-100">
+          TEST: Your choices apply only to this private test. They do not subscribe you to newsletters or change campaign contacts.
+        </p>}
         <header className="mb-8 border-b border-[#cda862]/25 pb-7">
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#dfbe7b]">
             <Fingerprint className="h-4 w-4" aria-hidden="true" />
@@ -155,7 +178,9 @@ export function WarmReconnectPreferences() {
             Your inbox should still feel like yours.
           </h1>
           <p className="mt-4 max-w-xl text-sm leading-6 text-[#cfc4b1] sm:text-base">
-            Choose updates from Rosser Gallery, RT.Solutions, or both. Your choices apply to promotional email and can be changed later.
+            {qaRef.current
+              ? "Try Rosser Gallery, RT.Solutions, or both. Your choices are recorded only for this test."
+              : "Choose updates from Rosser Gallery, RT.Solutions, or both. Your choices apply to promotional email and can be changed later."}
           </p>
         </header>
 
@@ -175,9 +200,11 @@ export function WarmReconnectPreferences() {
         ) : globallyUnsubscribed ? (
           <section className="rounded-2xl border border-[#82c7c6]/30 bg-[#82c7c6]/[0.07] p-6 sm:p-8" role="status">
             <Check className="h-7 w-7 text-[#9bd9d6]" aria-hidden="true" />
-            <h2 className="mt-5 font-serif text-3xl text-[#fff7e7]">You&apos;re unsubscribed.</h2>
+            <h2 className="mt-5 font-serif text-3xl text-[#fff7e7]">{qaRef.current ? "Test unsubscribe saved." : "You're unsubscribed."}</h2>
             <p className="mt-3 max-w-xl text-sm leading-6 text-[#d5ccbb]">
-              Promotional email from this reconnect campaign is blocked. We&apos;ll keep that choice in place.
+              {qaRef.current
+                ? "Your test choices are cleared. Real newsletter subscriptions and campaign contacts are unchanged."
+                : "Promotional email from this reconnect campaign is blocked. We'll keep that choice in place."}
             </p>
           </section>
         ) : (
@@ -187,7 +214,7 @@ export function WarmReconnectPreferences() {
                 <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-white/40">Email preferences</p>
                 <h2 id="choice-heading" className="mt-2 font-serif text-2xl text-[#fff7e7] sm:text-3xl">What would you like to hear about?</h2>
               </div>
-              <span className="hidden text-xs text-white/35 sm:block">Nothing is selected for you.</span>
+              <span className="text-xs text-white/50">Nothing changes until you confirm.</span>
             </div>
 
             <div className="space-y-3">
@@ -219,7 +246,9 @@ export function WarmReconnectPreferences() {
 
             {result?.expired ? (
               <p className="mt-4 rounded-xl border border-amber-300/25 bg-amber-300/[0.07] p-4 text-sm leading-6 text-amber-100/80">
-                This link has expired, so it cannot add subscriptions. You can still unsubscribe below.
+                {qaRef.current
+                  ? "This test link has expired, so it cannot save new test choices. You can still test unsubscribe below."
+                  : "This link has expired, so it cannot add subscriptions. You can still unsubscribe below."}
               </p>
             ) : null}
 
@@ -230,14 +259,16 @@ export function WarmReconnectPreferences() {
                 onClick={() => void saveChoices()}
                 className="rounded-full bg-[#e0b760] px-6 py-3 text-sm font-semibold text-[#17130c] transition hover:bg-[#f0cc7a] disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {busy ? "Saving…" : "Save my choices"}
+                {busy ? "Saving…" : "Confirm my updates"}
               </button>
               <p className="text-xs leading-5 text-white/40">We don&apos;t sell your information or use this page for tracking.</p>
             </div>
 
             <div className="mt-7 rounded-2xl border border-white/10 bg-black/25 p-5">
               <h3 className="font-medium text-[#fff7e7]">Prefer no promotional email?</h3>
-              <p className="mt-2 text-sm leading-6 text-[#bdb3a2]">Unsubscribe globally from this reconnect campaign. This safety choice stays in place.</p>
+              <p className="mt-2 text-sm leading-6 text-[#bdb3a2]">{qaRef.current
+                ? "Test the unsubscribe control. It clears this test's choices only and leaves real subscriptions unchanged."
+                : "Unsubscribe globally from this reconnect campaign. This safety choice stays in place."}</p>
               {!confirmUnsubscribe ? (
                 <button
                   type="button"

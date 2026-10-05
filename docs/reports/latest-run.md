@@ -1,5 +1,12 @@
 # Latest Verification Run
 
+## 2026-10-05 Approved campaign v2 design (local candidate)
+
+- Adds a separate `approved_design_v2` campaign path for the exact approved template/CID images, frozen first-name greetings and production recipient capabilities. Existing owner v1/v2 paths and fingerprints are preserved; no QA authority is reused for campaigns.
+- Full unit/smoke: 1,767 tests / 255 files passed. Focused renderer/MIME/executor/owner coverage: 71 tests; activation/API/UI: 46 tests. Production build and TypeScript passed. Full lint: zero errors, two unchanged callback warnings; scoped lint clean. Dependency manifests unchanged; no fresh network audit under the local-only scope.
+- Baseline-versus-patched probes show identical renderer/MIME implementation fingerprints, rendered contract, HTML/text and full MIME hashes for both owner versions. Exact five private review packages remain outside public source. Final privacy, patch-only Gitleaks and immutable patch/tree evidence are in the external manifest.
+- No cloud calls, live pilot creation, consent changes, send, push or deployment. Domain authentication, native Workspace verification and the existing OIDC execution path remain external delivery blockers. Details: `docs/reports/2026-10-05-approved-campaign-design-v2.md`. Earlier entries below are historical.
+
 ## 2026-10-04 Preference buttons and isolated owner test (local candidate)
 
 - Three explicit Gallery / RT.Solutions / Both choices, first-name greetings, multipart text fallback, accepted postal footer and both websites. URL fetch/load never grants consent; explicit confirmation is required.

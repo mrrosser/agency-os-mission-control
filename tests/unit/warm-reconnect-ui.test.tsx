@@ -201,6 +201,31 @@ describe("warm reconnect campaign UI", () => {
     expect(launchButton(html)).toContain('disabled=""');
   });
 
+  it("shows the approved design in an inert preview without enabling an unapproved launch", () => {
+    const activation = activationFixture(false);
+    Object.assign(activation.pilots[0], {
+      contentMode: "approved_design_v2",
+      emailPreview: {
+        designVersion: "rosser-rt-library-kit-v1",
+        recipientId: "synthetic-recipient",
+        greetingName: "Alex",
+        subject: "A quick hello from Marcus",
+        plainText: "Hi Alex,\nSynthetic reviewed text.",
+        html: "<!doctype html><html><body><p>Hi Alex,</p><a>Choose Rosser Gallery</a></body></html>",
+      },
+    });
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+    expect(html).toContain("Approved v2 design with inline artwork");
+    expect(html).toContain("Preview for Alex");
+    expect(html).toContain('title="Approved campaign email preview"');
+    expect(html).toContain('sandbox=""');
+    expect(html).toContain('referrerPolicy="no-referrer"');
+    expect(html).toContain("Links are inactive");
+    expect(launchButton(html)).toContain('disabled=""');
+  });
+
   it.each([true, false])("preserves the approved pilot's launch control when provider status is %s", (enabled) => {
     loadedActivation(enabled, true);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);

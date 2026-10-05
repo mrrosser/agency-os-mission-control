@@ -45,7 +45,7 @@ const bodySchema = z
       .tuple([identifier, identifier, identifier, identifier, identifier])
       .refine((values) => new Set(values).size === 5, "Candidate ids must be distinct"),
     sender: senderSchema,
-    contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons"]).optional(),
+    contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons", "approved_design_v2"]).optional(),
     artworkEmailApproval: z
       .object({
         approvedForThisEmailCampaign: z.literal(true),
@@ -55,7 +55,7 @@ const bodySchema = z
   })
   .strict()
   .superRefine((body, context) => {
-    const artworkMode = (body.contentMode ?? "artwork_html") === "artwork_html";
+    const artworkMode = body.contentMode === "approved_design_v2" || (body.contentMode ?? "artwork_html") === "artwork_html";
     if (artworkMode ? !body.artworkEmailApproval : body.artworkEmailApproval !== undefined) {
       context.addIssue({
         code: "custom",

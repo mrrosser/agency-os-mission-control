@@ -31,7 +31,11 @@ import {
   warmReconnectEmailKey,
   warmReconnectFingerprint,
 } from "@/lib/crm/warm-reconnect-dedupe";
-import { renderWarmReconnectEmail, resolveWarmReconnectContentMode } from "@/lib/crm/warm-reconnect-email-renderer";
+import {
+  renderWarmReconnectCampaignEmail, resolveWarmReconnectCampaignContentMode,
+  isWarmReconnectCampaignArtworkMode, warmReconnectCampaignInlineAssets,
+} from "@/lib/crm/warm-reconnect-campaign-design";
+import { buildWarmReconnectCampaignDeliveryMime, type WarmReconnectCampaignDeliveryMessage } from "@/lib/google/gmail-campaign-design";
 import {
   WARM_RECONNECT_INVITATION_LEDGER_COLLECTION,
   parseWarmReconnectInvitationLedgerDocument,
@@ -290,7 +294,7 @@ export interface WarmReconnectExecutorDependencies {
     uid: string;
     pilot: WarmReconnectPilot;
   }) => Promise<string>;
-  renderMessage: typeof renderWarmReconnectEmail;
+  renderMessage: typeof renderWarmReconnectCampaignEmail;
   sendMessage: typeof sendWarmReconnectCampaignEmail;
   recordSent: (input: {
     claim: WarmReconnectExecutorClaim;
@@ -698,7 +702,7 @@ function assertFrozenLaunchPilot(
   }
   const gateIds = new Set(pilot.gates.map((gate) => gate.id));
   const expectedGateIds = new Set([...EXPECTED_GATE_IDS].filter((id) =>
-    resolveWarmReconnectContentMode(pilot.contentMode) === "artwork_html" ||
+    isWarmReconnectCampaignArtworkMode(pilot.contentMode) ||
     id !== "artwork_email_channel_approval"
   ));
   if (
@@ -2235,7 +2239,7 @@ function defaultDependencies(): WarmReconnectExecutorDependencies {
     markCapabilitiesPrepared: markWarmReconnectCapabilitiesPrepared,
     beginProviderAttempt: beginWarmReconnectProviderAttempt,
     resolveAccessToken: resolveWarmReconnectGmailAccessToken,
-    renderMessage: renderWarmReconnectEmail,
+    renderMessage: renderWarmReconnectCampaignEmail,
     sendMessage: sendWarmReconnectCampaignEmail,
     recordSent: recordWarmReconnectSent,
     recordDeliveryUnknown: recordWarmReconnectDeliveryUnknown,
@@ -2370,7 +2374,7 @@ export async function runWarmReconnectPilotExecutor(input: {
     };
   }
 
-  let rendered: ReturnType<typeof renderWarmReconnectEmail>;
+  let outbound: WarmReconnectCampaignDeliveryMessage;
   let accessToken: string;
   try {
     const campaign = await dependencies.loadCampaign({
@@ -2395,9 +2399,10 @@ export async function runWarmReconnectPilotExecutor(input: {
       capabilities.oneClickPath,
       claim.pilot.preferenceContract.origin
     ).toString();
-    rendered = dependencies.renderMessage({
+    const contentMode = resolveWarmReconnectCampaignContentMode(claim.pilot.contentMode);
+    const rendered = dependencies.renderMessage({
       campaign,
-      contentMode: resolveWarmReconnectContentMode(claim.pilot.contentMode),
+      contentMode,
       firstName: claim.recipient.greetingName || null,
       senderName: claim.pilot.sender.senderName,
       legalEntity: claim.pilot.sender.legalEntity,
@@ -2406,6 +2411,27 @@ export async function runWarmReconnectPilotExecutor(input: {
       unsubscribeUrl,
       publicOrigin: claim.pilot.preferenceContract.origin,
     });
+    if (rendered.contentMode !== contentMode) throw new ApiError(409, "The approved delivery mode changed.");
+    outbound = {
+      to: claim.email,
+      from: claim.pilot.sender.fromEmail,
+      senderName: claim.pilot.sender.senderName,
+      replyTo: claim.pilot.sender.replyTo,
+      subject: rendered.subject,
+      contentMode: rendered.contentMode,
+      plainText: rendered.plainText,
+      html: rendered.html,
+      messageId: deterministicMessageId(claim),
+      preferencesUrl: preferenceUrl,
+      oneClickUnsubscribeUrl: unsubscribeUrl,
+      ...(contentMode === "approved_design_v2" ? {
+        purpose: "campaign" as const,
+        inlineAssets: warmReconnectCampaignInlineAssets(),
+      } : {}),
+    };
+    // Reject a malformed or changed CID payload before the durable provider boundary.
+    // The sender repeats validation immediately before the sole provider request.
+    if (contentMode === "approved_design_v2") buildWarmReconnectCampaignDeliveryMime(outbound);
     accessToken = await dependencies.resolveAccessToken({
       uid: input.uid,
       pilot: claim.pilot,
@@ -2453,25 +2479,7 @@ export async function runWarmReconnectPilotExecutor(input: {
   try {
     providerResult = await dependencies.sendMessage(
       accessToken,
-      {
-        to: claim.email,
-        from: claim.pilot.sender.fromEmail,
-        senderName: claim.pilot.sender.senderName,
-        replyTo: claim.pilot.sender.replyTo,
-        subject: rendered.subject,
-        contentMode: rendered.contentMode,
-        plainText: rendered.plainText,
-        html: rendered.html,
-        messageId: deterministicMessageId(claim),
-        preferencesUrl: new URL(
-          capabilities.preferenceFragment,
-          claim.pilot.preferenceContract.origin
-        ).toString(),
-        oneClickUnsubscribeUrl: new URL(
-          capabilities.oneClickPath,
-          claim.pilot.preferenceContract.origin
-        ).toString(),
-      },
+      outbound,
       undefined
     );
   } catch {

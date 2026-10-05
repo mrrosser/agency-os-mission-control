@@ -99,6 +99,17 @@ describe("warm reconnect activation routes", () => {
     } as never);
   });
 
+  it("requires artwork approval for the approved v2 design before preparing a pilot", async () => {
+    const body = { ...pilotRequest, contentMode: "approved_design_v2" };
+    const rejected = await postPilot(jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", { ...body, artworkEmailApproval: undefined }) as never, context() as never);
+    expect(rejected.status).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+    const accepted = await postPilot(jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", body) as never, context() as never);
+    expect(accepted.status).toBe(201);
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ contentMode: "approved_design_v2", artworkEmailApproval: body.artworkEmailApproval }) }));
+    expect(await accepted.json()).toMatchObject({ providerAction: false });
+  });
+
   it("accepts preference buttons only without artwork approval", async () => {
     const body = { ...pilotRequest, contentMode: "preference_buttons", artworkEmailApproval: undefined };
     const accepted = await postPilot(jsonRequest("http://localhost/api/crm/warm-reconnect/pilots", body) as never, context() as never);

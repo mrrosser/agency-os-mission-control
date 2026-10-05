@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
+import historical from "@/tests/fixtures/warm-reconnect-qa-original.json";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED } from "@/lib/crm/warm-reconnect-qa-version";
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(), summary: vi.fn(), account: vi.fn(), accessToken: vi.fn(), sender: vi.fn(), scope: vi.fn(),
@@ -119,7 +121,7 @@ describe("fixed-recipient owner QA preparation and execution", () => {
   });
 
   it("owner reads do not prepare or write", async () => {
-    const f = fakeDb(); expect(await readWarmReconnectQaForOwner(uid, f.db)).toEqual({ testMode: true, status: "not_prepared" });
+    const f = fakeDb(); expect(await readWarmReconnectQaForOwner(uid, f.db)).toMatchObject({ testMode: true, status: "not_prepared", testId: ORIGINAL });
     expect(f.writes).toEqual([]); expect(mocks.account).not.toHaveBeenCalled();
   });
 
@@ -219,6 +221,102 @@ describe("fixed-recipient owner QA preparation and execution", () => {
     f.records.set(id, Object.fromEntries(Object.entries({ ...value, message }).sort(([a], [b]) => a.localeCompare(b))));
     expect(await send(f, prepared.artifactFingerprint)).toMatchObject({ status: "sent" });
     expect(mocks.sender).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("separately authorized revised design", () => {
+  const revisedPrepare = (f: ReturnType<typeof fakeDb>) => prepareWarmReconnectQa({ uid, recipient, log, db: f.db, now: NOW, testId: REVISED });
+  const revisedSend = (f: ReturnType<typeof fakeDb>, artifactFingerprint: string) => sendWarmReconnectQa({ uid, recipient, artifactFingerprint, confirmSendOneTest: true, db: f.db, now: NOW + 1000, testId: REVISED });
+  function historicalDb() {
+    const f = fakeDb();
+    for (const [key, value] of historical.records) f.records.set(key as string, structuredClone(value) as Stored);
+    return f;
+  }
+
+  it("reads the immutable baseline-generated original receipt and keeps its links functional", async () => {
+    const f = historicalDb(); const before = JSON.stringify([...f.records]);
+    const original = await readWarmReconnectQaForOwner(uid, f.db);
+    expect(original).toMatchObject({ testId: ORIGINAL, status: "sent", providerMessageId: "provider-message" });
+    expect(await processWarmReconnectQaPreference({ action: "inspect", token: historical.preferenceToken }, { db: f.db, now: NOW })).toMatchObject({ available: true, testMode: true });
+    expect(f.writes).toEqual([]); expect(JSON.stringify([...f.records])).toBe(before);
+    expect(await send(f, "artifactFingerprint" in original ? original.artifactFingerprint : "missing")).toMatchObject({ testId: ORIGINAL, status: "sent", providerAction: false });
+    expect(mocks.sender).not.toHaveBeenCalled();
+  });
+
+  it("freezes exact CID assets and version separately without changing the original receipt", async () => {
+    const f = historicalDb(); const originalEntries = JSON.stringify([...f.records]);
+    const revised = await revisedPrepare(f);
+    expect(revised).toMatchObject({ testId: REVISED, designVersion: "rosser-rt-library-kit-v1", designReady: true, status: "prepared" });
+    expect(revised.html).toContain('src="cid:nurturer-v1@rosser-owner-qa"');
+    expect(revised.html).not.toMatch(/preview\.invalid|assets\/|\{\{|data:/);
+    expect(revised).toHaveProperty("previewHtml", expect.stringContaining("data:image/jpeg;base64,"));
+    expect(revised.inlineAssetManifest).toHaveLength(3);
+    const saved = [...f.records.values()].find(value => value.testId === REVISED)!;
+    expect(JSON.stringify(saved)).not.toContain("base64");
+    expect(saved).toHaveProperty("inlineAssetManifest");
+    expect(JSON.stringify([...f.records].filter(([, value]) => value.testId !== REVISED))).toBe(originalEntries);
+    expect(await revisedPrepare(f)).toMatchObject({ replayed: true, artifactFingerprint: revised.artifactFingerprint });
+    expect(f.writes).toHaveLength(1);
+    expect(mocks.sender).not.toHaveBeenCalled();
+  });
+
+  it("rejects cross-version artifacts, arbitrary identities and changed recipient", async () => {
+    const f = fakeDb(); const original = await prepare(f); const revised = await revisedPrepare(f);
+    expect(original.artifactFingerprint).not.toBe(revised.artifactFingerprint);
+    await expect(revisedSend(f, original.artifactFingerprint)).rejects.toMatchObject({ status: 409 });
+    await expect(send(f, revised.artifactFingerprint)).rejects.toMatchObject({ status: 409 });
+    await expect(prepareWarmReconnectQa({ uid, recipient, log, db: f.db, testId: "arbitrary" as never })).rejects.toMatchObject({ status: 400 });
+    await expect(prepareWarmReconnectQa({ uid, recipient: "other@example.test", log, db: f.db, testId: REVISED })).rejects.toMatchObject({ status: 400 });
+    expect(mocks.sender).not.toHaveBeenCalled(); expect(mocks.accessToken).not.toHaveBeenCalled();
+  });
+
+  it("returns only revised identity under concurrent sends even when the original was already sent", async () => {
+    const f = historicalDb(); const revised = await revisedPrepare(f);
+    mocks.sender.mockResolvedValue({ id: "revised-provider-message", threadId: "revised-thread" });
+    const results = await Promise.all([revisedSend(f, revised.artifactFingerprint), revisedSend(f, revised.artifactFingerprint)]);
+    expect(mocks.sender).toHaveBeenCalledTimes(1);
+    for (const result of results) {
+      expect(result.testId).toBe(REVISED);
+      expect(result).not.toMatchObject({ providerMessageId: "provider-message" });
+    }
+    expect(mocks.sender.mock.calls[0][1].inlineAssets).toHaveLength(3);
+    expect(await readWarmReconnectQaForOwner(uid, f.db)).toMatchObject({ testId: ORIGINAL, status: "sent", providerMessageId: "provider-message" });
+    expect(await revisedSend(f, revised.artifactFingerprint)).toMatchObject({ testId: REVISED, providerAction: false });
+    expect(mocks.sender).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["timeout", "receipt-write-failure", "inflight"])("never retries revised ambiguous outcome: %s", async kind => {
+    const f = historicalDb(); const revised = await revisedPrepare(f);
+    if (kind === "inflight") {
+      const [key, value] = [...f.records].find(([, value]) => value.testId === REVISED)!;
+      f.records.set(key, { ...value, status: "provider_inflight" });
+    } else if (kind === "timeout") mocks.sender.mockRejectedValue(new Error("synthetic provider timeout"));
+    else f.failStatus("sent");
+    await revisedSend(f, revised.artifactFingerprint);
+    expect(await revisedSend(f, revised.artifactFingerprint)).toMatchObject({ testId: REVISED, providerAction: false, status: kind === "inflight" ? "provider_inflight" : "delivery_unknown" });
+    expect(mocks.sender).toHaveBeenCalledTimes(kind === "inflight" ? 0 : 1);
+    expect(await readWarmReconnectQaForOwner(uid, f.db)).toMatchObject({ providerMessageId: "provider-message", status: "sent" });
+  });
+
+  it("rejects asset-manifest tampering before token resolution or provider activity", async () => {
+    const f = fakeDb(); const revised = await revisedPrepare(f);
+    const [key, value] = [...f.records].find(([, value]) => value.testId === REVISED)!;
+    f.records.set(key, { ...value, inlineAssetManifest: [] });
+    await expect(revisedSend(f, revised.artifactFingerprint)).rejects.toMatchObject({ status: 409 });
+    expect(mocks.accessToken).not.toHaveBeenCalled(); expect(mocks.sender).not.toHaveBeenCalled();
+  });
+
+  it("keeps confirmation state and replay IDs isolated across original and revised capabilities", async () => {
+    const f = historicalDb(); const revised = await revisedPrepare(f); await revisedSend(f, revised.artifactFingerprint);
+    const message = mocks.sender.mock.calls[0][1];
+    const revisedToken = new URLSearchParams(new URL(message.preferencesUrl).hash.slice(1)).get("token")!;
+    for (const [token, topics] of [[historical.preferenceToken, { rosser_gallery: true, rt_solutions: false }], [revisedToken, { rosser_gallery: false, rt_solutions: true }]] as const) {
+      const inspected = await processWarmReconnectQaPreference({ action: "inspect", token }, { db: f.db, now: NOW });
+      expect(await processWarmReconnectQaPreference({ action: "save_preferences", token, topics, confirmationNonce: inspected.confirmationNonce!, requestId: "same-request-id" }, { db: f.db, now: NOW })).toMatchObject({ topics });
+    }
+    expect(await readWarmReconnectQaForOwner(uid, f.db)).toMatchObject({ qaPreferenceState: { topics: { rosser_gallery: true, rt_solutions: false } } });
+    expect(await readWarmReconnectQaForOwner(uid, f.db, REVISED)).toMatchObject({ qaPreferenceState: { topics: { rosser_gallery: false, rt_solutions: true } } });
+    expect(f.writes.every(path => Object.values(C).some(collection => path.startsWith(`${collection}/`)))).toBe(true);
   });
 });
 

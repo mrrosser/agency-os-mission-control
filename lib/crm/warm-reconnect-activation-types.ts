@@ -190,7 +190,7 @@ export interface WarmReconnectPilotAvailableActions {
   launchAuthorizesExactProviderExecution: true;
 }
 
-export type WarmReconnectContentMode = "artwork_html" | "plain_text" | "preference_buttons";
+export type WarmReconnectContentMode = "artwork_html" | "plain_text" | "preference_buttons" | "approved_design_v2";
 
 export interface WarmReconnectPilot {
   schemaVersion: typeof WARM_RECONNECT_PILOT_SCHEMA_VERSION;
@@ -235,6 +235,14 @@ export type WarmReconnectPilotView = Omit<
   "recipients" | "workspaceId" | "ownerUid" | "legacyDncOrgId"
 > & {
   recipients: WarmReconnectPilotRecipientView[];
+  emailPreview?: {
+    designVersion: string;
+    recipientId: string;
+    greetingName: string;
+    subject: string;
+    plainText: string;
+    html: string;
+  };
 };
 
 export interface WarmReconnectActivationResponse {

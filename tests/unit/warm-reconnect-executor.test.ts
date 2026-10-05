@@ -40,6 +40,9 @@ import {
 } from "@/lib/crm/warm-reconnect-invitation-ledger";
 import { WARM_RECONNECT_CAMPAIGN_VERSION } from "@/lib/crm/warm-reconnect-types";
 import { warmReconnectEmailKey } from "@/lib/crm/warm-reconnect-dedupe";
+import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
+import { isWarmReconnectCampaignArtworkMode, renderWarmReconnectCampaignEmail, warmReconnectCampaignAssetManifest } from "@/lib/crm/warm-reconnect-campaign-design";
+import { buildWarmReconnectCampaignDeliveryMime } from "@/lib/google/gmail-campaign-design";
 
 const START = new Date("2026-08-12T12:00:00.000Z");
 const RUN_AT = new Date("2026-08-12T15:00:00.000Z");
@@ -98,21 +101,23 @@ function launchedPilot(
       ],
       sender: {
         senderName: "Marcus Rosser",
-        legalEntity: "Rosser Gallery LLC",
-        replyTo: "marcus@example.com",
+        legalEntity: contentMode === "approved_design_v2" ? "Marcus Rosser / Rosser Gallery" : "Rosser Gallery LLC",
+        replyTo: contentMode === "approved_design_v2" ? "mrosser@rossergallery.com" : "marcus@example.com",
         physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
         businessId: "rosser_nft_gallery",
         profileId: "rosser_gallery_send",
       },
       contentMode,
-      ...(contentMode === "artwork_html" ? {
+      ...(isWarmReconnectCampaignArtworkMode(contentMode) ? {
         artworkEmailApproval: {
           approvedForThisEmailCampaign: true as const,
           evidenceNote: "Approved for this exact email campaign.",
         },
       } : {}),
     },
-    candidates: [1, 2, 3, 4, 5].map(candidate),
+    candidates: [1, 2, 3, 4, 5].map((index) => contentMode === "approved_design_v2" ? {
+      ...candidate(index), displayName: ["Avery", "Blake", "Cameron", "Devon", "Emery"][index - 1], email: `person${index}@example.test`,
+    } : candidate(index)),
     googleReady: true,
     fromEmail: "mrosser@rossergallery.com",
     accountId: "google-account-1",
@@ -152,7 +157,7 @@ function launchedPilot(
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        ...(contentMode === "artwork_html" ? { artworkApprovedForEmail: true as const } : {}),
+        ...(isWarmReconnectCampaignArtworkMode(contentMode) ? { artworkApprovedForEmail: true as const } : {}),
         exactAudienceReviewed: true,
       },
       note: "Approved for the exact five-person pilot.",
@@ -613,6 +618,63 @@ describe("warm reconnect provider executor", () => {
     expect(() => assertWarmReconnectPilotFingerprints(pilot)).not.toThrow();
     pilot.contentMode = "artwork_html";
     expect(() => assertWarmReconnectPilotFingerprints(pilot)).toThrow();
+  });
+
+  it("executes five frozen revised-design recipients with distinct production links and exact CID assets", async () => {
+    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-design", "approved_design_v2");
+    expect(pilot.artworkEmailApproval?.attested).toBe(true);
+    expect(pilot.gates.find((gate) => gate.id === "artwork_email_channel_approval")?.status).toBe("verified");
+    const baseCampaign = buildWarmReconnectCampaignDraft({
+      schemaVersion: 1, sourceOfTruth: "firestore_portfolio_registry", dataClassification: "aggregate_only", readOnly: true,
+      outreach: { status: "blocked", eligibleContacts: 0 }, permissions: { contactPointStates: { unknown: 0 }, sourceRecordsWithNoPermissionBasis: 0 },
+      totals: { people: 0, contactPoints: 0, emailContactPoints: 0 }, brands: { unassigned: 0 }, freshness: { observedAt: START.toISOString() },
+    } as never);
+    const capabilitiesSeen = new Set<string>();
+    for (const [index, recipient] of pilot.recipients.entries()) {
+      const preferenceToken = "p".repeat(42) + index;
+      const unsubscribeOnlyToken = "u".repeat(42) + index;
+      const deps = dependencies({
+        claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim: { ...claimFor(pilot), recipient, email: `person${index + 1}@example.test` } })),
+        issueCapabilities: vi.fn(async () => ({ preferenceToken, unsubscribeOnlyToken,
+          preferenceFragment: `/preferences#token=${preferenceToken}`, oneClickPath: `/api/crm/warm-reconnect/unsubscribe/${unsubscribeOnlyToken}` })),
+        renderMessage: vi.fn(renderWarmReconnectCampaignEmail),
+        loadCampaign: vi.fn(async () => ({ ...baseCampaign, review: { ...baseCampaign.review, previewFingerprint: PREVIEW_FINGERPRINT } })),
+      });
+      const result = await runWarmReconnectPilotExecutor({ uid: "owner-1", pilotId: pilot.pilotId, correlationId: `design-${index}`, log, db, now: RUN_AT, dependencies: deps });
+      expect(result).toMatchObject({ outcome: "sent", providerCalled: true });
+      expect(deps.beginProviderAttempt).toHaveBeenCalledOnce(); expect(deps.sendMessage).toHaveBeenCalledOnce();
+      expect(deps.issueCapabilities).toHaveBeenCalledWith(expect.objectContaining({ recipientId: recipient.recipientId, recipientDecisionId: recipient.decision.decisionId }), db);
+      const outbound = vi.mocked(deps.sendMessage).mock.calls[0][1];
+      expect(outbound).toMatchObject({
+        contentMode: "approved_design_v2", purpose: "campaign", to: `person${index + 1}@example.test`,
+        from: "mrosser@rossergallery.com", replyTo: "mrosser@rossergallery.com", senderName: "Marcus Rosser", subject: "A quick hello from Marcus",
+      });
+      expect(outbound.plainText).toContain(`Hi ${recipient.greetingName},`);
+      expect(outbound.html).toContain(`Hi ${recipient.greetingName},`);
+      expect(outbound.inlineAssets?.map((asset) => asset.sha256)).toEqual(warmReconnectCampaignAssetManifest().map((asset) => asset.sha256));
+      expect(outbound.html).not.toMatch(/mode=qa|\/qa\//);
+      const mime = buildWarmReconnectCampaignDeliveryMime(outbound);
+      expect(mime.match(/Content-ID:/g)).toHaveLength(3);
+      expect(mime).toContain(`List-Unsubscribe: <${outbound.oneClickUnsubscribeUrl}>`);
+      capabilitiesSeen.add(outbound.preferencesUrl); capabilitiesSeen.add(outbound.oneClickUnsubscribeUrl);
+    }
+    expect(capabilitiesSeen.size).toBe(10);
+  });
+
+  it("rejects malformed revised CID rendering before sender refresh or provider-inflight marking", async () => {
+    const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-design", "approved_design_v2");
+    const deps = dependencies({
+      claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim: claimFor(pilot) })),
+      renderMessage: vi.fn(() => ({
+        rendererVersion: "warm-reconnect-approved-design-renderer.v1" as const, contentMode: "approved_design_v2" as const, subject: "A quick hello from Marcus",
+        html: '<img src="cid:missing@example.test">', plainText: "Invalid rendering", artworkUrl: "", contractFingerprint: `sha256:${"f".repeat(64)}`,
+      })),
+    });
+    const result = await runWarmReconnectPilotExecutor({ uid: "owner-1", pilotId: pilot.pilotId, correlationId: "invalid-design", log, db, now: RUN_AT, dependencies: deps });
+    expect(result).toMatchObject({ outcome: "stopped", providerCalled: false, reason: "pre_provider_readiness_failed" });
+    expect(deps.resolveAccessToken).not.toHaveBeenCalled(); expect(deps.beginProviderAttempt).not.toHaveBeenCalled();
+    expect(deps.sendMessage).not.toHaveBeenCalled(); expect(deps.recordDeliveryUnknown).not.toHaveBeenCalled();
+    expect(deps.recordStoppedBeforeProvider).toHaveBeenCalledOnce();
   });
 
   it("stops before Gmail when the frozen preview or sender readiness drifts", async () => {

@@ -56,9 +56,13 @@ const APPROVAL_CONFIRMATIONS = [
   ["exactAudienceReviewed", "Exact five-person audience"],
 ] as const;
 
+function hasArtwork(contentMode?: WarmReconnectContentMode) {
+  return contentMode === "approved_design_v2" || (contentMode ?? "artwork_html") === "artwork_html";
+}
+
 function requiredConfirmations(contentMode?: WarmReconnectContentMode) {
   return APPROVAL_CONFIRMATIONS.filter(([key]) =>
-    (contentMode ?? "artwork_html") === "artwork_html" || key !== "artworkApprovedForEmail",
+    hasArtwork(contentMode) || key !== "artworkApprovedForEmail",
   );
 }
 
@@ -90,7 +94,7 @@ const INITIAL_SENDER_FORM: SenderForm = {
   replyTo: "",
   physicalPostalAddress: "",
   profileId: "rosser_gallery_send",
-  contentMode: "preference_buttons",
+  contentMode: "approved_design_v2",
   artworkEvidenceNote: "",
   artworkApproved: false,
 };
@@ -341,7 +345,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         profileId: profile.profileId,
       },
       contentMode: sender.contentMode,
-      ...(sender.contentMode === "artwork_html" ? {
+      ...(hasArtwork(sender.contentMode) ? {
         artworkEmailApproval: {
           approvedForThisEmailCampaign: true as const,
           evidenceNote: sender.artworkEvidenceNote.trim(),
@@ -419,7 +423,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         suppressionLedgerVerified: true,
         spfDkimDmarcVerified: true,
         replyToMonitored: true,
-        ...((pilot.contentMode ?? "artwork_html") !== "artwork_html" ? {} : { artworkApprovedForEmail: true as const }),
+        ...(!hasArtwork(pilot.contentMode) ? {} : { artworkApprovedForEmail: true as const }),
         exactAudienceReviewed: true,
       },
       note: approvalNote.trim(),
@@ -512,7 +516,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     sender.legalEntity.trim() &&
     sender.replyTo.trim() &&
     sender.physicalPostalAddress.trim() &&
-    (sender.contentMode !== "artwork_html" ||
+    (!hasArtwork(sender.contentMode) ||
       (sender.artworkApproved && sender.artworkEvidenceNote.trim())) &&
     !activePilot,
   );
@@ -687,12 +691,13 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     <label className="block text-xs text-zinc-300">
                       Email format
                       <select aria-label="Email format" value={sender.contentMode} onChange={(event) => setSender((current) => ({ ...current, contentMode: event.target.value as WarmReconnectContentMode }))} className="mt-1 w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
+                        <option value="approved_design_v2">Approved v2 design with inline artwork</option>
                         <option value="preference_buttons">Preference buttons (no artwork)</option>
                         <option value="plain_text">Plain text</option>
                         <option value="artwork_html">Email with artwork</option>
                       </select>
                     </label>
-                    {sender.contentMode !== "artwork_html" && <details className="rounded-md border border-white/10 p-3 text-xs leading-5 text-zinc-300">
+                    {!hasArtwork(sender.contentMode) && <details className="rounded-md border border-white/10 p-3 text-xs leading-5 text-zinc-300">
                       <summary className="cursor-pointer font-semibold">Preview invitation text and footer</summary>
                       <p className="mt-2 font-semibold">Subject: {campaign?.copy.subject}</p>
                       <pre className="mt-2 whitespace-pre-wrap font-sans">{campaign?.copy.plainText}</pre>
@@ -700,7 +705,8 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       <p className="whitespace-pre-wrap">{sender.physicalPostalAddress || "[Postal address required]"}</p>
                       <p className="mt-2">The final email includes your recipient&apos;s preference and unsubscribe links. Preference buttons open a selected choice; the recipient must confirm on the page. Rosser Gallery: https://rossergallery.com · RT.Solutions: https://rt.solutions</p>
                     </details>}
-                    {sender.contentMode === "artwork_html" && <>
+                    {sender.contentMode === "approved_design_v2" && <p className="text-xs leading-5 text-zinc-300">Uses the approved Nurturer design, Gallery crest and RT logo. Each invitation uses the reviewed first name and its own preference links. The saved review includes an inactive preview. Sender: Marcus Rosser / Rosser Gallery; reply-to: {ROSSER_GALLERY_SENDING_EMAIL}; postal footer: 2505 N Tonti St, New Orleans, LA 70117.</p>}
+                    {hasArtwork(sender.contentMode) && <>
                     <textarea aria-label="Artwork approval evidence" value={sender.artworkEvidenceNote} onChange={(event) => setSender((current) => ({ ...current, artworkEvidenceNote: event.target.value }))} placeholder="Why this artwork is approved for this exact email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <label className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
                       <input type="checkbox" checked={sender.artworkApproved} onChange={(event) => setSender((current) => ({ ...current, artworkApproved: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" />
@@ -810,8 +816,18 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     )}
 
                     <div className="rounded-lg border border-white/10 p-3 text-xs leading-5 text-zinc-300">
-                      <p className="font-semibold">Saved email format: {activePilot.contentMode === "preference_buttons" ? "Preference buttons (no artwork)" : activePilot.contentMode === "plain_text" ? "Plain text" : "Email with artwork"}</p>
-                      {(activePilot.contentMode ?? "artwork_html") !== "artwork_html" && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
+                      <p className="font-semibold">Saved email format: {activePilot.contentMode === "approved_design_v2" ? "Approved v2 design with inline artwork" : activePilot.contentMode === "preference_buttons" ? "Preference buttons (no artwork)" : activePilot.contentMode === "plain_text" ? "Plain text" : "Email with artwork"}</p>
+                      {activePilot.contentMode === "approved_design_v2" && activePilot.emailPreview && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer">Review approved design and recipient greeting</summary>
+                          <p className="mt-2 font-semibold">Subject: {activePilot.emailPreview.subject}</p>
+                          <p>Preview for {activePilot.emailPreview.greetingName}. Links are inactive; delivery creates each recipient&apos;s own links.</p>
+                          <iframe title="Approved campaign email preview" srcDoc={activePilot.emailPreview.html} sandbox="" referrerPolicy="no-referrer" className="mt-3 h-[820px] w-full rounded border border-white/10 bg-white" />
+                          <details className="mt-2"><summary className="cursor-pointer">Plain-text alternative</summary><pre className="mt-2 whitespace-pre-wrap font-sans">{activePilot.emailPreview.plainText}</pre></details>
+                          <p className="mt-2">Reviewed greetings: {activePilot.recipients.map((recipient) => recipient.greetingName).join(", ")}</p>
+                        </details>
+                      )}
+                      {!hasArtwork(activePilot.contentMode) && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
                         <details className="mt-2">
                           <summary className="cursor-pointer">Review saved invitation and footer</summary>
                           <p className="mt-2 font-semibold">Subject: {campaign.copy.subject}</p>

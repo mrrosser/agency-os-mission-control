@@ -10,7 +10,7 @@ import type {
 import { FieldValue } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
-import { resolveWarmReconnectContentMode } from "@/lib/crm/warm-reconnect-email-renderer";
+import { resolveWarmReconnectCampaignContentMode } from "@/lib/crm/warm-reconnect-campaign-design";
 import { isWarmReconnectProviderSendEnabled } from "@/lib/crm/warm-reconnect-provider-config";
 import type { Logger } from "@/lib/logging";
 import {
@@ -31,6 +31,7 @@ import {
 } from "@/lib/crm/warm-reconnect-activation-types";
 import {
   createWarmReconnectPilot,
+  buildWarmReconnectPilotEmailPreview,
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
   materializeWarmReconnectPilot,
@@ -538,7 +539,8 @@ async function hydratePilotView(
   void _ownerUid;
   void _legacyDncOrgId;
   void _storedRecipients;
-  return { ...publicPilot, recipients };
+  const emailPreview = buildWarmReconnectPilotEmailPreview(pilot);
+  return { ...publicPilot, recipients, ...(emailPreview ? { emailPreview } : {}) };
 }
 
 function assertOwnerAccess(
@@ -810,7 +812,7 @@ export async function createWarmReconnectPilotForUid(input: {
         warmReconnectFingerprint({
           preview: stored.campaignPreviewFingerprint,
           sender: stored.sender,
-          contentMode: resolveWarmReconnectContentMode(stored.contentMode),
+          contentMode: resolveWarmReconnectCampaignContentMode(stored.contentMode),
           artwork: stored.artworkEmailApproval,
           preference: stored.preferenceContract,
           recipients: stored.recipients.map((recipient) => ({
@@ -823,7 +825,7 @@ export async function createWarmReconnectPilotForUid(input: {
           warmReconnectFingerprint({
             preview: pilot.campaignPreviewFingerprint,
             sender: pilot.sender,
-            contentMode: resolveWarmReconnectContentMode(pilot.contentMode),
+            contentMode: resolveWarmReconnectCampaignContentMode(pilot.contentMode),
             artwork: pilot.artworkEmailApproval,
             preference: pilot.preferenceContract,
             recipients: pilot.recipients.map((recipient) => ({

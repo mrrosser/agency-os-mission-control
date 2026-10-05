@@ -21,19 +21,30 @@ import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
 import {
   WARM_RECONNECT_EMAIL_RENDERER_VERSION,
   WARM_RECONNECT_RENDERER_CONTRACT_VERSION,
-  renderWarmReconnectEmail,
-  resolveWarmReconnectContentMode,
-  warmReconnectRendererImplementationFingerprint,
 } from "@/lib/crm/warm-reconnect-email-renderer";
+import {
+  WARM_RECONNECT_CAMPAIGN_DESIGN_VERSION,
+  WARM_RECONNECT_CAMPAIGN_RENDERER_VERSION,
+  isWarmReconnectCampaignArtworkMode,
+  renderWarmReconnectCampaignEmail,
+  resolveWarmReconnectCampaignContentMode,
+  warmReconnectCampaignAssetManifest,
+  warmReconnectCampaignInlineAssets,
+  warmReconnectCampaignPreviewHtml,
+  warmReconnectCampaignRendererImplementationFingerprint,
+} from "@/lib/crm/warm-reconnect-campaign-design";
 import {
   WARM_RECONNECT_CAMPAIGN_ID,
   WARM_RECONNECT_CAMPAIGN_VERSION,
 } from "@/lib/crm/warm-reconnect-types";
 import {
   WARM_RECONNECT_MIME_VERSION,
-  buildWarmReconnectCampaignMime,
-  warmReconnectMimeImplementationFingerprint,
 } from "@/lib/google/gmail-campaign";
+import {
+  WARM_RECONNECT_CAMPAIGN_INLINE_MIME_VERSION,
+  buildWarmReconnectCampaignDeliveryMime,
+  warmReconnectCampaignMimeImplementationFingerprint,
+} from "@/lib/google/gmail-campaign-design";
 
 const APPROVAL_SCOPE = "exact_five_one_time_reconnection_emails" as const;
 const EXCLUDED_SCOPE = [
@@ -134,12 +145,13 @@ const DELIVERY_ARTIFACT_CONTRACT = {
   },
 } as const;
 
-function exactDeliveryTemplateFingerprint(
+function renderDeliveryTemplate(
   pilot: Pick<
     WarmReconnectPilot,
     "sender" | "preferenceContract" | "contentMode"
-  >
-): string {
+  >,
+  firstName: string,
+) {
   const preferenceToken = "p".repeat(43);
   const unsubscribeToken = "u".repeat(43);
   const preferencesUrl = `${pilot.preferenceContract.origin}/preferences#token=${preferenceToken}`;
@@ -157,10 +169,10 @@ function exactDeliveryTemplateFingerprint(
       alt: "Black two-figure braiding sculpture by Marcus Rosser on a reflective glass surface.",
     },
   } as never;
-  const rendered = renderWarmReconnectEmail({
+  return renderWarmReconnectCampaignEmail({
     campaign,
-    contentMode: resolveWarmReconnectContentMode(pilot.contentMode),
-    firstName: "<reviewed first name>",
+    contentMode: resolveWarmReconnectCampaignContentMode(pilot.contentMode),
+    firstName,
     senderName: pilot.sender.senderName,
     legalEntity: pilot.sender.legalEntity,
     physicalPostalAddress: pilot.sender.physicalPostalAddress,
@@ -168,7 +180,15 @@ function exactDeliveryTemplateFingerprint(
     unsubscribeUrl: oneClickUnsubscribeUrl,
     publicOrigin: pilot.preferenceContract.origin,
   });
-  const mime = buildWarmReconnectCampaignMime({
+}
+
+function exactDeliveryTemplateFingerprint(
+  pilot: Pick<WarmReconnectPilot, "sender" | "preferenceContract" | "contentMode">,
+): string {
+  const rendered = renderDeliveryTemplate(pilot, "<reviewed first name>");
+  const preferencesUrl = `${pilot.preferenceContract.origin}/preferences#token=${"p".repeat(43)}`;
+  const oneClickUnsubscribeUrl = `${pilot.preferenceContract.origin}/api/crm/warm-reconnect/unsubscribe/${"u".repeat(43)}`;
+  const mime = buildWarmReconnectCampaignDeliveryMime({
     contentMode: rendered.contentMode,
     to: "reviewed-recipient@example.invalid",
     from: pilot.sender.fromEmail,
@@ -180,12 +200,29 @@ function exactDeliveryTemplateFingerprint(
     messageId: `<warm-reconnect.review-template@${pilot.sender.fromEmail.split("@")[1]}>`,
     preferencesUrl,
     oneClickUnsubscribeUrl,
+    ...(rendered.contentMode === "approved_design_v2" ? { inlineAssets: warmReconnectCampaignInlineAssets() } : {}),
   });
   return warmReconnectFingerprint({
     contract: "warm-reconnect-rendered-delivery-template.v1",
     rendererContractFingerprint: rendered.contractFingerprint,
     mime,
   });
+}
+
+/** Authenticated review only: no issued capability and no active preview links. */
+export function buildWarmReconnectPilotEmailPreview(pilot: WarmReconnectPilot) {
+  if (pilot.contentMode !== "approved_design_v2") return undefined;
+  const recipient = pilot.recipients[0];
+  if (!recipient) throw new ApiError(409, "The reviewed audience is missing.");
+  const rendered = renderDeliveryTemplate(pilot, recipient.greetingName);
+  return {
+    designVersion: WARM_RECONNECT_CAMPAIGN_DESIGN_VERSION,
+    recipientId: recipient.recipientId,
+    greetingName: recipient.greetingName,
+    subject: rendered.subject,
+    plainText: rendered.plainText,
+    html: warmReconnectCampaignPreviewHtml(rendered.html).replace(/\s+href=(?:"[^"]*"|'[^']*')/gi, ""),
+  };
 }
 
 type ApprovalConfirmations = Extract<
@@ -210,14 +247,14 @@ export function computeWarmReconnectPilotFingerprints(
   >,
   executionPolicy: WarmReconnectExecutionPolicy = WARM_RECONNECT_EXECUTION_POLICY,
   deliveryImplementation = {
-    renderer: warmReconnectRendererImplementationFingerprint(),
-    mime: warmReconnectMimeImplementationFingerprint(),
+    renderer: warmReconnectCampaignRendererImplementationFingerprint(pilot.contentMode),
+    mime: warmReconnectCampaignMimeImplementationFingerprint(pilot.contentMode),
   }
 ) {
-  const contentMode = resolveWarmReconnectContentMode(pilot.contentMode);
+  const contentMode = resolveWarmReconnectCampaignContentMode(pilot.contentMode);
   if (
-    (contentMode !== "artwork_html" && pilot.artworkEmailApproval !== null) ||
-    (contentMode === "artwork_html" &&
+    (!isWarmReconnectCampaignArtworkMode(contentMode) && pilot.artworkEmailApproval !== null) ||
+    (isWarmReconnectCampaignArtworkMode(contentMode) &&
       (!pilot.artworkEmailApproval?.attested || !pilot.artworkEmailApproval.evidenceNote?.trim()))
   ) {
     throw new ApiError(409, "Artwork approval must match the reviewed content mode.");
@@ -235,6 +272,12 @@ export function computeWarmReconnectPilotFingerprints(
     exactDeliveryArtifact: {
       ...DELIVERY_ARTIFACT_CONTRACT,
       artworkSha256: contentMode === "artwork_html" ? DELIVERY_ARTIFACT_CONTRACT.artworkSha256 : null,
+      ...(contentMode === "approved_design_v2" ? {
+        designVersion: WARM_RECONNECT_CAMPAIGN_DESIGN_VERSION,
+        inlineAssetManifest: warmReconnectCampaignAssetManifest(),
+        rendererVersion: WARM_RECONNECT_CAMPAIGN_RENDERER_VERSION,
+        mimeVersion: WARM_RECONNECT_CAMPAIGN_INLINE_MIME_VERSION,
+      } : {}),
     },
     exactRenderedDeliveryTemplateFingerprint: exactDeliveryTemplateFingerprint(pilot),
     deliveryImplementation,
@@ -546,7 +589,7 @@ function buildGates(input: {
         : "Connect the selected Google profile with Gmail capability.",
     },
   ];
-  return resolveWarmReconnectContentMode(input.pilot.contentMode) !== "artwork_html"
+  return !isWarmReconnectCampaignArtworkMode(input.pilot.contentMode)
     ? gates.filter((gate) => gate.id !== "artwork_email_channel_approval")
     : gates;
 }
@@ -609,10 +652,10 @@ export function createWarmReconnectPilot(input: {
   accountId: string;
   legacyDncOrgId: string;
 }): WarmReconnectPilot {
-  const contentMode = resolveWarmReconnectContentMode(input.request.contentMode);
+  const contentMode = resolveWarmReconnectCampaignContentMode(input.request.contentMode);
   if (
-    (contentMode !== "artwork_html" && input.request.artworkEmailApproval !== undefined) ||
-    (contentMode === "artwork_html" &&
+    (!isWarmReconnectCampaignArtworkMode(contentMode) && input.request.artworkEmailApproval !== undefined) ||
+    (isWarmReconnectCampaignArtworkMode(contentMode) &&
       (!input.request.artworkEmailApproval?.approvedForThisEmailCampaign ||
         !input.request.artworkEmailApproval.evidenceNote?.trim()))
   ) {
@@ -647,6 +690,13 @@ export function createWarmReconnectPilot(input: {
   if (input.fromEmail !== expectedEmail) {
     throw new ApiError(400, "Sending requires the selected business's verified dedicated Google account.");
   }
+  if (contentMode === "approved_design_v2" && (
+    input.request.sender.profileId !== ROSSER_GALLERY_SENDING_PROFILE.profileId ||
+    input.request.sender.senderName !== "Marcus Rosser" ||
+    input.request.sender.legalEntity !== "Marcus Rosser / Rosser Gallery" ||
+    input.request.sender.physicalPostalAddress !== "2505 N Tonti St, New Orleans, LA 70117" ||
+    input.request.sender.replyTo !== ROSSER_GALLERY_SENDING_EMAIL
+  )) throw new ApiError(400, "The approved design requires the reviewed Gallery sender, reply-to and postal footer.");
 
   const now = (input.now || new Date()).toISOString();
   const recipients: WarmReconnectPilotRecipient[] = input.candidates.map((candidate) => ({
@@ -691,7 +741,7 @@ export function createWarmReconnectPilot(input: {
       fromEmail: input.fromEmail,
       accountId: input.accountId,
     },
-    artworkEmailApproval: contentMode === "artwork_html" ? {
+    artworkEmailApproval: isWarmReconnectCampaignArtworkMode(contentMode) ? {
       attested: true as const,
       evidenceNote: input.request.artworkEmailApproval!.evidenceNote,
     } : null,
@@ -847,7 +897,7 @@ export function decideWarmReconnectPilotApproval(input: {
     throw new ApiError(409, "All five recipient relationships must be attested first.");
   }
   if (
-    resolveWarmReconnectContentMode(input.pilot.contentMode) !== "artwork_html" &&
+    !isWarmReconnectCampaignArtworkMode(input.pilot.contentMode) &&
     input.request.confirmations.artworkApprovedForEmail !== undefined
   ) {
     throw new ApiError(400, "Approval for a format without artwork must omit artwork confirmation.");

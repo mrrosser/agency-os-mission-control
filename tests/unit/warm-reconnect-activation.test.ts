@@ -4,6 +4,7 @@ import {
   assertWarmReconnectStopBoundary,
   canReleaseWarmReconnectInitialPilotLock,
   computeWarmReconnectPilotFingerprints,
+  buildWarmReconnectPilotEmailPreview,
   createWarmReconnectPilot,
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
@@ -149,6 +150,42 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it("binds the approved inline design to named greetings while retaining every activation gate", () => {
+    const candidates = [1, 2, 3, 4, 5].map(candidate);
+    candidates[0].displayName = "alex Example";
+    const approvedDesignRequest = request({
+      contentMode: "approved_design_v2",
+      sender: { ...request().sender, legalEntity: "Marcus Rosser / Rosser Gallery", replyTo: "mrosser@rossergallery.com" },
+    });
+    const draft = create({ candidates, request: approvedDesignRequest });
+    expect(draft.contentMode).toBe("approved_design_v2");
+    expect(draft.recipients[0].greetingName).toBe("Alex");
+    expect(draft.recipients.every((row) => row.decision.permissionState === "unknown")).toBe(true);
+    expect(draft.gates).toHaveLength(9);
+    expect(draft.gates.find((row) => row.id === "artwork_email_channel_approval")?.status).toBe("pending_approval");
+    expect(() => create({ request: { ...approvedDesignRequest, artworkEmailApproval: undefined } })).toThrow("requires artwork approval");
+    expect(() => create({ request: { ...approvedDesignRequest, sender: { ...approvedDesignRequest.sender, replyTo: "other@example.test" } } })).toThrow("reviewed Gallery sender");
+    const attested = attestAll(draft);
+    expect(() => approve(attested)).toThrow("Every activation gate must be verified");
+    for (const key of ["spfDkimDmarcVerified", "physicalPostalAddressVerified", "preferencesAndUnsubscribeVerified", "suppressionLedgerVerified", "replyToMonitored", "artworkApprovedForEmail"]) {
+      expect(() => approve(attested, undefined, { artworkApprovedForEmail: true, [key]: undefined })).toThrow("Every activation gate must be verified");
+    }
+    const approved = approve(attested, undefined, { artworkApprovedForEmail: true });
+    expect(approved.status).toBe("approved");
+    const preview = buildWarmReconnectPilotEmailPreview(approved)!;
+    expect(preview.greetingName).toBe("Alex");
+    expect(preview.subject).toBe("A quick hello from Marcus");
+    expect(preview.html).toContain("Hi Alex,");
+    expect(preview.html).toContain("data:image/jpeg;base64,");
+    expect(preview.html).not.toMatch(/\shref=|\bcid:|mode=qa|\/qa\//i);
+    expect(preview.plainText).toContain("Hi Alex,");
+    const ordinary = create({ request: { ...approvedDesignRequest, contentMode: "preference_buttons", artworkEmailApproval: undefined } });
+    expect(ordinary.fingerprints.artifactFingerprint).not.toBe(draft.fingerprints.artifactFingerprint);
+    const changedGreeting = structuredClone(approved);
+    changedGreeting.recipients[0].greetingName = "Different";
+    expect(computeWarmReconnectPilotFingerprints(changedGreeting).audienceFingerprint).not.toBe(approved.fingerprints.audienceFingerprint);
+  });
+
   it("freezes capitalized first-name greetings without changing candidate names or permissions", () => {
     const candidates = [1, 2, 3, 4, 5].map(candidate);
     candidates[0].displayName = "cody lestelle w @Example";

@@ -7,18 +7,19 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import { assertPortfolioRegistryAccess, loadPortfolioCrmSummaryForUid } from "@/lib/crm/portfolio-registry";
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import { warmReconnectFingerprint as fingerprint } from "@/lib/crm/warm-reconnect-dedupe";
-import { renderWarmReconnectEmail, warmReconnectRendererImplementationFingerprint } from "@/lib/crm/warm-reconnect-email-renderer";
+import { assertWarmReconnectQaDesignReady, renderWarmReconnectQaDesign, warmReconnectQaAssetManifest, warmReconnectQaDesignReady, warmReconnectQaInlineAssets, warmReconnectQaPreviewHtml, warmReconnectQaRendererFingerprint } from "@/lib/crm/warm-reconnect-qa-design";
+import { isWarmReconnectQaTestId, WARM_RECONNECT_QA_ORIGINAL_TEST_ID, warmReconnectQaVersion, type WarmReconnectQaTestId } from "@/lib/crm/warm-reconnect-qa-version";
 import { isWarmReconnectProviderSendEnabled } from "@/lib/crm/warm-reconnect-provider-config";
 import { isWarmReconnectQaRecipient } from "@/lib/crm/warm-reconnect-qa-recipient";
 import type { WarmReconnectPreferenceResult, WarmReconnectTopics } from "@/lib/crm/warm-reconnect-preferences";
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import { getAccessTokenForUser, isGoogleTokenScopeBoundedForPreset } from "@/lib/google/oauth";
 import { ROSSER_GALLERY_SENDING_EMAIL, ROSSER_GALLERY_SENDING_PROFILE } from "@/lib/google/business-profiles";
-import { buildWarmReconnectCampaignMime, warmReconnectMimeImplementationFingerprint, type WarmReconnectCampaignMessage } from "@/lib/google/gmail-campaign";
+import { buildWarmReconnectCampaignMime, buildWarmReconnectCampaignMimeWithInlineAssets, warmReconnectInlineMimeImplementationFingerprint, warmReconnectMimeImplementationFingerprint, type WarmReconnectCampaignMessage } from "@/lib/google/gmail-campaign";
 import { sendWarmReconnectCampaignEmail } from "@/lib/google/gmail-campaign-sender";
 import type { Logger } from "@/lib/logging";
 
-/** This is one individually authorized test, not a reusable mailing endpoint. */
+/** Only the fixed, separately authorized owner tests are supported. */
 export const WARM_RECONNECT_QA_SUBJECT = "[TEST] A quick hello from Marcus" as const;
 export const WARM_RECONNECT_QA_COLLECTIONS = {
   runs: "crm_warm_reconnect_qa_runs",
@@ -26,7 +27,6 @@ export const WARM_RECONNECT_QA_COLLECTIONS = {
   choices: "crm_warm_reconnect_qa_choices",
   requests: "crm_warm_reconnect_qa_requests",
 } as const;
-const TEST_ID = "gallery-owner-single-test-2026-10-04";
 const PREVIEW_PREFERENCE_TOKEN = "p".repeat(43);
 const PREVIEW_UNSUBSCRIBE_TOKEN = "u".repeat(43);
 const CAPABILITY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -37,7 +37,9 @@ const MAX_CONFIRMATIONS = 100;
 type QaStatus = "prepared" | "provider_inflight" | "sent" | "delivery_unknown";
 type QaRun = {
   schemaVersion: 1;
-  testId: typeof TEST_ID;
+  testId: WarmReconnectQaTestId;
+  designVersion?: string;
+  inlineAssetManifest?: ReturnType<typeof warmReconnectQaAssetManifest>;
   ownerUid: string;
   workspaceId: string;
   accountId: string;
@@ -88,8 +90,8 @@ function unavailable(): WarmReconnectQaPreferenceResult {
 function confirmationNonce(token: string): string {
   return hash(`warm-reconnect-owner-qa-confirmation:v1:${token}`);
 }
-function runId(workspaceId: string): string {
-  return hash(`${TEST_ID}:${workspaceId}`);
+function runId(workspaceId: string, testId: WarmReconnectQaTestId): string {
+  return hash(`${testId}:${workspaceId}`);
 }
 function publicOrigin(): string {
   const value = process.env.WARM_RECONNECT_PUBLIC_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || "https://leadflow-review.web.app";
@@ -123,33 +125,47 @@ async function assertGalleryAccount(uid: string, expectedAccountId?: string): Pr
   return record.accountId;
 }
 
-function artifactFingerprint(run: Pick<QaRun, "message" | "accountId" | "rendererImplementationFingerprint" | "mimeImplementationFingerprint">): string {
+function artifactFingerprint(run: Pick<QaRun, "testId" | "designVersion" | "inlineAssetManifest" | "message" | "accountId" | "rendererImplementationFingerprint" | "mimeImplementationFingerprint">): string {
   return fingerprint({
+    // Preserve the exact original fingerprint algorithm and persisted record.
+    ...(run.testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? {} : { testId: run.testId, designVersion: run.designVersion, inlineAssetManifest: run.inlineAssetManifest }),
     message: run.message, accountId: run.accountId,
     rendererImplementationFingerprint: run.rendererImplementationFingerprint,
     mimeImplementationFingerprint: run.mimeImplementationFingerprint,
   });
 }
+function mimeFingerprint(testId: WarmReconnectQaTestId) {
+  return testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? warmReconnectMimeImplementationFingerprint() : warmReconnectInlineMimeImplementationFingerprint();
+}
+function validateMessage(testId: WarmReconnectQaTestId, message: WarmReconnectCampaignMessage) {
+  if (testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID) buildWarmReconnectCampaignMime(message);
+  else buildWarmReconnectCampaignMimeWithInlineAssets({ ...message, inlineAssets: warmReconnectQaInlineAssets() });
+}
 function assertImplementationCurrent(run: QaRun) {
-  if (run.rendererImplementationFingerprint !== warmReconnectRendererImplementationFingerprint() ||
-      run.mimeImplementationFingerprint !== warmReconnectMimeImplementationFingerprint()) {
+  if (run.rendererImplementationFingerprint !== warmReconnectQaRendererFingerprint(run.testId) ||
+      run.mimeImplementationFingerprint !== mimeFingerprint(run.testId)) {
     throw new ApiError(409, "The reviewed QA renderer or MIME implementation changed.");
   }
 }
-function assertFrozenRun(run: QaRun, uid: string, workspaceId: string) {
-  if (run.schemaVersion !== 1 || run.testId !== TEST_ID || run.ownerUid !== uid || run.workspaceId !== workspaceId ||
+function assertFrozenRun(run: QaRun, uid: string, workspaceId: string, expectedTestId: WarmReconnectQaTestId = run.testId) {
+  if (!isWarmReconnectQaTestId(run.testId)) throw new ApiError(409, "Unknown frozen owner test version.");
+  const version = warmReconnectQaVersion(run.testId);
+  if (run.schemaVersion !== 1 || run.testId !== expectedTestId || run.ownerUid !== uid || run.workspaceId !== workspaceId ||
+      (run.testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? run.designVersion !== undefined : run.designVersion !== version.designVersion) ||
+      (run.testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? run.inlineAssetManifest !== undefined : fingerprint(run.inlineAssetManifest) !== fingerprint(warmReconnectQaAssetManifest())) ||
       !isWarmReconnectQaRecipient(run.message?.to) || run.message?.from !== ROSSER_GALLERY_SENDING_EMAIL ||
-      run.message.replyTo !== ROSSER_GALLERY_SENDING_EMAIL || run.message.subject !== WARM_RECONNECT_QA_SUBJECT ||
+      run.message.replyTo !== ROSSER_GALLERY_SENDING_EMAIL || run.message.subject !== version.subject ||
       run.message.purpose !== "owner_qa" || run.message.contentMode !== "preference_buttons" ||
       !/^sha256:[a-f0-9]{64}$/.test(run.rendererImplementationFingerprint) ||
       !/^sha256:[a-f0-9]{64}$/.test(run.mimeImplementationFingerprint) ||
       run.artifactFingerprint !== artifactFingerprint(run)) {
     throw new ApiError(409, "The frozen QA artifact could not be verified.");
   }
-  buildWarmReconnectCampaignMime(run.message);
+  validateMessage(run.testId, run.message);
 }
 function review(run: QaRun) {
   return {
+    ...warmReconnectQaVersion(run.testId), designReady: warmReconnectQaDesignReady(run.testId),
     testMode: true as const, recipient: run.message.to,
     from: ROSSER_GALLERY_SENDING_EMAIL, status: run.status,
     artifactFingerprint: run.artifactFingerprint, preparedAtMs: run.preparedAtMs,
@@ -157,17 +173,25 @@ function review(run: QaRun) {
     rendererImplementationFingerprint: run.rendererImplementationFingerprint,
     mimeImplementationFingerprint: run.mimeImplementationFingerprint,
     subject: run.message.subject, plainText: run.message.plainText, html: run.message.html,
+    ...(run.testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? {} : {
+      inlineAssetManifest: run.inlineAssetManifest, previewHtml: warmReconnectQaPreviewHtml(run.message.html),
+    }),
     previewLinksOnly: true, maximumProviderAttempts: 1,
     providerMessageId: run.providerMessageId || null,
   };
 }
 
-export async function readWarmReconnectQaForOwner(uid: string, db: Firestore = getAdminDb()) {
+export async function readWarmReconnectQaForOwner(uid: string, db: Firestore = getAdminDb(), testId: WarmReconnectQaTestId = WARM_RECONNECT_QA_ORIGINAL_TEST_ID) {
+  if (!isWarmReconnectQaTestId(testId)) throw new ApiError(400, "Unknown owner test version.");
   const access = await assertOwner(uid, db);
-  const snapshot = await db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(runId(access.workspaceId)).get();
-  if (!snapshot.exists) return { testMode: true as const, status: "not_prepared" as const };
+  const snapshot = await db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(runId(access.workspaceId, testId)).get();
+  if (!snapshot.exists) return {
+    ...warmReconnectQaVersion(testId), designReady: warmReconnectQaDesignReady(testId),
+    testMode: true as const, status: warmReconnectQaDesignReady(testId) ? "not_prepared" as const : "blocked" as const,
+    ...(!warmReconnectQaDesignReady(testId) ? { blockedReason: "exact_design_kit_missing" as const } : {}),
+  };
   const run = snapshot.data() as QaRun;
-  assertFrozenRun(run, uid, access.workspaceId);
+  assertFrozenRun(run, uid, access.workspaceId, testId);
   const state = await db.collection(WARM_RECONNECT_QA_COLLECTIONS.choices).doc(snapshot.id).get();
   const stored = state.data() as QaState | undefined;
   return {
@@ -182,26 +206,30 @@ export async function readWarmReconnectQaForOwner(uid: string, db: Firestore = g
 
 /** Freeze placeholder-based content for owner review; no capability or provider action. */
 export async function prepareWarmReconnectQa(input: {
-  uid: string; recipient: string; log: Logger; db?: Firestore; now?: number;
+  uid: string; recipient: string; log: Logger; db?: Firestore; now?: number; testId?: WarmReconnectQaTestId;
 }) {
   const recipient = typeof input.recipient === "string" ? input.recipient.trim().toLowerCase() : "";
   if (!isWarmReconnectQaRecipient(recipient)) throw new ApiError(400, "The test recipient is fixed.");
   const db = input.db || getAdminDb();
   const access = await assertOwner(input.uid, db);
-  const ref = db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(runId(access.workspaceId));
+  const testId = input.testId ?? WARM_RECONNECT_QA_ORIGINAL_TEST_ID;
+  if (!isWarmReconnectQaTestId(testId)) throw new ApiError(400, "Unknown owner test version.");
+  const version = warmReconnectQaVersion(testId);
+  const ref = db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(runId(access.workspaceId, testId));
   const existing = await ref.get();
   if (existing.exists) {
     const run = existing.data() as QaRun;
-    assertFrozenRun(run, input.uid, access.workspaceId);
+    assertFrozenRun(run, input.uid, access.workspaceId, testId);
     return { ...review(run), replayed: true };
   }
+  assertWarmReconnectQaDesignReady(testId);
   const accountId = await assertGalleryAccount(input.uid);
   const summary = await loadPortfolioCrmSummaryForUid(input.uid, input.log, db);
   const campaign = buildWarmReconnectCampaignDraft(summary);
   const origin = publicOrigin();
   const preferencesUrl = `${origin}/preferences#token=${PREVIEW_PREFERENCE_TOKEN}&mode=qa`;
   const unsubscribeUrl = `${origin}/api/crm/warm-reconnect/qa/unsubscribe/${PREVIEW_UNSUBSCRIBE_TOKEN}`;
-  const rendered = renderWarmReconnectEmail({
+  const rendered = renderWarmReconnectQaDesign(testId, {
     purpose: "owner_qa", campaign,
     contentMode: "preference_buttons", firstName: "Marcus", senderName: "Marcus Rosser",
     legalEntity: "Marcus Rosser / Rosser Gallery", physicalPostalAddress: "2505 N Tonti St, New Orleans, LA 70117",
@@ -210,24 +238,25 @@ export async function prepareWarmReconnectQa(input: {
   const message: WarmReconnectCampaignMessage = {
     purpose: "owner_qa", contentMode: "preference_buttons", to: recipient,
     from: ROSSER_GALLERY_SENDING_EMAIL, senderName: "Marcus Rosser", replyTo: ROSSER_GALLERY_SENDING_EMAIL,
-    subject: WARM_RECONNECT_QA_SUBJECT, plainText: rendered.plainText, html: rendered.html,
+    subject: version.subject, plainText: rendered.plainText, html: rendered.html,
     messageId: `<qa-${ref.id}@rossergallery.com>`, preferencesUrl, oneClickUnsubscribeUrl: unsubscribeUrl,
   };
   const implementations = {
-    rendererImplementationFingerprint: warmReconnectRendererImplementationFingerprint(),
-    mimeImplementationFingerprint: warmReconnectMimeImplementationFingerprint(),
+    rendererImplementationFingerprint: warmReconnectQaRendererFingerprint(testId),
+    mimeImplementationFingerprint: mimeFingerprint(testId),
   };
+  const identity = { testId, ...(testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? {} : { designVersion: version.designVersion, inlineAssetManifest: warmReconnectQaAssetManifest() }) };
   const candidate: QaRun = {
-    schemaVersion: 1, testId: TEST_ID, ownerUid: input.uid, workspaceId: access.workspaceId, accountId,
+    schemaVersion: 1, ...identity, ownerUid: input.uid, workspaceId: access.workspaceId, accountId,
     status: "prepared", preparedAtMs: input.now ?? Date.now(), ...implementations,
-    artifactFingerprint: artifactFingerprint({ message, accountId, ...implementations }), message,
+    artifactFingerprint: artifactFingerprint({ ...identity, message, accountId, ...implementations }), message,
   };
-  assertFrozenRun(candidate, input.uid, access.workspaceId);
+  assertFrozenRun(candidate, input.uid, access.workspaceId, testId);
   return db.runTransaction(async (tx) => {
     const current = await tx.get(ref);
     if (current.exists) {
       const run = current.data() as QaRun;
-      assertFrozenRun(run, input.uid, access.workspaceId);
+      assertFrozenRun(run, input.uid, access.workspaceId, testId);
       return { ...review(run), replayed: true };
     }
     tx.create(ref, candidate);
@@ -238,21 +267,24 @@ export async function prepareWarmReconnectQa(input: {
 /** Claim once before the provider call. Neither failures nor repeats may send again. */
 export async function sendWarmReconnectQa(input: {
   uid: string; recipient: string; artifactFingerprint: string;
-  confirmSendOneTest: true; db?: Firestore; now?: number;
+  confirmSendOneTest: true; db?: Firestore; now?: number; testId?: WarmReconnectQaTestId;
 }) {
   const recipient = typeof input.recipient === "string" ? input.recipient.trim().toLowerCase() : "";
   if (!isWarmReconnectQaRecipient(recipient) || input.confirmSendOneTest !== true) throw new ApiError(400, "Confirm the exact one-test recipient.");
   const db = input.db || getAdminDb();
   const access = await assertOwner(input.uid, db);
-  const id = runId(access.workspaceId);
+  const testId = input.testId ?? WARM_RECONNECT_QA_ORIGINAL_TEST_ID;
+  if (!isWarmReconnectQaTestId(testId)) throw new ApiError(400, "Unknown owner test version.");
+  const id = runId(access.workspaceId, testId);
   const ref = db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(id);
   const loaded = await ref.get();
   if (!loaded.exists) throw new ApiError(409, "Prepare and review the test first.");
   const run = loaded.data() as QaRun;
-  assertFrozenRun(run, input.uid, access.workspaceId);
+  assertFrozenRun(run, input.uid, access.workspaceId, testId);
   if (run.message.to !== recipient) throw new ApiError(409, "Confirm the exact frozen test recipient.");
   if (run.artifactFingerprint !== input.artifactFingerprint) throw new ApiError(409, "Review the exact frozen test before sending.");
   if (run.status !== "prepared") return { ...review(run), replayed: true, providerAction: false };
+  assertWarmReconnectQaDesignReady(testId);
   assertImplementationCurrent(run);
   const now = input.now ?? Date.now();
   if (now < run.preparedAtMs || now - run.preparedAtMs > PREPARATION_TTL_MS) throw new ApiError(409, "The test review has expired.");
@@ -268,11 +300,12 @@ export async function sendWarmReconnectQa(input: {
     ...run.message, plainText: substitute(run.message.plainText), html: substitute(run.message.html),
     preferencesUrl: substitute(run.message.preferencesUrl), oneClickUnsubscribeUrl: substitute(run.message.oneClickUnsubscribeUrl),
   };
-  buildWarmReconnectCampaignMime(message);
+  validateMessage(testId, message);
+  const outbound = testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? message : { ...message, inlineAssets: warmReconnectQaInlineAssets() };
   const claimed = await db.runTransaction(async (tx) => {
     const snapshot = await tx.get(ref);
     const current = snapshot.data() as QaRun;
-    assertFrozenRun(current, input.uid, access.workspaceId);
+    assertFrozenRun(current, input.uid, access.workspaceId, testId);
     assertImplementationCurrent(current);
     if (current.artifactFingerprint !== input.artifactFingerprint) throw new ApiError(409, "The reviewed artifact changed.");
     if (current.status !== "prepared") return false;
@@ -287,22 +320,22 @@ export async function sendWarmReconnectQa(input: {
     tx.create(db.collection(WARM_RECONNECT_QA_COLLECTIONS.choices).doc(id), emptyState());
     tx.set(ref, {
       ...current, status: "provider_inflight", providerStartedAtMs: now,
-      deliveredArtifactFingerprint: fingerprint(message), capabilityExpiresAtMs: now + CAPABILITY_TTL_MS,
+      deliveredArtifactFingerprint: fingerprint(testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID ? message : { message, inlineAssetManifest: current.inlineAssetManifest }), capabilityExpiresAtMs: now + CAPABILITY_TTL_MS,
     });
     return true;
   });
-  if (!claimed) return { ...(await readWarmReconnectQaForOwner(input.uid, db)), replayed: true, providerAction: false };
+  if (!claimed) return { ...(await readWarmReconnectQaForOwner(input.uid, db, testId)), replayed: true, providerAction: false };
   let sent: { id: string; threadId: string };
   try {
     // Shared sender performs one fetch, with no automatic retry. Do not log provider errors/content.
-    sent = await sendWarmReconnectCampaignEmail(accessToken, message);
+    sent = await sendWarmReconnectCampaignEmail(accessToken, outbound);
     if (!sent?.id || !sent?.threadId) throw new Error("Missing delivery evidence");
     await db.runTransaction(async (tx) => {
       const current = (await tx.get(ref)).data() as QaRun;
       if (current.status !== "provider_inflight") throw new Error("Unexpected QA state");
       tx.set(ref, { ...current, status: "sent", providerMessageId: sent.id, providerThreadId: sent.threadId, terminalAtMs: now });
     });
-    return { testMode: true as const, status: "sent" as const, providerMessageId: sent.id, providerAction: true, replayed: false };
+    return { ...warmReconnectQaVersion(testId), testMode: true as const, status: "sent" as const, providerMessageId: sent.id, providerAction: true, replayed: false };
   } catch {
     // A provider error or failed receipt write is ambiguous. Persist unknown if possible;
     // even a failed persistence leaves the durable inflight claim blocking all retries.
@@ -312,7 +345,7 @@ export async function sendWarmReconnectQa(input: {
         if (current.status === "provider_inflight") tx.set(ref, { ...current, status: "delivery_unknown", terminalAtMs: now });
       });
     } catch { /* durable provider_inflight claim remains terminal for sending */ }
-    return { testMode: true as const, status: "delivery_unknown" as const, providerAction: true, replayed: false };
+    return { ...warmReconnectQaVersion(testId), testMode: true as const, status: "delivery_unknown" as const, providerAction: true, replayed: false };
   }
 }
 
@@ -333,10 +366,10 @@ async function processQa(input: WarmReconnectQaMutation | { action: "one_click";
         !/^[a-f0-9]{64}$/.test(token.runId) || !Number.isSafeInteger(token.expiresAtMs)) return unavailable();
     const runSnapshot = await tx.get(db.collection(WARM_RECONNECT_QA_COLLECTIONS.runs).doc(token.runId));
     const run = runSnapshot.data() as QaRun | undefined;
-    if (!run || run.testId !== TEST_ID || !["provider_inflight", "sent", "delivery_unknown"].includes(run.status) ||
+    if (!run || !isWarmReconnectQaTestId(run.testId) || !["provider_inflight", "sent", "delivery_unknown"].includes(run.status) ||
         run.artifactFingerprint !== token.artifactFingerprint || !isWarmReconnectQaRecipient(run.message?.to)) return unavailable();
     try { assertFrozenRun(run, run.ownerUid, run.workspaceId); } catch { return unavailable(); }
-    if (runId(run.workspaceId) !== token.runId) return unavailable();
+    if (runId(run.workspaceId, run.testId) !== token.runId) return unavailable();
     const stateRef = db.collection(WARM_RECONNECT_QA_COLLECTIONS.choices).doc(token.runId);
     const stateSnapshot = await tx.get(stateRef);
     let state = stateSnapshot.exists ? stateSnapshot.data() as QaState : emptyState();

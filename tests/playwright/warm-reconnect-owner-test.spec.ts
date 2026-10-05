@@ -1,9 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, warmReconnectQaVersion } from "../../lib/crm/warm-reconnect-qa-version";
+
 const API_KEY = "playwright-local-api-key";
 const fingerprint = `sha256:${"a".repeat(64)}`;
-const review = { testMode: true, status: "prepared", artifactFingerprint: fingerprint,
-  recipient: "owner-qa@example.test", from: "mrosser@rossergallery.com", subject: "[TEST] A quick hello from Marcus",
+const review = { ...warmReconnectQaVersion(REVISED), designReady: true, testMode: true, status: "prepared", artifactFingerprint: fingerprint,
+  recipient: "owner-qa@example.test", from: "mrosser@rossergallery.com", subject: warmReconnectQaVersion(REVISED).subject,
   plainText: "Hi Marcus,\nReview fixture only.", html: '<!doctype html><html><head></head><body><p>Hi Marcus,</p><a href="https://example.invalid">Both</a></body></html>' };
 
 async function persistUser(page: Page, uid: string) {
@@ -34,13 +36,13 @@ async function persistUser(page: Page, uid: string) {
   }, { key: `firebase:authUser:${API_KEY}:[DEFAULT]`, user });
 }
 
-async function fixture(page: Page, baseURL: string, outcome: "sent" | "delivery_unknown" | "network_error" = "sent", holdPrepare = false, target = "/dashboard/crm", fillInbox = true) {
+
+async function fixture(page: Page, baseURL: string, options: { outcome?: "sent" | "delivery_unknown" | "network_error"; blocked?: boolean; wrongVersion?: boolean; holdPrepare?: boolean; target?: string } = {}) {
   const origin = new URL(baseURL).origin;
   expect(["localhost", "127.0.0.1"]).toContain(new URL(origin).hostname);
   const calls: { method: string; path: string; body: Record<string, unknown> | null; uid: string | null }[] = [];
-  let release: (() => void) | undefined;
-  let prepareCount = 0;
-  let sent = false;
+  const prepared = new Set<string>(); const sent = new Set<string>();
+  let release: (() => void) | undefined; let held = false;
   await page.context().route("**/*", async route => {
     const request = route.request(); const url = new URL(request.url());
     if (url.origin !== origin) return route.abort();
@@ -52,109 +54,130 @@ async function fixture(page: Page, baseURL: string, outcome: "sent" | "delivery_
       return route.fulfill({ json: {} });
     }
     const auth = request.headers().authorization;
-    calls.push({ method: request.method(), path: url.pathname, body: request.postData() ? request.postDataJSON() : null,
-      uid: auth ? JSON.parse(Buffer.from(auth.split(".")[1], "base64url").toString()).sub : null });
-    if (url.pathname.endsWith("/prepare")) {
-      if (request.method() === "POST" && holdPrepare && prepareCount++ === 0) await new Promise<void>(resolve => { release = resolve; });
-      return route.fulfill({ json: { ...review, status: sent ? outcome === "sent" ? "sent" : "delivery_unknown" : "prepared",
-        qaPreferenceState: sent ? { topics: { rosser_gallery: true, rt_solutions: true }, globallyUnsubscribed: false, confirmations: 1 } : null } });
+    const uid = auth ? JSON.parse(Buffer.from(auth.split(".")[1], "base64url").toString()).sub : null;
+    calls.push({ method: request.method(), path: url.pathname, body: request.postData() ? request.postDataJSON() : null, uid });
+    if (!url.pathname.includes("/revised/")) {
+      expect(request.method()).toBe("GET");
+      return route.fulfill({ json: { ...warmReconnectQaVersion(ORIGINAL), designReady: true, testMode: true, status: "sent", providerMessageId: "original-fixture-receipt" } });
     }
-    sent = true;
-    if (outcome === "network_error") return route.abort("failed");
-    return route.fulfill({ json: { testMode: true, status: outcome, providerMessageId: outcome === "sent" ? "local-fixture-delivery" : null } });
+    if (url.pathname.endsWith("/prepare")) {
+      if (request.method() === "POST") {
+        if (options.holdPrepare && !held) { held = true; await new Promise<void>(resolve => { release = resolve; }); }
+        prepared.add(uid);
+      }
+      const status = options.blocked ? "blocked" : sent.has(uid) ? options.outcome === "sent" || !options.outcome ? "sent" : "delivery_unknown" : prepared.has(uid) ? "prepared" : "not_prepared";
+      return route.fulfill({ json: { ...review, ...(options.wrongVersion && prepared.has(uid) ? warmReconnectQaVersion(ORIGINAL) : {}), status, designReady: !options.blocked,
+        ...(sent.has(uid) ? { providerMessageId: "revised-fixture-receipt", qaPreferenceState: { topics: { rosser_gallery: true, rt_solutions: true }, globallyUnsubscribed: false, confirmations: 1 } } : {}) } });
+    }
+    sent.add(uid);
+    if (options.outcome === "network_error") return route.abort("failed");
+    return route.fulfill({ json: { ...warmReconnectQaVersion(REVISED), testMode: true, status: options.outcome || "sent", providerMessageId: "revised-fixture-receipt" } });
   });
   await page.context().routeWebSocket("**", socket => socket.close());
   await page.goto("/login", { waitUntil: "domcontentloaded" });
   await persistUser(page, "qa-owner-a");
-  await page.goto(target, { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: target.endsWith("/test-email") ? "Test your outreach email" : "Your next conversation.", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.goto(options.target || "/dashboard/crm/test-email", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: options.target ? "Your next conversation." : "Test your outreach email", exact: true })).toBeVisible({ timeout: 20_000 });
   const tour = page.getByTestId("first-scan-tour");
   if (await tour.isVisible().catch(() => false)) await tour.getByTitle("Dismiss").click();
-  if (!target.endsWith("/test-email")) await page.getByRole("tab", { name: "Outreach", exact: true }).click();
-  const panel = page.getByTestId("warm-reconnect-owner-test");
-  await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeDisabled();
-  if (fillInbox) {
-    await panel.getByLabel("Approved test inbox").fill(review.recipient);
-    await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeEnabled();
-  }
+  if (options.target) await page.getByRole("tab", { name: "Outreach", exact: true }).click();
+  const panel = page.getByTestId("owner-test-revised");
+  await expect(panel.getByRole("button", { name: "Prepare revised private test" })).toBeDisabled();
   return { calls, panel, release: () => release?.() };
 }
 
-test.describe("owner-only test panel with local synthetic authentication", () => {
+async function prepare(state: Awaited<ReturnType<typeof fixture>>) {
+  await state.panel.getByRole("button", { name: "Refresh revised test" }).click();
+  await state.panel.getByLabel("Approved revised-test inbox").fill(review.recipient);
+  await state.panel.getByRole("button", { name: "Prepare revised private test" }).click();
+}
+
+test.describe("versioned owner test panel with local synthetic authentication", () => {
   test.setTimeout(60_000);
   test.skip(Boolean(process.env.PLAYWRIGHT_BASE_URL), "Synthetic authentication must never run against a deployed service.");
 
-  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct private test is visible without campaign setup at ${viewport.width}px`, async ({ page, baseURL }) => {
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`revised version and readiness controls are visible at ${viewport.width}px`, async ({ page, baseURL }) => {
     await page.setViewportSize(viewport);
-    const { calls, panel } = await fixture(page, baseURL!, "sent", false, "/dashboard/crm/test-email", false);
-    await expect(panel.getByLabel("Approved test inbox")).toBeInViewport();
-    await expect(panel.getByRole("button", { name: "Prepare private test" })).toBeInViewport();
-    await expect(page.getByRole("button", { name: "Prepare exact five-person review" })).toHaveCount(0);
-    expect(calls).toEqual([]);
+    const state = await fixture(page, baseURL!);
+    await expect(state.panel.getByRole("heading")).toBeInViewport();
+    await expect(state.panel.getByRole("button", { name: "Refresh revised test" })).toBeInViewport();
+    await expect(state.panel).toContainText(REVISED);
+    expect(state.calls).toEqual([]);
     const width = await page.evaluate(() => ({ content: document.documentElement.scrollWidth, viewport: innerWidth }));
     expect(width.content).toBeLessThanOrEqual(width.viewport + 1);
-    await panel.getByLabel("Approved test inbox").fill(review.recipient);
-    await panel.getByRole("button", { name: "Prepare private test" }).click();
-    await expect(panel.getByRole("button", { name: "Send one test" })).toBeDisabled();
-    expect(calls.filter(call => call.path.endsWith("/send"))).toHaveLength(0);
   });
 
-  test("CRM offers a direct test link and places the private panel before the campaign", async ({ page, baseURL }) => {
-    const { calls, panel } = await fixture(page, baseURL!);
-    await expect(page.getByRole("link", { name: "Test one email", exact: true })).toHaveAttribute("href", "/dashboard/crm/test-email");
-    expect(await page.locator("#crm-panel-outreach > :first-child").getAttribute("data-testid")).toBe("warm-reconnect-owner-test");
-    await page.getByRole("link", { name: "Test one email", exact: true }).click();
-    await expect(page).toHaveURL(/\/dashboard\/crm\/test-email$/);
-    await expect(panel.getByLabel("Approved test inbox")).toBeVisible();
-    expect(calls).toEqual([]);
+  test("preserves the original receipt in a read-only panel", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!);
+    await page.getByText("Original October 4 test receipt (read only)", { exact: true }).click();
+    const old = page.getByTestId("owner-test-original");
+    await old.getByRole("button", { name: "Refresh original receipt" }).click();
+    await expect(old).toContainText("original-fixture-receipt");
+    await expect(old.getByRole("button")).toHaveCount(1);
+    await expect(old.getByRole("checkbox")).toHaveCount(0);
+    expect(state.calls).toHaveLength(1); expect(state.calls[0].method).toBe("GET");
   });
 
-  test("requires review and explicit send, then reads back test-only choices", async ({ page, baseURL }) => {
-    const { calls, panel } = await fixture(page, baseURL!);
-    expect(calls).toEqual([]);
-    await expect(panel).not.toContainText(review.recipient);
-    await panel.getByRole("button", { name: "Prepare private test" }).click();
-    await expect(panel.getByRole("button", { name: "Send one test" })).toBeDisabled();
-    expect(calls[0]).toMatchObject({ method: "POST", uid: "qa-owner-a" });
-    expect(calls[0].body).toEqual({ recipient: review.recipient, testOnly: true });
-    await expect(panel).toContainText(review.recipient);
-    await expect(page.frameLocator('iframe[title="Private test email preview"]').locator("a")).not.toHaveAttribute("href");
-    await panel.getByRole("checkbox").check();
-    await panel.getByRole("button", { name: "Send one test" }).click();
-    await expect(panel.getByRole("status")).toContainText("Test sent.");
-    expect(calls[1]).toMatchObject({ method: "POST", uid: "qa-owner-a", body: { recipient: "owner-qa@example.test", artifactFingerprint: fingerprint, confirmSendOneTest: true } });
-    await panel.getByRole("button", { name: "Refresh test receipt" }).click();
-    await expect(panel).toContainText("Test choices: Rosser Gallery and RT.Solutions");
-    expect(calls.filter(call => call.path.endsWith("/send"))).toHaveLength(1);
-    expect(calls.at(-1)?.method).toBe("GET");
+  test("requires revised review, fingerprint and explicit version confirmation", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!); await prepare(state);
+    await expect(state.panel.getByRole("button", { name: "Send one revised test" })).toBeDisabled();
+    await expect(state.panel).toContainText(fingerprint);
+    await expect(page.frameLocator('iframe[title="Private revised test email preview"]').locator("a")).not.toHaveAttribute("href");
+    await state.panel.getByRole("checkbox").check();
+    await state.panel.getByRole("button", { name: "Send one revised test" }).click();
+    await expect(state.panel.getByRole("status")).toContainText("This version was sent");
+    const sends = state.calls.filter(call => call.path.endsWith("/send"));
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ path: "/api/crm/warm-reconnect/qa/revised/send", uid: "qa-owner-a", body: { recipient: review.recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true, reviewedTestId: REVISED, reviewedDesignVersion: warmReconnectQaVersion(REVISED).designVersion } });
+    await state.panel.getByRole("button", { name: "Refresh revised test" }).click();
+    await expect(state.panel).toContainText("Test choices: Rosser Gallery and RT.Solutions");
   });
 
-  for (const outcome of ["delivery_unknown", "network_error"] as const) test(`${outcome} never offers a blind resend`, async ({ page, baseURL }) => {
-    const { calls, panel } = await fixture(page, baseURL!, outcome);
-    await panel.getByRole("button", { name: "Prepare private test" }).click();
-    await panel.getByRole("checkbox").check();
-    await panel.getByRole("button", { name: "Send one test" }).click();
-    if (outcome === "network_error") await expect(panel.getByRole("alert")).toContainText("Do not send another test");
-    else await expect(panel.getByRole("status")).toContainText("Delivery is uncertain");
-    await panel.getByRole("button", { name: "Refresh test receipt" }).click();
-    await expect(panel.getByRole("status")).toContainText("Delivery is uncertain");
-    await expect(panel.getByRole("button", { name: "Send one test" })).toHaveCount(0);
-    expect(calls.filter(call => call.path.endsWith("/send"))).toHaveLength(1);
+  test("missing exact design disables preparation and send", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, { blocked: true });
+    await state.panel.getByRole("button", { name: "Refresh revised test" }).click();
+    await expect(state.panel).toContainText("Preparation and sending are disabled");
+    await expect(state.panel.getByRole("button", { name: "Prepare revised private test" })).toBeDisabled();
+    await expect(state.panel.getByRole("checkbox")).toHaveCount(0);
+    expect(state.calls.every(call => call.method === "GET")).toBe(true);
   });
 
-  test("switching owners releases pending controls and ignores a late old-owner draft", async ({ page, baseURL }) => {
-    const state = await fixture(page, baseURL!, "sent", true);
-    await state.panel.getByRole("button", { name: "Prepare private test" }).click();
-    await expect.poll(() => state.calls.length).toBe(1);
+  test("rejects an original-version response at the revised route", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, { wrongVersion: true }); await prepare(state);
+    await expect(state.panel.getByRole("alert")).toContainText("This test version could not be loaded");
+    await expect(state.panel.getByRole("button", { name: "Send one revised test" })).toHaveCount(0);
+    expect(state.calls.filter(call => call.path.endsWith("/send"))).toHaveLength(0);
+  });
+
+  for (const outcome of ["delivery_unknown", "network_error"] as const) test(`${outcome} keeps the revised send locked`, async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, { outcome }); await prepare(state);
+    await state.panel.getByRole("checkbox").check();
+    await state.panel.getByRole("button", { name: "Send one revised test" }).click();
+    if (outcome === "network_error") await expect(state.panel.getByRole("alert")).toContainText("Do not send another test");
+    else await expect(state.panel.getByRole("status")).toContainText("Delivery is uncertain");
+    await state.panel.getByRole("button", { name: "Refresh revised test" }).click();
+    await expect(state.panel.getByRole("status")).toContainText("Delivery is uncertain");
+    await expect(state.panel.getByRole("button", { name: "Send one revised test" })).toHaveCount(0);
+    expect(state.calls.filter(call => call.path.endsWith("/send"))).toHaveLength(1);
+  });
+
+  test("switching owners ignores a late draft and clears confirmation", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, { holdPrepare: true }); await prepare(state);
+    await expect.poll(() => state.calls.length).toBe(2);
     await persistUser(page, "qa-owner-b");
-    await expect(state.panel.getByLabel("Approved test inbox")).toBeEnabled({ timeout: 15_000 });
-    await expect(state.panel.getByLabel("Approved test inbox")).toHaveValue("");
-    await state.panel.getByLabel("Approved test inbox").fill(review.recipient);
-    await expect(state.panel.getByRole("button", { name: "Prepare private test" })).toBeEnabled();
+    await expect(state.panel.getByRole("button", { name: "Refresh revised test" })).toBeEnabled({ timeout: 15_000 });
+    await expect(state.panel.getByRole("checkbox")).toHaveCount(0);
     state.release();
-    await state.panel.getByRole("button", { name: "Refresh test receipt" }).click();
-    await expect(state.panel.getByRole("button", { name: "Send one test" })).toBeDisabled();
+    await state.panel.getByRole("button", { name: "Refresh revised test" }).click();
+    await expect(state.panel.getByLabel("Approved revised-test inbox")).toHaveValue("");
     expect(state.calls.at(-1)?.uid).toBe("qa-owner-b");
     expect(state.calls.some(call => call.path.endsWith("/send"))).toBe(false);
+  });
+
+  test("CRM keeps the direct test link and panel before campaign controls", async ({ page, baseURL }) => {
+    const state = await fixture(page, baseURL!, { target: "/dashboard/crm" });
+    await expect(page.getByRole("link", { name: "Test one email", exact: true })).toHaveAttribute("href", "/dashboard/crm/test-email");
+    expect(await page.locator("#crm-panel-outreach > :first-child").getAttribute("data-testid")).toBe("warm-reconnect-owner-test");
+    expect(state.calls).toEqual([]);
   });
 });

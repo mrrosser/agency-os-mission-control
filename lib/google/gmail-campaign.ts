@@ -227,3 +227,97 @@ export function buildWarmReconnectCampaignMime(
   ];
   return [...headers, "", ...body].join("\r\n");
 }
+
+export const WARM_RECONNECT_INLINE_MIME_VERSION = "warm-reconnect-owner-inline.v1" as const;
+
+export interface WarmReconnectInlineAsset {
+  contentId: string;
+  filename: string;
+  contentType: "image/jpeg" | "image/png";
+  bytes: Uint8Array;
+  sha256: string;
+}
+
+export type WarmReconnectInlineMessage = WarmReconnectCampaignMessage & {
+  inlineAssets: readonly WarmReconnectInlineAsset[];
+};
+
+function validatedInlineAssets(input: WarmReconnectInlineMessage) {
+  if (input.purpose !== "owner_qa" || input.contentMode === "plain_text") {
+    throw new Error("Inline artwork is restricted to owner HTML tests");
+  }
+  if (!Array.isArray(input.inlineAssets) || input.inlineAssets.length < 1 || input.inlineAssets.length > 8) {
+    throw new Error("Invalid inline artwork count");
+  }
+  const seen = new Set<string>();
+  let totalBytes = 0;
+  const assets = input.inlineAssets.map((asset) => {
+    if (!asset || !/^[a-z0-9][a-z0-9._-]{0,95}@rosser-owner-qa$/.test(asset.contentId)) {
+      throw new Error("Invalid inline content ID");
+    }
+    if (seen.has(asset.contentId)) throw new Error("Duplicate inline content ID");
+    seen.add(asset.contentId);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}\.(?:jpg|jpeg|png)$/.test(asset.filename)) {
+      throw new Error("Invalid inline filename");
+    }
+    if (!(asset.bytes instanceof Uint8Array) || asset.bytes.byteLength < 8 || asset.bytes.byteLength > 2 * 1024 * 1024) {
+      throw new Error("Invalid inline artwork bytes");
+    }
+    const bytes = Buffer.from(asset.bytes);
+    totalBytes += bytes.byteLength;
+    if (totalBytes > 4 * 1024 * 1024) throw new Error("Inline artwork exceeds total limit");
+    const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+    if (!((asset.contentType === "image/png" && png && /\.png$/.test(asset.filename)) ||
+      (asset.contentType === "image/jpeg" && jpeg && /\.jpe?g$/.test(asset.filename)))) {
+      throw new Error("Inline artwork content type mismatch");
+    }
+    if (!/^[a-f0-9]{64}$/.test(asset.sha256) || createHash("sha256").update(bytes).digest("hex") !== asset.sha256) {
+      throw new Error("Inline artwork hash mismatch");
+    }
+    return { ...asset, bytes };
+  });
+  const references = [...input.html.matchAll(/\bcid:([^\s"'<>]+)/g)].map((match) => match[1]);
+  if (!references.length || references.some((id) => !seen.has(id)) || assets.some((asset) => !references.includes(asset.contentId))) {
+    throw new Error("Inline artwork references do not match the frozen assets");
+  }
+  return assets.sort((a, b) => a.contentId.localeCompare(b.contentId, "en"));
+}
+
+export function warmReconnectInlineMimeImplementationFingerprint(): string {
+  return `sha256:${createHash("sha256").update([
+    WARM_RECONNECT_INLINE_MIME_VERSION,
+    warmReconnectMimeImplementationFingerprint(),
+    validatedInlineAssets.toString(),
+    buildWarmReconnectCampaignMimeWithInlineAssets.toString(),
+  ].join("\n---\n")).digest("hex")}`;
+}
+
+export function buildWarmReconnectCampaignMimeWithInlineAssets(input: WarmReconnectInlineMessage): string {
+  // Keep the legacy builder and fingerprint unchanged for the first frozen test.
+  const original = buildWarmReconnectCampaignMime(input);
+  const assets = validatedInlineAssets(input);
+  const relatedBoundary = `related_${createHash("sha256").update(JSON.stringify([
+    WARM_RECONNECT_INLINE_MIME_VERSION, input.messageId,
+    assets.map(({ contentId, filename, contentType, sha256 }) => ({ contentId, filename, contentType, sha256 })),
+  ])).digest("hex").slice(0, 32)}`;
+  const htmlPart = ["Content-Type: text/html; charset=utf-8", "Content-Transfer-Encoding: base64", "", base64Lines(input.html)].join("\r\n");
+  if (original.split(htmlPart).length !== 2) throw new Error("Expected one HTML MIME alternative");
+  const related = [
+    `Content-Type: multipart/related; boundary="${relatedBoundary}"; type="text/html"`,
+    "",
+    `--${relatedBoundary}`,
+    htmlPart,
+    ...assets.flatMap((asset) => [
+      `--${relatedBoundary}`,
+      `Content-Type: ${asset.contentType}; name="${asset.filename}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-ID: <${asset.contentId}>`,
+      `Content-Disposition: inline; filename="${asset.filename}"`,
+      "",
+      asset.bytes.toString("base64").match(/.{1,76}/g)?.join("\r\n") || "",
+    ]),
+    `--${relatedBoundary}--`,
+  ].join("\r\n");
+  return original.replace(htmlPart, related);
+}

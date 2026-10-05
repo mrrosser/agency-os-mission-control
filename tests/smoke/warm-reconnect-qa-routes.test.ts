@@ -16,6 +16,9 @@ vi.mock("@/lib/crm/warm-reconnect-qa", () => ({
 }));
 import { GET as read, POST as prepare } from "@/app/api/crm/warm-reconnect/qa/prepare/route";
 import { POST as send } from "@/app/api/crm/warm-reconnect/qa/send/route";
+import { GET as revisedRead, POST as revisedPrepare } from "@/app/api/crm/warm-reconnect/qa/revised/prepare/route";
+import { POST as revisedSend } from "@/app/api/crm/warm-reconnect/qa/revised/send/route";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, warmReconnectQaVersion } from "@/lib/crm/warm-reconnect-qa-version";
 import { GET as preferenceGet, HEAD as preferenceHead, POST as preference } from "@/app/api/crm/warm-reconnect/qa/preferences/route";
 import { GET as unsubscribeGet, HEAD as unsubscribeHead, POST as unsubscribe } from "@/app/api/crm/warm-reconnect/qa/unsubscribe/[token]/route";
 
@@ -40,6 +43,45 @@ beforeEach(() => {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+describe("fixed revised owner test routes", () => {
+  it("reads and prepares only the server-defined revised identity", async () => {
+    await revisedRead(new Request("https://leadflow-review.web.app/api/crm/warm-reconnect/qa/revised/prepare") as never, context());
+    expect(mocks.read).toHaveBeenCalledWith("owner", undefined, REVISED);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect((await revisedPrepare(request("revised/prepare", { recipient, testOnly: true }), context())).status).toBe(200);
+    expect(mocks.prepare).toHaveBeenCalledWith({ uid: "owner", recipient, log: expect.anything(), testId: REVISED });
+  });
+
+  it("requires the literal revised version confirmation and prevents old-page or arbitrary-body sends", async () => {
+    const valid = { recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true, reviewedTestId: REVISED, reviewedDesignVersion: warmReconnectQaVersion(REVISED).designVersion };
+    for (const body of [
+      { recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true },
+      { ...valid, reviewedTestId: ORIGINAL }, { ...valid, reviewedTestId: "arbitrary" },
+      { ...valid, reviewedDesignVersion: "another-design" }, { ...valid, html: "<p>caller template</p>" },
+      { ...valid, testId: ORIGINAL }, { ...valid, inlineAssets: [] },
+    ]) expect((await revisedSend(request("revised/send", body), context())).status).toBe(400);
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect((await revisedSend(request("revised/send", valid), context())).status).toBe(200);
+    expect(mocks.send).toHaveBeenCalledWith({ uid: "owner", recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true, testId: REVISED });
+  });
+
+  it("rejects version, HTML, account and asset overrides at revised preparation", async () => {
+    for (const extra of [{ testId: ORIGINAL }, { html: "<p>override</p>" }, { from: "other@example.test" }, { inlineAssets: [] }, { designVersion: "v3" }]) {
+      expect((await revisedPrepare(request("revised/prepare", { recipient, testOnly: true, ...extra }), context())).status).toBe(400);
+    }
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it("requires owner authentication for both revised endpoints and preserves no-query guards", async () => {
+    mocks.auth.mockRejectedValue(new ApiError(401, "Missing authorization"));
+    expect((await revisedPrepare(request("revised/prepare", { recipient, testOnly: true }), context())).status).toBe(401);
+    expect((await revisedSend(request("revised/send", {}), context())).status).toBe(401);
+    expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    mocks.auth.mockResolvedValue({ uid: "owner" });
+    expect((await revisedPrepare(request("revised/prepare?testId=other", { recipient, testOnly: true }), context())).status).toBe(400);
+  });
 });
 
 describe("owner QA API authentication and exact action boundaries", () => {

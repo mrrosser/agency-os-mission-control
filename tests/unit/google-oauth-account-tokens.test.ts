@@ -27,7 +27,7 @@ const {
     resolveGoogleAccountTokensMock: vi.fn(),
     persistGoogleAccountTokensMock: vi.fn(),
     persistGoogleAccountTokenFailureMock: vi.fn(),
-    oauthClientMock: vi.fn(() => client),
+    oauthClientMock: vi.fn(function () { return client; }),
     getAccessTokenMock,
     setCredentialsMock,
     getAdminDbMock: vi.fn(),

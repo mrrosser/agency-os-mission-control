@@ -34,8 +34,8 @@ Repository gates remain `npm run lint`, `npm run test:unit`, `npm run test:smoke
 
 ## Deployment and rollback
 
-This candidate is a draft PR only. No live pilot operation, provider send, merge or deployment is part of preparing it. Use the existing protected PR/main Firebase workflow after review and all release gates pass. No Firestore rule, migration, index, dependency, credential, IAM, environment flag or scheduler change is required. The PR validation workflow has provider sends disabled and does not deploy previews.
+The combined candidate includes this recovery transition and the scoped dependency security updates documented in the [release repair report](reports/2026-10-07-crm-dependency-release-repair.md). Use the existing protected PR/main Firebase workflow after review and all release gates pass. No live pilot operation or provider send is part of preparing or deploying the code. No Firestore rule, migration, index, credential, IAM, environment flag or scheduler change is required. The PR validation workflow has provider sends disabled and does not deploy previews.
 
-The fresh October 7 registry audit fails on the unchanged dependency lock (three critical, three high and seventeen moderate findings). The release gate stays in force; resolve dependencies separately through review before deployment. Do not waive the gate for this feature.
+The initial October 7 audit blocked this candidate on its then-unchanged dependency lock. Marcus subsequently authorized the scoped dependency repair; its fresh audit has zero high/critical findings and fifteen remaining moderate findings. The same protected audit and application-validation gates remain required before deployment. No gate exception is used, and the remaining moderate findings are not claimed fixed.
 
 Rollback the source through a reviewed revert and the same release workflow. Preserve all recovery events and live state: a pilot already returned to review safely remains unapproved under the prior application. Do not restore the expired approval, rewrite execution evidence, release the campaign lock or recreate a pilot as a rollback mechanism.

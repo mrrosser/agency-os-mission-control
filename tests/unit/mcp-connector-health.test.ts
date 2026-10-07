@@ -6,9 +6,9 @@ const googleAuthMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("google-auth-library", () => ({
-  GoogleAuth: vi.fn(() => ({
-    getIdTokenClient: googleAuthMocks.getIdTokenClient,
-  })),
+  GoogleAuth: vi.fn(function () {
+    return { getIdTokenClient: googleAuthMocks.getIdTokenClient };
+  }),
 }));
 
 import {

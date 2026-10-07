@@ -98,8 +98,8 @@ describe("ad-ops routes", () => {
       timeoutMs: 1000,
     }));
     AdOpsClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           listCampaigns: vi.fn(async () => [
             {
               providerId: "meta_ads",
@@ -115,7 +115,8 @@ describe("ad-ops routes", () => {
             },
           ]),
           invokeCampaignAction: vi.fn(async () => ({ ok: true })),
-        }) as never
+        }) as never;
+      }
     );
     assertProviderSpendAllowedMock.mockResolvedValue(undefined);
   });

@@ -58,15 +58,16 @@ describe("agents actions route", () => {
     }));
     readPaperclipClientConfigMock.mockReturnValue(null);
     PaperclipClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           invokeLifecycleAction: vi.fn(async () => ({
             ok: true,
             status: 200,
             detail: "forwarded",
             payload: { ok: true },
           })),
-        }) as never
+        }) as never;
+      }
     );
   });
 

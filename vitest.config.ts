@@ -7,6 +7,9 @@ export default defineConfig({
     jsxImportSource: "react",
   },
   test: {
+    // Vitest 4 no longer clears automock call history in restoreAllMocks.
+    // Keep every test's external-action assertions isolated from prior cases.
+    clearMocks: true,
     environment: "node",
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
   },

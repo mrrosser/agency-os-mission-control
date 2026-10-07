@@ -1,5 +1,7 @@
 # Expired, never-dispatched pilot recovery
 
+The initial implementation and validation below are preserved historical evidence. The subsequently authorized [dependency repair](2026-10-07-crm-dependency-release-repair.md) addresses the release audit blocker and records current validation for the updated PR.
+
 An initial exact-five pilot can remain `launch_requested` after its approval expires even though dispatch never began. The old application closes approval in that state. The new owner action checks execution evidence and returns that same pilot to unapproved review. It preserves the original campaign lock, copy, audience, fingerprints and evidence. Approval and launch remain separate ordinary actions.
 
 ## Scope and authority

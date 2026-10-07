@@ -30,3 +30,17 @@ Base: production merge `5eedcb94df79cedf4f70be1c9d185bdb0e3c4c8f`, isolated bran
 2026-10-07: recovered current cloud/Gmail evidence, confirmed missing state transition in deployed source, created isolated worktree from production commit, implemented bounded recovery and completed application validation. Root and independent agent review found no blocking source issue. Published scoped implementation commit `c3f5d6f6a695c55d7217ff2e3b41b2f1ffb6f8ca` in draft PR #60; the dependency audit prevents release readiness. The deployed application and live pilot remain unchanged.
 
 Run/deploy/rollback: [recovery guide](../warm-reconnect-expired-launch-review.md). Validation: [October 7 report](../reports/2026-10-07-expired-unsent-pilot-review.md).
+
+## Authorized dependency repair follow-up
+
+Marcus explicitly requested fixing the CRM release blocker. Continue on PR #60 without changing campaign source, approval gates, provider authority or existing evidence. No merge/deployment/live recovery/send until the updated result is reviewed by the root agent.
+
+- [x] Reproduce current official-registry audit: three critical/four high/sixteen moderate. Verify upstream advisories and patched releases.
+- [x] Upgrade sharp 0.35.4 to 0.35.5; preserve the existing shared sharp override. Update compatible transitive proxy-addr to 2.0.8 and source-map-js to 1.2.2.
+- [x] Upgrade the development-only runner to Vitest 4.1.11, the patched 4.x release. It removes the vulnerable Tinypool dependency and fixes mocker path traversal. Explicitly pin existing Vite 7.3.6; preserve constructor fixture results, all assertions and explicit restoration, with per-test call-history cleanup configured.
+- [x] Safely detach only this worktree's shared node_modules junction; create an owned installation. Preserve other worktrees' dependencies. Reviewed lock changes and Node 22 compatibility. Fresh audit: zero high/critical, fifteen moderate.
+- [x] Four dependency runtime checks and complete unit/smoke suite: 1,808 tests / 258 files passed. Production build, TypeScript and lint passed; official-registry audit zero high/critical, fifteen moderate. Existing lint guard passed with its unchanged timeout after the final run removed check contention. All assertions preserved.
+- [x] Prepare current scoped reports, guide and PR #60 update with upstream references, fresh validation and source preservation evidence. Publication and CI receipts are retained in the external handoff manifest; root reviews the update before any merge/deployment/live action.
+- [ ] Final publication handoff: scoped secrets/whitespace scan, commit/push, and current-head protected CI readback. No release or live campaign authority is granted by this checklist.
+
+Official references: [sharp 0.35.5 advisory](https://github.com/advisories/GHSA-wq5f-xc86-pv6w), [proxy-addr 2.0.8 advisory](https://github.com/advisories/GHSA-jqcg-44mw-7w3h), [source-map-js 1.2.2 advisory](https://github.com/advisories/GHSA-68fv-2mgg-jv7q), [Tinypool 2.1.2 advisory](https://github.com/advisories/GHSA-85c8-ppgw-ccpr), [Vitest 4.1.11 release](https://github.com/vitest-dev/vitest/releases/tag/v4.1.11). Earlier audit results remain historical evidence.

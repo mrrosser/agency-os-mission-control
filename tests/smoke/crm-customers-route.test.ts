@@ -68,12 +68,13 @@ describe("crm customer routes", () => {
     }));
     readPaperclipClientConfigMock.mockReturnValue(null);
     PaperclipClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           listCustomers: vi.fn(async () => ({ items: [] })),
           getCustomerTimeline: vi.fn(async () => ({ events: [] })),
           upsertCustomer: vi.fn(async () => ({ items: [] })),
-        }) as never
+        }) as never;
+      }
     );
   });
 
@@ -125,12 +126,13 @@ describe("crm customer routes", () => {
       customerUpdatePathTemplate: "/api/customers/{customerId}",
     });
     PaperclipClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           upsertCustomer: vi.fn(async () => ({
             items: [{ customerId: "cust_1", companyName: "Alpha Dental" }],
           })),
-        }) as never
+        }) as never;
+      }
     );
     normalizePaperclipCustomersMock.mockReturnValue([
       {
@@ -201,10 +203,11 @@ describe("crm customer routes", () => {
       customerUpdatePathTemplate: "/api/customers/{customerId}",
     });
     PaperclipClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           upsertCustomer: vi.fn(async () => ({ items: [] })),
-        }) as never
+        }) as never;
+      }
     );
     normalizePaperclipCustomersMock.mockReturnValue([]);
 
@@ -267,12 +270,13 @@ describe("crm customer routes", () => {
       customerUpdatePathTemplate: "/api/customers/{customerId}",
     });
     PaperclipClientMock.mockImplementation(
-      () =>
-        ({
+      function () {
+        return ({
           upsertCustomer: vi.fn(async () => {
             throw Object.assign(new Error("conflict"), { status: 409 });
           }),
-        }) as never
+        }) as never;
+      }
     );
 
     const response = await upsertCustomer(

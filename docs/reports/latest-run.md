@@ -1,5 +1,12 @@
 # Latest Verification Run
 
+## 2026-10-07 Expired, never-dispatched pilot recovery (draft PR candidate)
+
+- Adds an owner-only return-to-review action for the same exact-five initial pilot when its launch approval expired before any execution evidence exists. Transaction checks preserve the active campaign lock and reject any executor, receipt or invitation ledger record, including unknown/incomplete states. Recovery records old authority in an immutable event, clears current approval/launch and never calls a provider.
+- Full unit/smoke: **1,804 tests / 257 files passed**. Includes 24 new recovery, 12 new route and 17 UI render tests. Full lint: zero errors/two unchanged warnings; standalone TypeScript and production build passed. Dependencies unchanged.
+- **Release blocked:** fresh official-registry audit reports three critical, three high and seventeen moderate findings on the unchanged lock. No exception or dependency change. Draft PR only; no live recovery, approval, launch, send, merge or deployment.
+- Details: [verification report](2026-10-07-expired-unsent-pilot-review.md). [Run/deploy/recovery and rollback guide](../warm-reconnect-expired-launch-review.md).
+
 ## 2026-10-05 Approved campaign v2 design (local candidate)
 
 - Adds a separate `approved_design_v2` campaign path for the exact approved template/CID images, frozen first-name greetings and production recipient capabilities. Existing owner v1/v2 paths and fingerprints are preserved; no QA authority is reused for campaigns.

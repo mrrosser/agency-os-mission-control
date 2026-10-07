@@ -234,6 +234,25 @@ describe("warm reconnect campaign UI", () => {
     expect(launchButton(html)).not.toContain('disabled=""');
   });
 
+  it("offers a guarded return to review for an expired launch without enabling send", () => {
+    const activation = activationFixture(true);
+    Object.assign(activation.pilots[0], {
+      status: "launch_requested",
+      approval: { approvalId: "expired-approval", expiresAt: "2020-01-01T00:00:00Z" },
+      availableActions: { canApprove: false, canLaunch: false, canStop: true, canReturnToReview: true },
+    });
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+    expect(html).toContain("This launch approval expired");
+    expect(html).toContain("This sends nothing; approval and launch will be required again");
+    expect(html).toContain('aria-label="Return to review reason"');
+    const recovery = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find(button => button.includes("Check and return to review"));
+    expect(recovery).toContain('disabled=""');
+    expect(launchButton(html)).toContain('disabled=""');
+    expect(html).not.toContain("Approve exact pilot");
+  });
+
   it.each([undefined, null, "true"])("shows unknown for an absent or malformed provider setting: %s", (enabled) => {
     loadedActivation(enabled);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);

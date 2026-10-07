@@ -31,6 +31,7 @@ import type {
   WarmReconnectPilotLaunchRequest,
   WarmReconnectPilotRecipientView,
   WarmReconnectPilotStopRequest,
+  WarmReconnectPilotReturnToReviewRequest,
   WarmReconnectPilotView,
   WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
@@ -67,7 +68,7 @@ function requiredConfirmations(contentMode?: WarmReconnectContentMode) {
 }
 
 type ConfirmationKey = (typeof APPROVAL_CONFIRMATIONS)[number][0];
-type MutationAction = "create" | "decision" | "approval" | "launch" | "stop";
+type MutationAction = "create" | "decision" | "approval" | "launch" | "stop" | "return-to-review";
 
 type Props = {
   campaign: WarmReconnectCampaignDraft | null;
@@ -163,6 +164,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const mountedRef = useRef(true);
   const currentOwnerRef = useRef(user?.uid);
   currentOwnerRef.current = user?.uid;
+  const [recoveryReason, setRecoveryReason] = useState("");
 
   const loadActivation = useCallback(async () => {
     if (!user) return;
@@ -465,6 +467,30 @@ export function WarmReconnectActivation({ campaign }: Props) {
       await loadActivation();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Pilot launch request failed");
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function returnToReview(pilot: WarmReconnectPilotView) {
+    if (!pilot.availableActions.canReturnToReview || !pilot.approval || mutation || !recoveryReason.trim()) return;
+    const payload: WarmReconnectPilotReturnToReviewRequest = {
+      expiredApprovalId: pilot.approval.approvalId,
+      expectedArtifactFingerprint: pilot.fingerprints.artifactFingerprint,
+      expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
+      expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
+      reason: recoveryReason.trim(),
+    };
+    setMutation({ action: "return-to-review" });
+    setError(null);
+    try {
+      await authenticatedPost(`/api/crm/warm-reconnect/pilots/${encodeURIComponent(pilot.pilotId)}/return-to-review`, payload);
+      setRecoveryReason("");
+      setApprovalNote("");
+      setConfirmations({ ...EMPTY_CONFIRMATIONS });
+      await loadActivation();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Return to review failed");
     } finally {
       setMutation(null);
     }
@@ -846,6 +872,15 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       </div>
                     )}
 
+                    {activePilot.availableActions.canReturnToReview && (
+                      <div className="space-y-2 rounded-lg border border-amber-300/25 p-3 text-xs text-amber-100">
+                        <p>This launch approval expired. Return the same pilot to review only if delivery never started. This sends nothing; approval and launch will be required again.</p>
+                        <input aria-label="Return to review reason" value={recoveryReason} onChange={(event) => setRecoveryReason(event.target.value)} maxLength={500} placeholder="Reason to return this pilot to review" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white" />
+                        <Button type="button" variant="outline" disabled={!recoveryReason.trim() || Boolean(mutation)} onClick={() => void returnToReview(activePilot)} className="w-full">
+                          <RefreshCw aria-hidden="true" /> Check and return to review
+                        </Button>
+                      </div>
+                    )}
                     <Button type="button" disabled={!activePilot.availableActions.canLaunch || !activePilot.approval || Boolean(mutation)} onClick={() => void launchPilot(activePilot)} className="w-full bg-emerald-300 text-emerald-950 hover:bg-emerald-200">
                       {mutation?.action === "launch" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MailCheck aria-hidden="true" />} Authorize exact five-email launch · {providerLaunchLabel}
                     </Button>

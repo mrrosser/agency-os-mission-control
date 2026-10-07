@@ -15,6 +15,7 @@ import {
   type WarmReconnectPilotApprovalRequest,
   type WarmReconnectPilotLaunchRequest,
   type WarmReconnectPilotRecipient,
+  type WarmReconnectPilotReturnToReviewRequest,
   type WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
@@ -627,9 +628,14 @@ export function materializeWarmReconnectPilot(
     options.googleReady &&
     pilot.gates.every((gate) => gate.status === "verified");
   const canStop = !["stopped", "rejected"].includes(pilot.status);
+  const canReturnToReview = pilot.status === "launch_requested" && Boolean(
+    pilot.approval && Number.isFinite(Date.parse(pilot.approval.expiresAt)) &&
+    Date.parse(pilot.approval.expiresAt) <= (options.now || new Date()).getTime()
+  );
   return {
     ...pilot,
     availableActions: {
+      canReturnToReview,
       canReviewRecipients,
       canApprove,
       canLaunch,
@@ -866,6 +872,43 @@ function assertExpectedFingerprints(
   ) {
     throw new ApiError(409, "The reviewed campaign changed. Reload and review the new fingerprints.");
   }
+}
+
+/** The repository must prove no dispatch evidence inside the same transaction. */
+export function returnExpiredWarmReconnectPilotToReview(input: {
+  pilot: WarmReconnectPilot;
+  request: WarmReconnectPilotReturnToReviewRequest;
+  now?: Date;
+  googleReady: boolean;
+}): WarmReconnectPilot {
+  const { pilot, request } = input;
+  const now = input.now || new Date();
+  assertExpectedFingerprints(pilot, request);
+  const computed = computeWarmReconnectPilotFingerprints(pilot);
+  if (Object.entries(computed).some(([key, value]) =>
+    pilot.fingerprints[key as keyof typeof computed] !== value)) {
+    throw new ApiError(409, "The saved campaign content changed. Preserve it for review.");
+  }
+  const approval = pilot.approval;
+  if (pilot.status !== "launch_requested" || pilot.tranche !== "initial_5" ||
+      pilot.recipientCap !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
+      pilot.recipients.length !== WARM_RECONNECT_INITIAL_PILOT_SIZE || !approval ||
+      approval.decision !== "approved" || approval.approvalId !== request.expiredApprovalId ||
+      !Number.isFinite(Date.parse(approval.expiresAt)) ||
+      Date.parse(approval.expiresAt) > now.getTime() || !request.reason.trim() ||
+      Object.entries(pilot.fingerprints).some(([key, value]) =>
+        approval[key as keyof typeof pilot.fingerprints] !== value)) {
+    throw new ApiError(409, "Only the matching expired launch can return to review.");
+  }
+  const next: WarmReconnectPilot = {
+    ...pilot,
+    status: "needs_campaign_approval",
+    approval: null,
+    launchRequestedAt: null,
+    updatedAt: now.toISOString(),
+    gates: buildGates({ pilot, googleReady: input.googleReady }),
+  };
+  return materializeWarmReconnectPilot(next, { googleReady: input.googleReady, now });
 }
 
 export function decideWarmReconnectPilotApproval(input: {

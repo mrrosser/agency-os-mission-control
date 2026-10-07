@@ -8,7 +8,7 @@ The strict, authenticated `return-to-review` endpoint uses the existing owner/wo
 
 The transaction archives the previous approval and launch time in an immutable event before clearing current authority and rebuilding pending review gates. Its read/write boundary contends with the dispatcher claim, so both cannot succeed under the prior launch. The UI requires a reason, describes the no-send effect, resets approval confirmations and reloads after success.
 
-This is a draft-PR candidate on `codex/crm-expired-pilot-review-20261007`, based on production merge `5eedcb94df79cedf4f70be1c9d185bdb0e3c4c8f`. No live recovery, approval, launch, provider send, deployment or merge was performed. Private recipient/campaign receipts and approved previews remain outside public source.
+This is [draft PR #60](https://github.com/mrrosser/agency-os-mission-control/pull/60) on `codex/crm-expired-pilot-review-20261007`, based on production merge `5eedcb94df79cedf4f70be1c9d185bdb0e3c4c8f`. No live recovery, approval, launch, provider send, deployment or merge was performed. Private recipient/campaign receipts and approved previews remain outside public source.
 
 ## Validation
 

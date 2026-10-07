@@ -23,10 +23,10 @@ Base: production merge `5eedcb94df79cedf4f70be1c9d185bdb0e3c4c8f`, isolated bran
 - [x] Dependency scan completed against the official registry, but the release gate FAILED: unchanged lock has three critical, three high and seventeen moderate advisories. No dependency changes or exception.
 - [x] Run/deploy/recovery and rollback guide; exact original five/content handoff kept in private workspace. No production application.
 - [x] Final scoped secret/whitespace scan passed with no findings.
-- [ ] Scoped commit and draft PR.
+- [x] Scoped commit and [draft PR #60](https://github.com/mrrosser/agency-os-mission-control/pull/60); no merge or deployment.
 
 ## Progress
 
-2026-10-07: recovered current cloud/Gmail evidence, confirmed missing state transition in deployed source, created isolated worktree from production commit, implemented bounded recovery and completed application validation. Root and independent agent review found no blocking source issue. Preparing the draft PR; the dependency audit prevents release readiness.
+2026-10-07: recovered current cloud/Gmail evidence, confirmed missing state transition in deployed source, created isolated worktree from production commit, implemented bounded recovery and completed application validation. Root and independent agent review found no blocking source issue. Published scoped implementation commit `c3f5d6f6a695c55d7217ff2e3b41b2f1ffb6f8ca` in draft PR #60; the dependency audit prevents release readiness. The deployed application and live pilot remain unchanged.
 
 Run/deploy/rollback: [recovery guide](../warm-reconnect-expired-launch-review.md). Validation: [October 7 report](../reports/2026-10-07-expired-unsent-pilot-review.md).

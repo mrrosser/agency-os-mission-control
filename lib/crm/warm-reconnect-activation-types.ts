@@ -187,7 +187,17 @@ export interface WarmReconnectPilotAvailableActions {
   canApprove: boolean;
   canLaunch: boolean;
   canStop: boolean;
+  /** Provisional: the transaction must also establish no dispatch evidence. */
+  canReturnToReview?: boolean;
   launchAuthorizesExactProviderExecution: true;
+}
+
+export interface WarmReconnectPilotReturnToReviewRequest {
+  expiredApprovalId: string;
+  expectedArtifactFingerprint: string;
+  expectedAudienceFingerprint: string;
+  expectedActionFingerprint: string;
+  reason: string;
 }
 
 export type WarmReconnectContentMode = "artwork_html" | "plain_text" | "preference_buttons" | "approved_design_v2";

@@ -25,6 +25,7 @@ import {
   type WarmReconnectPilotApprovalRequest,
   type WarmReconnectPilotLaunchRequest,
   type WarmReconnectPilotStopRequest,
+  type WarmReconnectPilotReturnToReviewRequest,
   type WarmReconnectPilotView,
   type WarmReconnectRecipientDecisionRequest,
   type WarmReconnectSourceEvidence,
@@ -42,9 +43,11 @@ import {
   isWarmReconnectPilotStopReplay,
   isWarmReconnectRecipientDecisionReplay,
   requestWarmReconnectPilotLaunch,
+  returnExpiredWarmReconnectPilotToReview,
   stopWarmReconnectPilot,
   warmReconnectInitialPilotLockId,
 } from "@/lib/crm/warm-reconnect-activation";
+import { assertWarmReconnectNeverDispatched } from "@/lib/crm/warm-reconnect-review-recovery";
 import {
   WARM_RECONNECT_INVITATION_LEDGER_COLLECTION,
   reconcileWarmReconnectInvitationTransition,
@@ -991,6 +994,10 @@ async function updatePilotTransaction(input: {
     if (requestsInitialLockRelease) {
       assertOwnedActiveInitialPilotLock(lockSnapshot.data(), current);
     }
+    if (input.eventKind === "expired_launch_returned_to_review") {
+      assertOwnedActiveInitialPilotLock(lockSnapshot.data(), current);
+      await assertWarmReconnectNeverDispatched({ db, transaction, pilotRef: ref, pilot: current });
+    }
     let releaseInitialLock = input.eventKind === "pilot_rejected";
     let executorStateRef: DocumentReference<DocumentData> | null = null;
     let activeReceiptRef: DocumentReference<DocumentData> | null = null;
@@ -1116,6 +1123,12 @@ async function updatePilotTransaction(input: {
       audienceFingerprint: next.fingerprints.audienceFingerprint,
       actionFingerprint: next.fingerprints.actionFingerprint,
       resultPilot: next,
+      ...(input.eventKind === "expired_launch_returned_to_review" ? {
+        previousApproval: current.approval,
+        previousLaunchRequestedAt: current.launchRequestedAt,
+        recoveryRequest: input.requestPayload,
+        providerAction: false,
+      } : {}),
       createdAt: FieldValue.serverTimestamp(),
     });
     return { pilot: next, replayed: false };
@@ -1240,6 +1253,31 @@ export async function requestWarmReconnectPilotLaunchForUid(input: {
     status: result.pilot.status,
     providerAction: false,
     replayed: result.replayed,
+  });
+  return result;
+}
+
+export async function returnExpiredWarmReconnectPilotToReviewForUid(input: {
+  uid: string;
+  pilotId: string;
+  request: WarmReconnectPilotReturnToReviewRequest;
+  correlationId: string;
+  idempotencyKey: string;
+  log: Logger;
+  db?: Firestore;
+}): Promise<{ pilot: WarmReconnectPilotView; replayed: boolean }> {
+  const result = await updatePilotTransaction({
+    ...input,
+    eventKind: "expired_launch_returned_to_review",
+    requireCurrentAudience: true,
+    requestPayload: input.request,
+    transform: (current, ready) => returnExpiredWarmReconnectPilotToReview({
+      pilot: current, request: input.request, googleReady: ready,
+    }),
+  });
+  input.log.info("crm.warm_reconnect.expired_launch_returned_to_review", {
+    pilotId: input.pilotId, status: result.pilot.status,
+    correlationId: input.correlationId, providerAction: false, replayed: result.replayed,
   });
   return result;
 }

@@ -1,5 +1,19 @@
 # Latest Verification Run
 
+## 2026-10-07 CRM dependency release repair
+
+- Repairs the audit blocker on recovery PR #60: Sharp 0.35.5, compatible proxy-addr 2.0.8/source-map-js 1.2.2 locks and development-only Vitest 4.1.11. Existing Vite 7.3.6 is explicitly pinned; Next/PostCSS and all 409 tracked application/source/artwork files are unchanged. Tinypool is removed through the supported runner upgrade.
+- Final full unit/smoke: **1,808 / 1,808 tests, 258 files, zero pending**. Actual native image, proxy-trust and source-map regression checks pass. Vitest constructor fixtures preserve returned objects and assertions; explicit restoration remains, with per-test call-history cleanup configured. One earlier concurrent-check timeout cleared in the final complete two-worker run without changing the existing guard or timeout.
+- Production build, standalone TypeScript and lint passed (zero errors/two existing callback warnings; changed-file lint clean). Fresh official-registry audit passes the unchanged threshold: **zero critical, zero high, fifteen moderate**. Prior audit-blocker entries below are historical evidence, not the current candidate's gate status.
+- Existing protected PR/main release workflow remains required. No live recovery, approval, launch, provider send or environment/scheduler change was performed. [Repair and validation report](2026-10-07-crm-dependency-release-repair.md); [recovery guide](../warm-reconnect-expired-launch-review.md).
+
+## 2026-10-07 Expired, never-dispatched pilot recovery (draft PR candidate)
+
+- Adds an owner-only return-to-review action for the same exact-five initial pilot when its launch approval expired before any execution evidence exists. Transaction checks preserve the active campaign lock and reject any executor, receipt or invitation ledger record, including unknown/incomplete states. Recovery records old authority in an immutable event, clears current approval/launch and never calls a provider.
+- Full unit/smoke: **1,804 tests / 257 files passed**. Includes 24 new recovery, 12 new route and 17 UI render tests. Full lint: zero errors/two unchanged warnings; standalone TypeScript and production build passed. Dependencies unchanged.
+- **Release blocked:** fresh official-registry audit reports three critical, three high and seventeen moderate findings on the unchanged lock. No exception or dependency change. Draft PR only; no live recovery, approval, launch, send, merge or deployment.
+- Details: [verification report](2026-10-07-expired-unsent-pilot-review.md). [Run/deploy/recovery and rollback guide](../warm-reconnect-expired-launch-review.md).
+
 ## 2026-10-05 Approved campaign v2 design (local candidate)
 
 - Adds a separate `approved_design_v2` campaign path for the exact approved template/CID images, frozen first-name greetings and production recipient capabilities. Existing owner v1/v2 paths and fingerprints are preserved; no QA authority is reused for campaigns.

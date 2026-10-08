@@ -1669,14 +1669,21 @@ export async function markWarmReconnectCapabilitiesPrepared(input: {
     assertInvitationLedgerBound(ledgerSnapshot.data(), invitationBinding, [
       "reserved",
     ]);
+    // Bind the lifetime to the durable claim, not time spent in Firestore.
+    const preparedAtMs = input.now.getTime();
+    const expectedExpiryMs = receipt.claimedAtMs + WARM_RECONNECT_CAPABILITY_TTL_MS;
     if (
       state.activeReceiptId !== receipt.receiptId ||
       receipt.status !== "claimed" ||
       !/^[a-f0-9]{64}$/.test(input.preferenceDigest) ||
       !/^[a-f0-9]{64}$/.test(input.unsubscribeDigest) ||
       input.preferenceDigest === input.unsubscribeDigest ||
-      input.capabilityExpiresAtMs - input.now.getTime() <
-        WARM_RECONNECT_CAPABILITY_TTL_MS - 1_000
+      !Number.isSafeInteger(receipt.claimedAtMs) || receipt.claimedAtMs <= 0 ||
+      !Number.isSafeInteger(preparedAtMs) || preparedAtMs < receipt.claimedAtMs ||
+      !Number.isSafeInteger(expectedExpiryMs) ||
+      !Number.isSafeInteger(input.capabilityExpiresAtMs) ||
+      input.capabilityExpiresAtMs !== expectedExpiryMs ||
+      preparedAtMs >= expectedExpiryMs
     ) {
       throw new ApiError(409, "Preference capabilities could not be bound to this claim.");
     }
@@ -2306,7 +2313,7 @@ export async function runWarmReconnectPilotExecutor(input: {
   if (!approval || !recipientDecisionId) {
     throw new ApiError(409, "The exact campaign approval is missing.");
   }
-  const capabilityExpiresAtMs = now.getTime() + WARM_RECONNECT_CAPABILITY_TTL_MS;
+  const capabilityExpiresAtMs = claim.claimedAtMs + WARM_RECONNECT_CAPABILITY_TTL_MS;
   let capabilities: Awaited<
     ReturnType<typeof issueWarmReconnectPreferenceCapabilities>
   >;

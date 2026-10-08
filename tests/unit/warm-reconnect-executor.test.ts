@@ -6,6 +6,7 @@ import {
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
   requestWarmReconnectPilotLaunch,
+  warmReconnectInitialPilotLockId,
 } from "@/lib/crm/warm-reconnect-activation";
 import type {
   WarmReconnectCandidate,
@@ -21,6 +22,7 @@ import {
   WARM_RECONNECT_SUPPRESSION_SCAN_LIMIT,
   isWarmReconnectProviderSendEnabled,
   isWarmReconnectGmailSendScopeExact,
+  markWarmReconnectCapabilitiesPrepared,
   reconcileWarmReconnectExecutorProgress,
   reconcileWarmReconnectPermission,
   reconcileWarmReconnectSourceEvidence,
@@ -80,13 +82,15 @@ function candidate(index: number): WarmReconnectCandidate {
 function launchedPilot(
   pilotId = "wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   approvalId = "approval-1",
-  contentMode: WarmReconnectContentMode = "artwork_html"
+  contentMode: WarmReconnectContentMode = "artwork_html",
+  workspaceId = "workspace-1",
+  legacyDncOrgId = "org-1"
 ): WarmReconnectPilot {
   let pilot = createWarmReconnectPilot({
     pilotId,
-    workspaceId: "workspace-1",
+    workspaceId,
     ownerUid: "owner-1",
-    legacyDncOrgId: "org-1",
+    legacyDncOrgId,
     request: {
       idempotencyKey: `request-${pilotId}`,
       campaignPreviewFingerprint: PREVIEW_FINGERPRINT,
@@ -266,7 +270,94 @@ function dependencies(
   };
 }
 
+function capabilityReceiptFixture() {
+  const pilot = launchedPilot(undefined, undefined, undefined, "workspace_default_owner-1", "workspace_default_owner-1");
+  const claim = claimFor(pilot);
+  const binding = reservationBindingFor(pilot);
+  const pilotPath = `crm_warm_reconnect_pilots/${pilot.pilotId}`;
+  const receiptPath = `${pilotPath}/delivery_receipts/${claim.receiptId}`;
+  const receipt = {
+    schemaVersion: "crm.warm-reconnect-delivery-receipt.v1",
+    ...binding, ...pilot.fingerprints, ownerUid: pilot.ownerUid,
+    recipientId: claim.recipient.recipientId,
+    invitationReservationId: binding.reservationId,
+    status: "claimed", claimedAtMs: claim.claimedAtMs,
+  };
+  const documents = new Map<string, Record<string, unknown>>([
+    [pilotPath, pilot as unknown as Record<string, unknown>],
+    [receiptPath, receipt],
+    [`${pilotPath}/executor/state`, {
+      schemaVersion: "crm.warm-reconnect-executor-state.v1", pilotId: pilot.pilotId,
+      workspaceId: pilot.workspaceId, activeReceiptId: claim.receiptId,
+    }],
+    [`crm_warm_reconnect_invitation_ledger/${binding.reservationId}`, invitationLedger(binding, "reserved")],
+    [`crm_warm_reconnect_campaign_locks/${warmReconnectInitialPilotLockId(pilot.workspaceId)}`, {
+      schemaVersion: 1, workspaceId: pilot.workspaceId, campaignId: "marcus-warm-reconnect",
+      campaignVersion: WARM_RECONNECT_CAMPAIGN_VERSION, tranche: "initial_5",
+      state: "active", pilotId: pilot.pilotId,
+    }],
+  ]);
+  type FakeRef = { path: string; collection: (name: string) => { doc: (id: string) => FakeRef } };
+  const ref = (path: string): FakeRef => ({
+    path, collection: (name) => ({ doc: (id) => ref(`${path}/${name}/${id}`) }),
+  });
+  const set = vi.fn();
+  const transaction = {
+    get: async ({ path }: { path: string }) => ({
+      id: path.split("/").at(-1), exists: documents.has(path), data: () => documents.get(path),
+    }), set,
+  };
+  const database = {
+    collection: (name: string) => ({ doc: (id: string) => ref(`${name}/${id}`) }),
+    runTransaction: async (callback: (value: typeof transaction) => Promise<void>) => callback(transaction),
+  };
+  return { claim, receipt, receiptPath, set, input: {
+    claim, preferenceDigest: "a".repeat(64), unsubscribeDigest: "b".repeat(64),
+    capabilityExpiresAtMs: claim.claimedAtMs + WARM_RECONNECT_CAPABILITY_TTL_MS,
+    correlationId: "capability-timing-regression", now: new Date(claim.claimedAtMs + 1_500), db: database as never,
+  } };
+}
+
 describe("warm reconnect provider executor", () => {
+  it.each([1_500, 10_000])("binds capabilities after %i ms without extending their lifetime", async (elapsedMs) => {
+    const fixture = capabilityReceiptFixture();
+    fixture.input.now = new Date(fixture.claim.claimedAtMs + elapsedMs);
+    await markWarmReconnectCapabilitiesPrepared(fixture.input);
+    expect(fixture.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: fixture.receiptPath }),
+      expect.objectContaining({ status: "capabilities_prepared", capabilityExpiresAtMs: fixture.input.capabilityExpiresAtMs }),
+      { merge: true }
+    );
+    expect(fixture.set).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["shortened", "extended", "nan", "infinite", "fractional", "before_claim", "bad_claim", "expired", "equal_digests"])(
+    "rejects %s capability timing without a receipt write", async (change) => {
+      const fixture = capabilityReceiptFixture();
+      if (change === "shortened") fixture.input.capabilityExpiresAtMs -= 1;
+      if (change === "extended") fixture.input.capabilityExpiresAtMs += 1;
+      if (change === "nan") fixture.input.capabilityExpiresAtMs = Number.NaN;
+      if (change === "infinite") fixture.input.capabilityExpiresAtMs = Number.POSITIVE_INFINITY;
+      if (change === "fractional") fixture.input.capabilityExpiresAtMs += 0.5;
+      if (change === "before_claim") fixture.input.now = new Date(fixture.claim.claimedAtMs - 1);
+      if (change === "bad_claim") fixture.receipt.claimedAtMs = Number.NaN;
+      if (change === "expired") fixture.input.now = new Date(fixture.input.capabilityExpiresAtMs);
+      if (change === "equal_digests") fixture.input.unsubscribeDigest = fixture.input.preferenceDigest;
+      await expect(markWarmReconnectCapabilitiesPrepared(fixture.input)).rejects.toThrow();
+      expect(fixture.set).not.toHaveBeenCalled();
+    }
+  );
+
+  it("issues capability lifetime from the durable claim timestamp", async () => {
+    const claim = { ...claimFor(launchedPilot()), claimedAtMs: RUN_AT.getTime() - 5_000 };
+    const deps = dependencies({ claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim })) });
+    await runWarmReconnectPilotExecutor({ uid: "owner-1", pilotId: claim.pilot.pilotId,
+      correlationId: "claim-lifetime", log, db, now: RUN_AT, dependencies: deps });
+    expect(deps.issueCapabilities).toHaveBeenCalledWith(expect.objectContaining({
+      capabilityExpiresAtMs: claim.claimedAtMs + WARM_RECONNECT_CAPABILITY_TTL_MS,
+    }), db);
+  });
+
   it("derives executor limits from the frozen shared execution policy", () => {
     expect(WARM_RECONNECT_MIN_CADENCE_MS).toBe(
       WARM_RECONNECT_EXECUTION_POLICY.minimumCadenceMs

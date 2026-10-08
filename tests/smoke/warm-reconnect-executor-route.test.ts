@@ -145,4 +145,19 @@ describe("warm reconnect executor worker route", () => {
     });
     expect(executorMock).not.toHaveBeenCalled();
   });
+
+  it("reports a pre-provider stop without retrying or treating HTTP 200 as a send", async () => {
+    executorMock.mockResolvedValue({
+      ok: true, outcome: "stopped", providerCalled: false,
+      reason: "capability_receipt_failed_before_provider",
+    });
+    const response = await POST(request({ pilotId }) as never, context() as never);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      outcome: "stopped", providerCalled: false,
+      reason: "capability_receipt_failed_before_provider",
+      correlationId: "executor-correlation-1",
+    });
+    expect(executorMock).toHaveBeenCalledOnce();
+  });
 });

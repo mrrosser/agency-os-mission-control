@@ -22,7 +22,7 @@ const bodySchema = z.discriminatedUnion("decision", [
     .object({
       decision: z.literal("approve"),
       ...common,
-      approvalScope: z.literal("exact_five_one_time_reconnection_emails"),
+      approvalScope: z.enum(["exact_five_one_time_reconnection_emails", "exact_batch_one_time_reconnection_emails"]),
       confirmations: z
         .object({
           senderLegalIdentityVerified: z.literal(true),

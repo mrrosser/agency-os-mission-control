@@ -53,7 +53,7 @@ function candidate(index: number): WarmReconnectCandidate {
 }
 
 function request(
-  overrides: Partial<CreateWarmReconnectPilotRequest> = {}
+  overrides: Partial<Extract<CreateWarmReconnectPilotRequest, { tranche: "initial_5" }>> = {}
 ): CreateWarmReconnectPilotRequest {
   return {
     idempotencyKey: "pilot-1",
@@ -132,7 +132,7 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
       expectedArtifactFingerprint: pilot.fingerprints.artifactFingerprint,
       expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
       expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
-      approvalScope: "exact_five_one_time_reconnection_emails",
+      approvalScope: pilot.tranche === "follow_on" ? "exact_batch_one_time_reconnection_emails" : "exact_five_one_time_reconnection_emails",
       confirmations: {
         senderLegalIdentityVerified: true,
         physicalPostalAddressVerified: true,
@@ -150,6 +150,33 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it.each([1, 10])("requires fresh exact audience approval and the batch launch acknowledgement for %i follow-on recipients", (size) => {
+    const candidates = Array.from({ length: size }, (_, index) => candidate(index + 20));
+    const pilot = createWarmReconnectPilot({
+      pilotId: "follow-on", workspaceId: "workspace-1", ownerUid: "owner-1", legacyDncOrgId: "org-1",
+      googleReady: true, preferenceOrigin: "https://leadflow-review.web.app", fromEmail: "mrosser@rossergallery.com",
+      accountId: "google-account-1", followOnNotBeforeMs: Date.parse("2026-08-12T11:59:00.000Z"),
+      candidates, now: new Date("2026-08-12T12:00:00.000Z"),
+      request: { ...request(), tranche: "follow_on", parentPilotId: "completed-parent", batchSequence: 1,
+        recipientCap: size, candidateRecipientIds: candidates.map(row => row.recipientId) },
+    });
+    expect(pilot.approval).toBeNull();
+    expect(pilot.recipients.every(row => !row.decision.relationshipAttested)).toBe(true);
+    expect(() => approve(pilot)).toThrow(/relationships must be attested/);
+    const approved = approve(attestAll(pilot));
+    expect(approved.approval?.approvalScope).toBe("exact_batch_one_time_reconnection_emails");
+    const launchRequest = { approvalId: approved.approval!.approvalId,
+      expectedArtifactFingerprint: approved.fingerprints.artifactFingerprint,
+      expectedAudienceFingerprint: approved.fingerprints.audienceFingerprint,
+      expectedActionFingerprint: approved.fingerprints.actionFingerprint };
+    expect(() => requestWarmReconnectPilotLaunch({ pilot: approved, googleReady: true,
+      now: new Date("2026-08-12T14:01:00.000Z"), request: { ...launchRequest, acknowledgeLaunchAuthorizesExactFiveEmailSend: true },
+    })).toThrow(/exact batch scope/);
+    expect(requestWarmReconnectPilotLaunch({ pilot: approved, googleReady: true,
+      now: new Date("2026-08-12T14:01:00.000Z"), request: { ...launchRequest, acknowledgeLaunchAuthorizesExactBatchEmailSend: true },
+    }).status).toBe("launch_requested");
+  });
+
   it("binds the approved inline design to named greetings while retaining every activation gate", () => {
     const candidates = [1, 2, 3, 4, 5].map(candidate);
     candidates[0].displayName = "alex Example";

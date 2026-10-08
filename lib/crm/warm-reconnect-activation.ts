@@ -47,7 +47,7 @@ import {
   warmReconnectCampaignMimeImplementationFingerprint,
 } from "@/lib/google/gmail-campaign-design";
 
-const APPROVAL_SCOPE = "exact_five_one_time_reconnection_emails" as const;
+import { assertWarmReconnectBatchShape, warmReconnectApprovalScopeForPilot } from "@/lib/crm/warm-reconnect-batches";
 const EXCLUDED_SCOPE = [
   "audience_expansion",
   "provider_draft_create",
@@ -245,6 +245,9 @@ export function computeWarmReconnectPilotFingerprints(
     | "recipients"
     | "recipientCap"
     | "tranche"
+    | "parentPilotId"
+    | "batchSequence"
+    | "followOnNotBeforeMs"
   >,
   executionPolicy: WarmReconnectExecutionPolicy = WARM_RECONNECT_EXECUTION_POLICY,
   deliveryImplementation = {
@@ -317,7 +320,8 @@ export function computeWarmReconnectPilotFingerprints(
     audienceFingerprint,
     tranche: pilot.tranche,
     recipientCap: pilot.recipientCap,
-    approvalScope: APPROVAL_SCOPE,
+    approvalScope: warmReconnectApprovalScopeForPilot(pilot),
+    ...(pilot.tranche === "follow_on" ? { parentPilotId: pilot.parentPilotId, batchSequence: pilot.batchSequence, followOnNotBeforeMs: pilot.followOnNotBeforeMs } : {}),
     excludedScope: EXCLUDED_SCOPE,
     executionPolicy,
   });
@@ -327,6 +331,7 @@ export function computeWarmReconnectPilotFingerprints(
 export function assertWarmReconnectPilotFingerprints(
   pilot: WarmReconnectPilot
 ): WarmReconnectPilot["fingerprints"] {
+  assertWarmReconnectBatchShape(pilot);
   const current = computeWarmReconnectPilotFingerprints(pilot);
   if (
     current.artifactFingerprint !== pilot.fingerprints.artifactFingerprint ||
@@ -378,6 +383,8 @@ export function isWarmReconnectPilotApprovalReplay(input: {
       input.pilot.approval &&
         Date.parse(input.pilot.approval.expiresAt) > (input.now || new Date()).getTime() &&
         input.pilot.approval.decision === "approved" &&
+        input.request.approvalScope === warmReconnectApprovalScopeForPilot(input.pilot) &&
+        input.pilot.approval.approvalScope === input.request.approvalScope &&
         input.pilot.approval.note === input.request.note &&
         input.pilot.approval.artifactFingerprint ===
           input.request.expectedArtifactFingerprint &&
@@ -395,6 +402,9 @@ export function isWarmReconnectPilotLaunchReplay(input: {
 }): boolean {
   return (
     input.pilot.status === "launch_requested" &&
+    (input.pilot.tranche === "follow_on"
+      ? input.request.acknowledgeLaunchAuthorizesExactBatchEmailSend === true && input.request.acknowledgeLaunchAuthorizesExactFiveEmailSend === undefined
+      : input.request.acknowledgeLaunchAuthorizesExactFiveEmailSend === true && input.request.acknowledgeLaunchAuthorizesExactBatchEmailSend === undefined) &&
     input.pilot.approval?.approvalId === input.request.approvalId &&
     input.pilot.fingerprints.artifactFingerprint ===
       input.request.expectedArtifactFingerprint &&
@@ -439,6 +449,7 @@ export function assertWarmReconnectStopBoundary(
 export function canReleaseWarmReconnectInitialPilotLock(input: {
   executorState: unknown;
   receipts: readonly unknown[];
+  recipientCap?: number;
 }): boolean {
   const state =
     input.executorState && typeof input.executorState === "object"
@@ -455,7 +466,7 @@ export function canReleaseWarmReconnectInitialPilotLock(input: {
       return false;
     }
   }
-  if (input.receipts.length > WARM_RECONNECT_INITIAL_PILOT_SIZE) return false;
+  if (input.receipts.length > (input.recipientCap ?? WARM_RECONNECT_INITIAL_PILOT_SIZE)) return false;
   const activeReceiptId =
     state && typeof state.activeReceiptId === "string" ? state.activeReceiptId : null;
   return input.receipts.every((value) => {
@@ -476,7 +487,7 @@ export function canReleaseWarmReconnectInitialPilotLock(input: {
 
 function allRecipientsAttested(pilot: WarmReconnectPilot): boolean {
   return (
-    pilot.recipients.length === WARM_RECONNECT_INITIAL_PILOT_SIZE &&
+    pilot.recipients.length === pilot.recipientCap &&
     pilot.recipients.every(
       (recipient) =>
         recipient.decision.status === "eligible_one_time_reconnection" &&
@@ -487,13 +498,13 @@ function allRecipientsAttested(pilot: WarmReconnectPilot): boolean {
 }
 
 function buildGates(input: {
-  pilot: Pick<WarmReconnectPilot, "sender" | "contentMode" | "artworkEmailApproval" | "recipients">;
+  pilot: Pick<WarmReconnectPilot, "sender" | "contentMode" | "artworkEmailApproval" | "recipients" | "recipientCap">;
   googleReady: boolean;
   confirmations?: ApprovalConfirmations;
 }): WarmReconnectActivationGateState[] {
   const confirmed = input.confirmations;
   const audienceReady =
-    input.pilot.recipients.length === WARM_RECONNECT_INITIAL_PILOT_SIZE &&
+    input.pilot.recipients.length === input.pilot.recipientCap &&
     input.pilot.recipients.every(
       (recipient) => recipient.decision.status === "eligible_one_time_reconnection"
     );
@@ -566,10 +577,10 @@ function buildGates(input: {
           ? "pending_approval"
           : "missing",
       reason: confirmed?.exactAudienceReviewed
-        ? "All five relationship attestations are bound to this audience fingerprint."
+        ? "All recipient relationship attestations are bound to this audience fingerprint."
         : audienceReady
-          ? "Review and approve the exact five-person audience."
-          : "Each of the five people needs an individual relationship decision.",
+          ? "Review and approve the exact batch audience."
+          : "Each person in the batch needs an individual relationship decision.",
     },
     {
       id: "artwork_email_channel_approval",
@@ -601,6 +612,7 @@ export function isWarmReconnectApprovalCurrent(
 ): boolean {
   return Boolean(
     pilot.approval &&
+      pilot.approval.approvalScope === warmReconnectApprovalScopeForPilot(pilot) &&
       Date.parse(pilot.approval.expiresAt) > now.getTime() &&
       pilot.approval.artifactFingerprint === pilot.fingerprints.artifactFingerprint &&
       pilot.approval.audienceFingerprint === pilot.fingerprints.audienceFingerprint &&
@@ -657,6 +669,7 @@ export function createWarmReconnectPilot(input: {
   fromEmail: string;
   accountId: string;
   legacyDncOrgId: string;
+  followOnNotBeforeMs?: number;
 }): WarmReconnectPilot {
   const contentMode = resolveWarmReconnectCampaignContentMode(input.request.contentMode);
   if (
@@ -667,18 +680,24 @@ export function createWarmReconnectPilot(input: {
   ) {
     throw new ApiError(400, "Artwork mode requires artwork approval; formats without artwork must omit it.");
   }
-  if (
-    input.request.tranche !== "initial_5" ||
-    input.request.recipientCap !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-    input.candidates.length !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-    new Set(input.candidates.map((candidate) => candidate.recipientId)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-    new Set(input.candidates.map((candidate) => candidate.personId)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-    new Set(input.candidates.map((candidate) => candidate.emailKey)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE
-  ) {
-    throw new ApiError(409, "The first pilot requires exactly five distinct people and emails.");
+  const batchFields = {
+    pilotId: input.pilotId,
+    tranche: input.request.tranche,
+    recipientCap: input.request.recipientCap,
+    ...(input.request.tranche === "follow_on" ? {
+      parentPilotId: input.request.parentPilotId,
+      batchSequence: input.request.batchSequence,
+      followOnNotBeforeMs: input.followOnNotBeforeMs,
+    } : {}),
+  };
+  assertWarmReconnectBatchShape(batchFields);
+  const cap = input.request.recipientCap;
+  if (input.candidates.length !== cap || input.request.candidateRecipientIds.length !== cap ||
+      input.candidates.some((candidate, index) => candidate.recipientId !== input.request.candidateRecipientIds[index]) ||
+      new Set(input.candidates.map(candidate => candidate.recipientId)).size !== cap ||
+      new Set(input.candidates.map(candidate => candidate.personId)).size !== cap ||
+      new Set(input.candidates.map(candidate => candidate.emailKey)).size !== cap) {
+    throw new ApiError(409, input.request.tranche === "initial_5" ? "The first pilot requires exactly five distinct people and emails." : "The batch requires its exact distinct people and email addresses.");
   }
 
   const expectedProfile =
@@ -733,13 +752,11 @@ export function createWarmReconnectPilot(input: {
   }));
   const base = {
     schemaVersion: WARM_RECONNECT_PILOT_SCHEMA_VERSION,
-    pilotId: input.pilotId,
     workspaceId: input.workspaceId,
     ownerUid: input.ownerUid,
     legacyDncOrgId: input.legacyDncOrgId,
     status: "needs_recipient_review" as const,
-    tranche: "initial_5" as const,
-    recipientCap: WARM_RECONNECT_INITIAL_PILOT_SIZE,
+    ...batchFields,
     campaignPreviewFingerprint: input.request.campaignPreviewFingerprint,
     contentMode,
     sender: {
@@ -890,9 +907,9 @@ export function returnExpiredWarmReconnectPilotToReview(input: {
     throw new ApiError(409, "The saved campaign content changed. Preserve it for review.");
   }
   const approval = pilot.approval;
-  if (pilot.status !== "launch_requested" || pilot.tranche !== "initial_5" ||
-      pilot.recipientCap !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-      pilot.recipients.length !== WARM_RECONNECT_INITIAL_PILOT_SIZE || !approval ||
+  assertWarmReconnectBatchShape(pilot);
+  if (pilot.status !== "launch_requested" ||
+      pilot.recipients.length !== pilot.recipientCap || !approval ||
       approval.decision !== "approved" || approval.approvalId !== request.expiredApprovalId ||
       !Number.isFinite(Date.parse(approval.expiresAt)) ||
       Date.parse(approval.expiresAt) > now.getTime() || !request.reason.trim() ||
@@ -936,8 +953,11 @@ export function decideWarmReconnectPilotApproval(input: {
       { googleReady: input.googleReady, now: nowDate }
     );
   }
+  if (input.request.approvalScope !== warmReconnectApprovalScopeForPilot(input.pilot)) {
+    throw new ApiError(409, "Approval must authorize this exact batch scope.");
+  }
   if (!allRecipientsAttested(input.pilot)) {
-    throw new ApiError(409, "All five recipient relationships must be attested first.");
+    throw new ApiError(409, input.pilot.tranche === "initial_5" ? "All five recipient relationships must be attested first." : "All recipient relationships must be attested first.");
   }
   if (
     !isWarmReconnectCampaignArtworkMode(input.pilot.contentMode) &&
@@ -970,7 +990,7 @@ export function decideWarmReconnectPilotApproval(input: {
       expiresAt,
       note: input.request.note,
       ...input.pilot.fingerprints,
-      approvalScope: APPROVAL_SCOPE,
+      approvalScope: warmReconnectApprovalScopeForPilot(input.pilot),
       excludedScope: EXCLUDED_SCOPE,
     },
     updatedAt: now,
@@ -985,6 +1005,10 @@ export function requestWarmReconnectPilotLaunch(input: {
   googleReady: boolean;
 }): WarmReconnectPilot {
   assertExpectedFingerprints(input.pilot, input.request);
+  const correctAcknowledgement = input.pilot.tranche === "follow_on"
+    ? input.request.acknowledgeLaunchAuthorizesExactBatchEmailSend === true && input.request.acknowledgeLaunchAuthorizesExactFiveEmailSend === undefined
+    : input.request.acknowledgeLaunchAuthorizesExactFiveEmailSend === true && input.request.acknowledgeLaunchAuthorizesExactBatchEmailSend === undefined;
+  if (!correctAcknowledgement) throw new ApiError(409, "Launch must acknowledge this exact batch scope.");
   const nowDate = input.now || new Date();
   if (input.pilot.status === "launch_requested") {
     return materializeWarmReconnectPilot(input.pilot, {

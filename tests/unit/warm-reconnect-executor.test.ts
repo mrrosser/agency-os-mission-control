@@ -3,6 +3,7 @@ import {
   WARM_RECONNECT_EXECUTION_POLICY,
   assertWarmReconnectPilotFingerprints,
   createWarmReconnectPilot,
+  computeWarmReconnectPilotFingerprints,
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
   requestWarmReconnectPilotLaunch,
@@ -23,6 +24,8 @@ import {
   isWarmReconnectProviderSendEnabled,
   isWarmReconnectGmailSendScopeExact,
   markWarmReconnectCapabilitiesPrepared,
+  recordWarmReconnectSent,
+  claimNextWarmReconnectRecipient,
   reconcileWarmReconnectExecutorProgress,
   reconcileWarmReconnectPermission,
   reconcileWarmReconnectSourceEvidence,
@@ -41,6 +44,7 @@ import {
   type WarmReconnectInvitationReservationBinding,
 } from "@/lib/crm/warm-reconnect-invitation-ledger";
 import { WARM_RECONNECT_CAMPAIGN_VERSION } from "@/lib/crm/warm-reconnect-types";
+import { warmReconnectFollowOnPilotLockId, warmReconnectBatchReceiptId } from "@/lib/crm/warm-reconnect-batches";
 import { warmReconnectEmailKey } from "@/lib/crm/warm-reconnect-dedupe";
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import { isWarmReconnectCampaignArtworkMode, renderWarmReconnectCampaignEmail, warmReconnectCampaignAssetManifest } from "@/lib/crm/warm-reconnect-campaign-design";
@@ -270,8 +274,8 @@ function dependencies(
   };
 }
 
-function capabilityReceiptFixture() {
-  const pilot = launchedPilot(undefined, undefined, undefined, "workspace_default_owner-1", "workspace_default_owner-1");
+function capabilityReceiptFixture(suppliedPilot?: WarmReconnectPilot) {
+  const pilot = suppliedPilot || launchedPilot(undefined, undefined, undefined, "workspace_default_owner-1", "workspace_default_owner-1");
   const claim = claimFor(pilot);
   const binding = reservationBindingFor(pilot);
   const pilotPath = `crm_warm_reconnect_pilots/${pilot.pilotId}`;
@@ -311,14 +315,91 @@ function capabilityReceiptFixture() {
     collection: (name: string) => ({ doc: (id: string) => ref(`${name}/${id}`) }),
     runTransaction: async (callback: (value: typeof transaction) => Promise<void>) => callback(transaction),
   };
-  return { claim, receipt, receiptPath, set, input: {
+  return { claim, receipt, receiptPath, set, documents, input: {
     claim, preferenceDigest: "a".repeat(64), unsubscribeDigest: "b".repeat(64),
     capabilityExpiresAtMs: claim.claimedAtMs + WARM_RECONNECT_CAPABILITY_TTL_MS,
     correlationId: "capability-timing-regression", now: new Date(claim.claimedAtMs + 1_500), db: database as never,
   } };
 }
 
+function followOnExecutorFixture(cap: number) {
+  const pilot = launchedPilot(undefined, undefined, undefined, "workspace_default_owner-1", "workspace_default_owner-1");
+  pilot.tranche = "follow_on";
+  pilot.parentPilotId = "completed-parent";
+  pilot.batchSequence = 1;
+  pilot.recipientCap = cap;
+  pilot.followOnNotBeforeMs = RUN_AT.getTime() + 60_000;
+  pilot.recipients = Array.from({ length: cap }, (_, index) => ({
+    ...structuredClone(pilot.recipients[index % 5]),
+    recipientId: `follow-recipient-${index}`, personId: `follow-person-${index}`,
+    contactPointId: `follow-contact-${index}`, emailKey: `sha256:${(index + 30).toString(16).padStart(64, "0")}`,
+  }));
+  pilot.fingerprints = computeWarmReconnectPilotFingerprints(pilot);
+  pilot.approval = { ...pilot.approval!, ...pilot.fingerprints, approvalScope: "exact_batch_one_time_reconnection_emails" };
+  const fixture = capabilityReceiptFixture(pilot);
+  const binding = reservationBindingFor(pilot);
+  fixture.documents.set(`crm_warm_reconnect_campaign_locks/${warmReconnectFollowOnPilotLockId(pilot.workspaceId)}`, {
+    schemaVersion: "crm.warm-reconnect-follow-on-lock.v1", workspaceId: pilot.workspaceId,
+    campaignId: "marcus-warm-reconnect", campaignVersion: WARM_RECONNECT_CAMPAIGN_VERSION,
+    tranche: "follow_on", state: "active", pilotId: pilot.pilotId, parentPilotId: pilot.parentPilotId,
+    batchSequence: pilot.batchSequence, recipientCap: cap,
+  });
+  fixture.documents.set(`crm_warm_reconnect_invitation_ledger/${binding.reservationId}`, invitationLedger(binding, "provider_inflight"));
+  fixture.documents.set(`crm_warm_reconnect_pilots/${pilot.pilotId}/executor/state`, {
+    schemaVersion: "crm.warm-reconnect-executor-state.v1", workspaceId: pilot.workspaceId,
+    pilotId: pilot.pilotId, activeReceiptId: fixture.claim.receiptId, claimedCount: cap,
+    sentCount: cap - 1, complete: false, halted: false,
+  });
+  Object.assign(fixture.receipt, { status: "provider_inflight", providerStartedAtMs: RUN_AT.getTime() });
+  return fixture;
+}
+
 describe("warm reconnect provider executor", () => {
+  it.each([1, 4, 10])("completes a follow-on batch at its exact cap %i", async (cap) => {
+    const fixture = followOnExecutorFixture(cap);
+    const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-final", providerThreadId: "thread-final", correlationId: "batch-completion", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ complete: true });
+    expect(fixture.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: `crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state` }),
+      expect.objectContaining({ sentCount: cap, complete: true }), { merge: true }
+    );
+  });
+
+  it("does not complete a ten-person follow-on after the old five-person boundary", async () => {
+    const fixture = followOnExecutorFixture(10);
+    fixture.documents.get(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`)!.sentCount = 4;
+    const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-fifth", providerThreadId: "thread-fifth", correlationId: "batch-midpoint", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ complete: false });
+  });
+
+  it("waits for the parent cadence without creating an executor or claiming a recipient", async () => {
+    const fixture = followOnExecutorFixture(1);
+    fixture.documents.delete(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`);
+    fixture.documents.delete(fixture.receiptPath);
+    const result = await claimNextWarmReconnectRecipient({ uid: fixture.claim.pilot.ownerUid, pilotId: fixture.claim.pilot.pilotId, correlationId: "parent-cadence", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ kind: "waiting", retryAfterMs: 60_000 });
+    expect(fixture.set).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stale follow-on worker after the chain lock advances", async () => {
+    const fixture = followOnExecutorFixture(1);
+    fixture.documents.get(`crm_warm_reconnect_campaign_locks/${warmReconnectFollowOnPilotLockId(fixture.claim.pilot.workspaceId)}`)!.pilotId = "new-batch";
+    await expect(recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-id", providerThreadId: "thread-id", correlationId: "old-worker", now: RUN_AT, db: fixture.input.db })).rejects.toThrow(/batch changed/);
+    expect(fixture.set).not.toHaveBeenCalled();
+  });
+
+  it("returns complete for a completed variable-size batch without another claim", async () => {
+    const fixture = followOnExecutorFixture(1);
+    const state = fixture.documents.get(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`)!;
+    Object.assign(state, { activeReceiptId: null, sentCount: 1, complete: true });
+    const receiptId = warmReconnectBatchReceiptId(fixture.claim.pilot, fixture.claim.recipient.recipientId);
+    fixture.documents.delete(fixture.receiptPath);
+    fixture.documents.set(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/delivery_receipts/${receiptId}`, { ...fixture.receipt, receiptId, status: "sent" });
+    const result = await claimNextWarmReconnectRecipient({ uid: fixture.claim.pilot.ownerUid, pilotId: fixture.claim.pilot.pilotId, correlationId: "completed-batch", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ kind: "complete" });
+    expect(fixture.set).not.toHaveBeenCalled();
+  });
+
   it.each([1_500, 10_000])("binds capabilities after %i ms without extending their lifetime", async (elapsedMs) => {
     const fixture = capabilityReceiptFixture();
     fixture.input.now = new Date(fixture.claim.claimedAtMs + elapsedMs);

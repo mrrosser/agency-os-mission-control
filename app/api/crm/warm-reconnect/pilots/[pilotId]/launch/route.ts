@@ -11,15 +11,16 @@ export const revalidate = 0;
 const routeId = z.string().trim().min(1).max(160).regex(/^[A-Za-z0-9_-]+$/);
 const sha256 = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const idempotencyKeySchema = z.string().trim().min(1).max(160).regex(/^[A-Za-z0-9_.:-]+$/);
-const bodySchema = z
-  .object({
+const commonFields = {
     approvalId: routeId,
     expectedArtifactFingerprint: sha256,
     expectedAudienceFingerprint: sha256,
     expectedActionFingerprint: sha256,
-    acknowledgeLaunchAuthorizesExactFiveEmailSend: z.literal(true),
-  })
-  .strict();
+};
+const bodySchema = z.union([
+  z.object({...commonFields, acknowledgeLaunchAuthorizesExactFiveEmailSend: z.literal(true)}).strict(),
+  z.object({...commonFields, acknowledgeLaunchAuthorizesExactBatchEmailSend: z.literal(true)}).strict(),
+]);
 
 function noStore(response: NextResponse): NextResponse {
   response.headers.set("Cache-Control", "private, no-store, max-age=0");
@@ -53,7 +54,9 @@ const postLaunch = withApiHandler(
         {
           schemaVersion: "crm.warm-reconnect-pilot-response.v1",
           providerAction: false,
-          exactFiveEmailExecutionAuthorized: true,
+          ...("acknowledgeLaunchAuthorizesExactFiveEmailSend" in body
+            ? {exactFiveEmailExecutionAuthorized: true}
+            : {exactBatchEmailExecutionAuthorized: true}),
           executionState: "launch_requested",
           ...result,
         },

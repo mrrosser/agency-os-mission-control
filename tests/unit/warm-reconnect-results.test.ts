@@ -14,7 +14,21 @@ const observed=<T,>(value:T)=>({status:"observed" as const,value});
 function project(overrides:Partial<Parameters<typeof buildWarmReconnectPilotResult>[0]>={}){return buildWarmReconnectPilotResult({pilot,receipts:observed(receipts),events:observed([]),executor:observed(executor),observation:observed(null),observedAt:now,...overrides});}
 function event(recipientId:string,occurredAt:string,extra:ResultDocument={}){return {workspaceId:pilot.workspaceId,pilotId:pilot.pilotId,recipientId,occurredAt,eventType:"preferences_updated",campaignApprovalId:"approval-1",...fingerprints,topics:{rosser_gallery:true,rt_solutions:false},...extra};}
 
+function batchFixture(count:number){
+  const batchRecipients=Array.from({length:count},(_,index)=>({...recipients[0],recipientId:`recipient-${index}`,personId:`person-${index}`,contactPointId:`point-${index}`,emailKey:`email-${index}`}));
+  const batchReceipts=batchRecipients.map((recipient,index)=>({...receipts[0],...recipient,receiptId:`receipt-${index}`,providerMessageId:`ab${index.toString(16)}`,providerThreadId:`ab${index.toString(16)}`}));
+  return {pilot:{...pilot,tranche:"follow_on",recipientCap:count,recipients:batchRecipients},receipts:observed(batchReceipts),executor:observed({...executor,sentCount:count,claimedCount:count})};
+}
+
 describe("warm outreach results projection",()=>{
+  it.each([11,20])("reports all %i follow-on sends without treating supported batches as capped",count=>{
+    const fixture=batchFixture(count);const result=project(fixture);
+    expect(result.sent).toMatchObject({status:"observed",value:count});expect(result.complete).toBe(true);expect(result.recipients).toHaveLength(count);
+    expect(project({...fixture,receipts:observed(fixture.receipts.value.slice(0,count-1))}).complete).toBe(false);
+  });
+  it("keeps an oversized twenty-one-person report unknown and incomplete",()=>{
+    const result=project(batchFixture(21));expect(result.sent).toMatchObject({status:"unknown",value:null});expect(result.complete).toBe(false);
+  });
   it("reports five durable sends and observed zero confirmations, but unknown uncollected outcomes",()=>{
     const result=project();expect(result.complete).toBe(true);expect(result.sent.value).toBe(5);expect(result.confirmedChoices.any).toMatchObject({status:"observed",value:0});expect(result.unsubscribed.value).toBe(0);
     for(const key of ["replies","bounces","opens","clicks","conversions"] as const)expect(result[key]).toMatchObject({status:"unknown",value:null});
@@ -54,6 +68,14 @@ describe("warm outreach results projection",()=>{
 });
 
 describe("outcome ownership",()=>{
+  it.each([20,21])("reads the overflow sentinel and handles %i receipt rows without silent truncation",async(count)=>{
+    const rows=batchFixture(count).receipts.value;let cap=Infinity;
+    const query={select:()=>query,limit:(limit:number)=>{cap=limit;return query;},get:async()=>({size:Math.min(rows.length,cap),docs:rows.slice(0,cap).map(row=>({id:row.receiptId,data:()=>row}))})};
+    const db={collection:()=>({doc:()=>({collection:()=>query})})} as unknown as Firestore;
+    const result=readResultsReceipts("pilot-1",db);
+    if(count===20)await expect(result).resolves.toHaveLength(20);else await expect(result).rejects.toMatchObject({status:409});
+    expect(cap).toBe(21);
+  });
   beforeEach(()=>vi.mocked(assertPortfolioRegistryAccess).mockResolvedValue({workspaceId:"workspace",role:"owner"}));
   it("requires owner role even when an admin has registry access",async()=>{
     vi.mocked(assertPortfolioRegistryAccess).mockResolvedValue({workspaceId:"workspace",role:"admin"});

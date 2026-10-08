@@ -70,7 +70,7 @@ function completedInitialFixture() {
       profileId: "rosser_gallery_send", businessId: "rosser_nft_gallery", label: "Gallery",
       connected: true, gmailCapable: true, accountEmail: "mrosser@rossergallery.com", state: "connected",
     }],
-    candidates: [...oldRecipients, ...Array.from({ length: 11 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`))],
+    candidates: [...oldRecipients, ...Array.from({ length: 21 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`))],
     pilots: [{
       ...activation.pilots[0], pilotId: "completed-initial", status: "launch_requested",
       tranche: "initial_5", recipientCap: 5, recipients: oldRecipients,
@@ -333,11 +333,11 @@ describe("warm reconnect campaign UI", () => {
     expect(html).not.toContain("fixture-pilot");
   });
 
-  it.each([1, 10])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
+  it.each([1, 4, 10, 11, 20])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
     loadCompletedInitialResults(true, Array.from({ length: count }, (_, index) => `next-${index + 1}`));
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
 
-    expect(html).toContain("Select 1–10");
+    expect(html).toContain("Select 1–20");
     expect(html).toContain("Keep the approved email");
     expect(html).toContain("next-1@example.test");
     expect(html).not.toContain("invited-1@example.test");
@@ -345,9 +345,9 @@ describe("warm reconnect campaign UI", () => {
     expect(buttonContaining(html, "Prepare next batch for review")).not.toContain('disabled=""');
     expect(launchButton(html)).toBeUndefined();
     expect(buttonContaining(html, "Start approved")).toBeUndefined();
-    if (count === 10) {
-      const eleventhCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-11@example.test"));
-      expect(eleventhCandidate).toContain('disabled=""');
+    if (count === 20) {
+      const extraCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-21@example.test"));
+      expect(extraCandidate).toContain('disabled=""');
     }
   });
 
@@ -355,10 +355,16 @@ describe("warm reconnect campaign UI", () => {
     loadCompletedInitialResults(false, ["next-1"]);
     if (completion === null) hookState.overrides[15] = null;
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
-    expect(html).not.toContain("Select 1–10");
+    expect(html).not.toContain("Select 1–20");
     expect(buttonContaining(html, "Prepare next batch for review")).toBeUndefined();
     expect(html).toContain("invited-1@example.test");
     expect(launchButton(html)).toContain('disabled=""');
+  });
+
+  it("does not prepare a twenty-one-person selection even when client state is oversized", () => {
+    loadCompletedInitialResults(true, Array.from({ length: 21 }, (_, index) => `next-${index + 1}`));
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(buttonContaining(html, "Prepare next batch for review")).toContain('disabled=""');
   });
 
   it.each([false, true])("labels an active three-recipient batch and requires its explicit approval to launch: %s", (approved) => {

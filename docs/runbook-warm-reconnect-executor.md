@@ -1,5 +1,10 @@
 # Warm reconnect provider executor
 
+The original exact-five executor is described below. For the supported
+follow-on batches, automatic dispatcher and outcome reporting, use the
+[reviewed batch runbook](runbook-warm-reconnect-batches.md). The original
+activation history below does not describe the current follow-on scheduler.
+
 ## Safety posture
 
 The worker route is `POST /api/jobs/warm-reconnect`. It processes at most one

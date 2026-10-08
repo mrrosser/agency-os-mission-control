@@ -35,15 +35,9 @@ const senderSchema = z
       });
     }
   });
-const bodySchema = z
-  .object({
+const commonFields = {
     idempotencyKey: identifier,
     campaignPreviewFingerprint: sha256,
-    tranche: z.literal("initial_5"),
-    recipientCap: z.literal(5),
-    candidateRecipientIds: z
-      .tuple([identifier, identifier, identifier, identifier, identifier])
-      .refine((values) => new Set(values).size === 5, "Candidate ids must be distinct"),
     sender: senderSchema,
     contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons", "approved_design_v2"]).optional(),
     artworkEmailApproval: z
@@ -52,9 +46,28 @@ const bodySchema = z
         evidenceNote: humanText(500),
       })
       .strict().optional(),
-  })
-  .strict()
+};
+const bodySchema = z.discriminatedUnion("tranche", [
+  z.object({
+    ...commonFields,
+    tranche: z.literal("initial_5"),
+    recipientCap: z.literal(5),
+    candidateRecipientIds: z.tuple([identifier, identifier, identifier, identifier, identifier]),
+  }).strict(),
+  z.object({
+    ...commonFields,
+    tranche: z.literal("follow_on"),
+    parentPilotId: z.string().regex(/^wrp_[a-f0-9]{32}$/),
+    batchSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    recipientCap: z.number().int().min(1).max(10),
+    candidateRecipientIds: z.array(identifier).min(1).max(10),
+  }).strict(),
+])
   .superRefine((body, context) => {
+    if (body.candidateRecipientIds.length !== body.recipientCap ||
+      new Set(body.candidateRecipientIds).size !== body.recipientCap) {
+      context.addIssue({code: "custom", path: ["candidateRecipientIds"], message: "The exact batch size must match distinct recipient ids."});
+    }
     const artworkMode = body.contentMode === "approved_design_v2" || (body.contentMode ?? "artwork_html") === "artwork_html";
     if (artworkMode ? !body.artworkEmailApproval : body.artworkEmailApproval !== undefined) {
       context.addIssue({

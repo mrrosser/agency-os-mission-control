@@ -47,6 +47,8 @@ import {
   stopWarmReconnectPilot,
   warmReconnectInitialPilotLockId,
 } from "@/lib/crm/warm-reconnect-activation";
+import { reserveWarmReconnectFollowOnBatch } from "@/lib/crm/warm-reconnect-batch-repository";
+import { assertOwnedWarmReconnectFollowOnLock, warmReconnectFollowOnPilotLockId } from "@/lib/crm/warm-reconnect-batches";
 import { assertWarmReconnectNeverDispatched } from "@/lib/crm/warm-reconnect-review-recovery";
 import {
   WARM_RECONNECT_INVITATION_LEDGER_COLLECTION,
@@ -598,10 +600,10 @@ export function resolveWarmReconnectLegacyDncOrgId(
   return workspaceId;
 }
 
-function initialPilotLockRef(db: Firestore, workspaceId: string) {
+function initialPilotLockRef(db: Firestore, workspaceId: string, tranche: WarmReconnectPilot["tranche"] = "initial_5") {
   return db
     .collection(COLLECTIONS.campaignLocks)
-    .doc(warmReconnectInitialPilotLockId(workspaceId));
+    .doc(tranche === "follow_on" ? warmReconnectFollowOnPilotLockId(workspaceId) : warmReconnectInitialPilotLockId(workspaceId));
 }
 
 export function assertWarmReconnectInitialPilotLock(
@@ -633,6 +635,7 @@ function assertOwnedActiveInitialPilotLock(
   existing: DocumentData | undefined,
   pilot: WarmReconnectPilot
 ): void {
+  if (pilot.tranche === "follow_on") return assertOwnedWarmReconnectFollowOnLock(existing, pilot);
   assertWarmReconnectInitialPilotLock(existing, pilot.pilotId);
   if (!existing || existing.state !== "active" || existing.pilotId !== pilot.pilotId) {
     throw new ApiError(409, "The active pilot lock changed. Reload the campaign desk.");
@@ -732,6 +735,7 @@ export async function loadWarmReconnectActivationForUid(
       initialPilotSize: WARM_RECONNECT_INITIAL_PILOT_SIZE,
       expandedPilotRange: [6, 10],
       expandedPilotRequiresNewApproval: true,
+      followOnBatchRange: [1, 10],
       approvalTtlHours: WARM_RECONNECT_APPROVAL_TTL_HOURS,
       launchAuthorizesExactProviderExecution: true,
       providerExecutionEnabled: isWarmReconnectProviderSendEnabled(),
@@ -771,7 +775,8 @@ export async function createWarmReconnectPilotForUid(input: {
       profile.businessId === input.request.sender.businessId &&
       profile.profileId === input.request.sender.profileId
   );
-  const pilot = createWarmReconnectPilot({
+  const makePilot = (followOnNotBeforeMs?: number) => createWarmReconnectPilot({
+    followOnNotBeforeMs,
     pilotId,
     workspaceId: access.workspaceId,
     ownerUid: input.uid,
@@ -799,6 +804,19 @@ export async function createWarmReconnectPilotForUid(input: {
     preferenceOrigin: preferenceOriginFromEnv(),
     legacyDncOrgId,
   });
+  if (input.request.tranche === "follow_on") {
+    const result = await reserveWarmReconnectFollowOnBatch({
+      db, uid: input.uid, workspaceId: access.workspaceId, pilotId,
+      parentPilotId: input.request.parentPilotId, correlationId: input.correlationId, makePilot,
+    });
+    input.log.info("crm.warm_reconnect.follow_on_batch_created", {
+      pilotId, parentPilotId: result.pilot.parentPilotId, batchSequence: result.pilot.batchSequence,
+      recipientCount: result.pilot.recipientCap, replayed: result.replayed, providerAction: false,
+      correlationId: input.correlationId,
+    });
+    return { pilot: await hydratePilotView(result.pilot, db), replayed: result.replayed };
+  }
+  const pilot = makePilot();
   const ref = pilotRef(db, pilotId);
   const lockRef = initialPilotLockRef(db, access.workspaceId);
   const replayed = await db.runTransaction(async (transaction) => {
@@ -963,7 +981,7 @@ async function updatePilotTransaction(input: {
     input.idempotencyKey
   );
   const eventRef = ref.collection("events").doc(id);
-  const lockRef = initialPilotLockRef(db, loaded.pilot.workspaceId);
+  const lockRef = initialPilotLockRef(db, loaded.pilot.workspaceId, loaded.pilot.tranche);
   const requestsInitialLockRelease =
     input.eventKind === "pilot_stopped" || input.eventKind === "pilot_rejected";
   const requestFingerprint = warmReconnectFingerprint({
@@ -991,7 +1009,7 @@ async function updatePilotTransaction(input: {
     if (input.semanticReplay?.(current)) {
       return { pilot: current, replayed: true };
     }
-    if (requestsInitialLockRelease) {
+    if (requestsInitialLockRelease || current.tranche === "follow_on") {
       assertOwnedActiveInitialPilotLock(lockSnapshot.data(), current);
     }
     if (input.eventKind === "expired_launch_returned_to_review") {
@@ -1011,7 +1029,7 @@ async function updatePilotTransaction(input: {
         transaction.get(
           ref
             .collection("delivery_receipts")
-            .limit(WARM_RECONNECT_INITIAL_PILOT_SIZE + 1)
+            .limit(current.recipientCap + 1)
         ),
       ]);
       const executorState = executorStateSnapshot.data();
@@ -1026,6 +1044,7 @@ async function updatePilotTransaction(input: {
       releaseInitialLock = canReleaseWarmReconnectInitialPilotLock({
         executorState,
         receipts: receiptSnapshots.docs.map((receipt) => receipt.data()),
+        recipientCap: current.recipientCap,
       });
       if (releaseInitialLock && activeReceiptId && activeReceiptData) {
         const recipientId = asText(activeReceiptData.recipientId);

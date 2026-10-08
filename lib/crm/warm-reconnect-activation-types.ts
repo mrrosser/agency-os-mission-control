@@ -14,6 +14,9 @@ export const WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES = [
 export const WARM_RECONNECT_APPROVAL_TTL_HOURS = 24 as const;
 export const WARM_RECONNECT_INITIAL_PILOT_SIZE = 5 as const;
 export const WARM_RECONNECT_MAX_PILOT_SIZE = 10 as const;
+export type WarmReconnectApprovalScope =
+  | "exact_five_one_time_reconnection_emails"
+  | "exact_batch_one_time_reconnection_emails";
 
 export type WarmReconnectBusinessId =
   (typeof WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES)[number]["businessId"];
@@ -170,7 +173,7 @@ export interface WarmReconnectPilotApproval {
   artifactFingerprint: string;
   audienceFingerprint: string;
   actionFingerprint: string;
-  approvalScope: "exact_five_one_time_reconnection_emails";
+  approvalScope: WarmReconnectApprovalScope;
   excludedScope: readonly [
     "audience_expansion",
     "provider_draft_create",
@@ -209,8 +212,12 @@ export interface WarmReconnectPilot {
   ownerUid: string;
   legacyDncOrgId: string;
   status: WarmReconnectPilotStatus;
-  tranche: "initial_5";
-  recipientCap: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
+  tranche: "initial_5" | "follow_on";
+  recipientCap: number;
+  parentPilotId?: string;
+  batchSequence?: number;
+  /** Server-derived from the completed parent's final provider attempt. */
+  followOnNotBeforeMs?: number;
   campaignPreviewFingerprint: string;
   sender: WarmReconnectPilotSenderConfiguration;
   contentMode?: WarmReconnectContentMode;
@@ -284,18 +291,16 @@ export interface WarmReconnectActivationResponse {
     initialPilotSize: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
     expandedPilotRange: readonly [6, 10];
     expandedPilotRequiresNewApproval: true;
+    followOnBatchRange: readonly [1, 10];
     approvalTtlHours: typeof WARM_RECONNECT_APPROVAL_TTL_HOURS;
     launchAuthorizesExactProviderExecution: true;
     providerExecutionEnabled: boolean;
   };
 }
 
-export interface CreateWarmReconnectPilotRequest {
+interface CreateWarmReconnectPilotBase {
   idempotencyKey: string;
   campaignPreviewFingerprint: string;
-  tranche: "initial_5";
-  recipientCap: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
-  candidateRecipientIds: [string, string, string, string, string];
   sender: WarmReconnectPilotSenderInput;
   contentMode?: WarmReconnectContentMode;
   artworkEmailApproval?: {
@@ -303,6 +308,21 @@ export interface CreateWarmReconnectPilotRequest {
     evidenceNote: string;
   };
 }
+
+export type CreateWarmReconnectPilotRequest = CreateWarmReconnectPilotBase & (
+  | {
+      tranche: "initial_5";
+      recipientCap: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
+      candidateRecipientIds: [string, string, string, string, string];
+    }
+  | {
+      tranche: "follow_on";
+      recipientCap: number;
+      candidateRecipientIds: string[];
+      parentPilotId: string;
+      batchSequence: number;
+    }
+);
 
 export type WarmReconnectRecipientDecisionRequest =
   | {
@@ -325,7 +345,7 @@ export type WarmReconnectPilotApprovalRequest =
       expectedArtifactFingerprint: string;
       expectedAudienceFingerprint: string;
       expectedActionFingerprint: string;
-      approvalScope: "exact_five_one_time_reconnection_emails";
+      approvalScope: WarmReconnectApprovalScope;
       confirmations: {
         senderLegalIdentityVerified: true;
         physicalPostalAddressVerified: true;
@@ -351,7 +371,8 @@ export interface WarmReconnectPilotLaunchRequest {
   expectedArtifactFingerprint: string;
   expectedAudienceFingerprint: string;
   expectedActionFingerprint: string;
-  acknowledgeLaunchAuthorizesExactFiveEmailSend: true;
+  acknowledgeLaunchAuthorizesExactFiveEmailSend?: true;
+  acknowledgeLaunchAuthorizesExactBatchEmailSend?: true;
 }
 
 export interface WarmReconnectPilotStopRequest {

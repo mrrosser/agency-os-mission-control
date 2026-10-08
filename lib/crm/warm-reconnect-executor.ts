@@ -1,4 +1,6 @@
 import "server-only";
+import { assertOwnedWarmReconnectFollowOnLock, warmReconnectFollowOnPilotLockId, warmReconnectApprovalScopeForPilot } from "@/lib/crm/warm-reconnect-batches";
+import { assertWarmReconnectNoHistoricalInvitation } from "@/lib/crm/warm-reconnect-batch-repository";
 
 import { createHash } from "node:crypto";
 import {
@@ -14,7 +16,6 @@ import {
 } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
 import {
-  WARM_RECONNECT_INITIAL_PILOT_SIZE,
   WARM_RECONNECT_PILOT_SCHEMA_VERSION,
   type WarmReconnectPilot,
   type WarmReconnectPilotRecipient,
@@ -432,17 +433,18 @@ function invitationLedgerRef(
 
 function initialPilotLockRef(
   db: Firestore,
-  workspaceId: string
+  pilot: WarmReconnectPilot
 ): DocumentReference<DocumentData> {
   return db
     .collection(COLLECTIONS.campaignLocks)
-    .doc(warmReconnectInitialPilotLockId(workspaceId));
+    .doc(pilot.tranche === "follow_on" ? warmReconnectFollowOnPilotLockId(pilot.workspaceId) : warmReconnectInitialPilotLockId(pilot.workspaceId));
 }
 
 function assertOwnedActiveInitialPilotLock(
   value: DocumentData | undefined,
   pilot: WarmReconnectPilot
 ): void {
+  if (pilot.tranche === "follow_on") return assertOwnedWarmReconnectFollowOnLock(value, pilot);
   if (
     !value ||
     value.schemaVersion !== 1 ||
@@ -666,19 +668,17 @@ function assertFrozenLaunchPilot(
   if (
     pilot.status !== "launch_requested" ||
     !pilot.launchRequestedAt ||
-    pilot.tranche !== "initial_5" ||
-    pilot.recipientCap !== WARM_RECONNECT_INITIAL_PILOT_SIZE ||
-    pilot.recipients.length !== WARM_RECONNECT_INITIAL_PILOT_SIZE
+    pilot.recipients.length !== pilot.recipientCap
   ) {
-    throw new ApiError(409, "Only the exact launched five-person pilot can execute.");
+    throw new ApiError(409, "Only the exact launched batch can execute.");
   }
   if (
     new Set(pilot.recipients.map((recipient) => recipient.recipientId)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE ||
+      pilot.recipientCap ||
     new Set(pilot.recipients.map((recipient) => recipient.personId)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE ||
+      pilot.recipientCap ||
     new Set(pilot.recipients.map((recipient) => recipient.emailKey)).size !==
-      WARM_RECONNECT_INITIAL_PILOT_SIZE ||
+      pilot.recipientCap ||
     pilot.recipients.some(
       (recipient) =>
         recipient.decision.status !== "eligible_one_time_reconnection" ||
@@ -693,7 +693,7 @@ function assertFrozenLaunchPilot(
     !pilot.approval ||
     pilot.approval.decision !== "approved" ||
     pilot.approval.approvalScope !==
-      "exact_five_one_time_reconnection_emails" ||
+      warmReconnectApprovalScopeForPilot(pilot) ||
     JSON.stringify(pilot.approval.excludedScope) !==
       JSON.stringify(EXPECTED_EXCLUDED_SCOPE) ||
     !isWarmReconnectApprovalCurrent(pilot, now)
@@ -753,7 +753,7 @@ function emptyExecutorState(pilot: WarmReconnectPilot): ExecutorStateDocument {
     claimedCount: 0,
     sentCount: 0,
     lastProviderAttemptAtMs: null,
-    nextEligibleAtMs: null,
+    nextEligibleAtMs: pilot.tranche === "follow_on" ? pilot.followOnNotBeforeMs! : null,
     halted: false,
     complete: false,
   };
@@ -1294,7 +1294,7 @@ export async function claimNextWarmReconnectRecipient(input: {
     const pilot = pilotFromSnapshot(pilotSnapshot, pilotId);
     assertFrozenLaunchPilot(pilot, uid, input.now);
     const state = parseExecutorState(stateSnapshot.data(), pilot);
-    const initialLockRef = initialPilotLockRef(input.db, pilot.workspaceId);
+    const initialLockRef = initialPilotLockRef(input.db, pilot);
     const initialLockSnapshot = await transaction.get(initialLockRef);
     assertOwnedActiveInitialPilotLock(initialLockSnapshot.data(), pilot);
     const receiptRefs = pilot.recipients.map((recipient) =>
@@ -1312,7 +1312,7 @@ export async function claimNextWarmReconnectRecipient(input: {
       state,
       receipts,
       nowMs: input.now.getTime(),
-      maxClaims: WARM_RECONNECT_INITIAL_PILOT_SIZE,
+      maxClaims: pilot.recipientCap,
       staleAfterMs: WARM_RECONNECT_INFLIGHT_RECONCILIATION_MS,
     });
     if (progress.action === "complete") return { kind: "complete" };
@@ -1445,6 +1445,20 @@ export async function claimNextWarmReconnectRecipient(input: {
     }
     const recipientIndex = progress.recipientIndex;
     const recipient = pilot.recipients[recipientIndex];
+    if (pilot.tranche === "follow_on") {
+      // Read before any writes; global identity exclusions share the claim transaction.
+      try {
+        await assertWarmReconnectNoHistoricalInvitation({ db: input.db, transaction, pilot, recipients: [recipient] });
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.details?.reason !== "cross_batch_identity_invitation_conflict") throw error;
+        const reason = "cross_batch_identity_invitation_conflict";
+        stopPilot(transaction, {
+          pilotRef, stateRef, initialLockRef, initialLockData: initialLockSnapshot.data(),
+          releaseInitialLock: false, pilot, state, reason, correlationId, now: input.now,
+        });
+        return { kind: "stopped", reason };
+      }
+    }
     const safety = await inspectCanonicalRecipient(
       transaction,
       input.db,
@@ -1641,7 +1655,7 @@ export async function markWarmReconnectCapabilitiesPrepared(input: {
   const ledgerRef = invitationLedgerRef(input.db, invitationBinding);
   const initialLockRef = initialPilotLockRef(
     input.db,
-    input.claim.pilot.workspaceId
+    input.claim.pilot
   );
   await input.db.runTransaction(async (transaction) => {
     const [
@@ -1738,7 +1752,7 @@ export async function beginWarmReconnectProviderAttempt(input: {
   const ledgerRef = invitationLedgerRef(input.db, invitationBinding);
   const initialLockRef = initialPilotLockRef(
     input.db,
-    input.claim.pilot.workspaceId
+    input.claim.pilot
   );
   return input.db.runTransaction(async (transaction) => {
     const [
@@ -1952,7 +1966,7 @@ export async function recordWarmReconnectSent(input: {
   const ledgerRef = invitationLedgerRef(input.db, invitationBinding);
   const initialLockRef = initialPilotLockRef(
     input.db,
-    input.claim.pilot.workspaceId
+    input.claim.pilot
   );
   return input.db.runTransaction(async (transaction) => {
     const [
@@ -1993,7 +2007,10 @@ export async function recordWarmReconnectSent(input: {
       throw new ApiError(409, "The provider receipt could not be reconciled.");
     }
     const sentCount = state.sentCount + 1;
-    const complete = sentCount === WARM_RECONNECT_INITIAL_PILOT_SIZE;
+    if (!Number.isSafeInteger(sentCount) || sentCount < 1 || sentCount > pilot.recipientCap) {
+      throw new ApiError(409, "The approved batch delivery count could not be reconciled.");
+    }
+    const complete = sentCount === pilot.recipientCap;
     transaction.set(
       receiptRef,
       {
@@ -2065,7 +2082,7 @@ export async function recordWarmReconnectDeliveryUnknown(input: {
   const ledgerRef = invitationLedgerRef(input.db, invitationBinding);
   const initialLockRef = initialPilotLockRef(
     input.db,
-    input.claim.pilot.workspaceId
+    input.claim.pilot
   );
   return input.db.runTransaction(async (transaction) => {
     const [
@@ -2167,7 +2184,7 @@ export async function recordWarmReconnectStoppedBeforeProvider(input: {
   const ledgerRef = invitationLedgerRef(input.db, invitationBinding);
   const initialLockRef = initialPilotLockRef(
     input.db,
-    input.claim.pilot.workspaceId
+    input.claim.pilot
   );
   await input.db.runTransaction(async (transaction) => {
     const [

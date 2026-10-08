@@ -36,6 +36,8 @@ import type {
   WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
+import type { WarmReconnectResultsResponse } from "@/lib/crm/warm-reconnect-results-types";
+import { WarmReconnectResults } from "./warm-reconnect-results";
 import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL, RT_SOLUTIONS_SENDING_EMAIL } from "@/lib/google/business-profiles";
 import {
   assertGoogleConnectionActive,
@@ -165,6 +167,22 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const currentOwnerRef = useRef(user?.uid);
   currentOwnerRef.current = user?.uid;
   const [recoveryReason, setRecoveryReason] = useState("");
+  const [results, setResults] = useState<{ownerUid: string; data: WarmReconnectResultsResponse} | null>(null);
+  const [resultsRefresh, setResultsRefresh] = useState(0);
+  const receiveResults = useCallback((data: WarmReconnectResultsResponse) => {
+    if (user && currentOwnerRef.current === user.uid) setResults({ownerUid: user.uid, data});
+  }, [user]);
+  const currentResults = results?.ownerUid === user?.uid ? results?.data : null;
+  const completedPilotIds = new Set(currentResults?.pilots.filter((pilot) => pilot.complete).map((pilot) => pilot.pilotId));
+  const activePilot = activation?.pilots.find((pilot) =>
+    !["stopped", "rejected", "stale"].includes(pilot.status) && !completedPilotIds.has(pilot.pilotId),
+  ) || null;
+  const followOnParent = !activePilot && !currentResults?.pilotsTruncated
+    ? activation?.pilots.find((pilot) => completedPilotIds.has(pilot.pilotId)) ?? null : null;
+  const selectionCap = followOnParent ? 10 : 5;
+  const previouslyInvitedIds = new Set(activation?.pilots.flatMap((pilot) =>
+    completedPilotIds.has(pilot.pilotId) ? pilot.recipients.map((recipient) => recipient.recipientId) : []));
+  const availableCandidates = activation?.candidates.filter((candidate) => !previouslyInvitedIds.has(candidate.recipientId)) ?? [];
 
   const loadActivation = useCallback(async () => {
     if (!user) return;
@@ -191,6 +209,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
       }
       setActivation(body);
       setActivationOwner(user.uid);
+      setResultsRefresh((value) => value + 1);
       setSelectedRecipientIds((current) =>
         current.filter((recipientId) => body.candidates.some((candidate) => candidate.recipientId === recipientId)),
       );
@@ -327,33 +346,39 @@ export function WarmReconnectActivation({ campaign }: Props) {
   }
 
   async function createPilot() {
-    const recipients = selectedTuple(selectedRecipientIds);
-    const profile = activation?.googleProfiles.find((item) => item.profileId === sender.profileId);
+    const recipients = followOnParent
+      ? selectedRecipientIds.length >= 1 && selectedRecipientIds.length <= 10 ? [...selectedRecipientIds] : null
+      : selectedTuple(selectedRecipientIds);
+    const selectedSender = followOnParent?.sender ?? sender;
+    const profile = activation?.googleProfiles.find((item) => item.profileId === selectedSender.profileId);
     if (!recipients || !profile || !campaign || mutation) return;
 
     const idempotencyKey = crypto.randomUUID();
-    const payload: CreateWarmReconnectPilotRequest = {
+    const common = {
       idempotencyKey,
-      campaignPreviewFingerprint: campaign.review.previewFingerprint,
-      tranche: "initial_5",
-      recipientCap: 5,
-      candidateRecipientIds: recipients,
+      campaignPreviewFingerprint: followOnParent?.campaignPreviewFingerprint ?? campaign.review.previewFingerprint,
       sender: {
-        senderName: sender.senderName.trim(),
-        legalEntity: sender.legalEntity.trim(),
-        replyTo: sender.replyTo.trim(),
-        physicalPostalAddress: sender.physicalPostalAddress.trim(),
+        senderName: selectedSender.senderName.trim(),
+        legalEntity: selectedSender.legalEntity.trim(),
+        replyTo: selectedSender.replyTo.trim(),
+        physicalPostalAddress: selectedSender.physicalPostalAddress.trim(),
         businessId: profile.businessId,
         profileId: profile.profileId,
       },
-      contentMode: sender.contentMode,
-      ...(hasArtwork(sender.contentMode) ? {
+      contentMode: followOnParent?.contentMode ?? sender.contentMode,
+      ...(hasArtwork(followOnParent?.contentMode ?? sender.contentMode) ? {
         artworkEmailApproval: {
           approvedForThisEmailCampaign: true as const,
-          evidenceNote: sender.artworkEvidenceNote.trim(),
+          evidenceNote: followOnParent?.artworkEmailApproval?.evidenceNote ?? sender.artworkEvidenceNote.trim(),
         },
       } : {}),
     };
+    const payload: CreateWarmReconnectPilotRequest = followOnParent ? {
+      ...common, tranche: "follow_on", parentPilotId: followOnParent.pilotId,
+      batchSequence: (followOnParent.batchSequence ?? 0) + 1,
+      recipientCap: recipients.length, candidateRecipientIds: recipients,
+    } : { ...common, tranche: "initial_5", recipientCap: 5,
+      candidateRecipientIds: recipients as [string, string, string, string, string] };
 
     setMutation({ action: "create" });
     setError(null);
@@ -417,7 +442,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
       expectedArtifactFingerprint: pilot.fingerprints.artifactFingerprint,
       expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
       expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
-      approvalScope: "exact_five_one_time_reconnection_emails",
+      approvalScope: pilot.tranche === "follow_on" ? "exact_batch_one_time_reconnection_emails" : "exact_five_one_time_reconnection_emails",
       confirmations: {
         senderLegalIdentityVerified: true,
         physicalPostalAddressVerified: true,
@@ -455,7 +480,9 @@ export function WarmReconnectActivation({ campaign }: Props) {
       expectedArtifactFingerprint: pilot.fingerprints.artifactFingerprint,
       expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
       expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
-      acknowledgeLaunchAuthorizesExactFiveEmailSend: true,
+      ...(pilot.tranche === "follow_on"
+        ? {acknowledgeLaunchAuthorizesExactBatchEmailSend: true as const}
+        : {acknowledgeLaunchAuthorizesExactFiveEmailSend: true as const}),
     };
     setMutation({ action: "launch" });
     setError(null);
@@ -515,9 +542,6 @@ export function WarmReconnectActivation({ campaign }: Props) {
     }
   }
 
-  const activePilot = activation?.pilots.find((pilot) =>
-    !["stopped", "rejected", "stale"].includes(pilot.status),
-  ) || null;
   const providerExecutionEnabled = error ? undefined : activation?.constraints?.providerExecutionEnabled;
   const providerStatus = providerExecutionEnabled === true
     ? "Provider execution is enabled."
@@ -531,19 +555,19 @@ export function WarmReconnectActivation({ campaign }: Props) {
       : "provider status unknown";
   const visibleConfirmations = requiredConfirmations(activePilot?.contentMode);
   const allConfirmationsChecked = visibleConfirmations.every(([key]) => confirmations[key]);
-  const selectedProfile = activation?.googleProfiles.find((profile) => profile.profileId === sender.profileId);
+  const selectedProfile = activation?.googleProfiles.find((profile) => profile.profileId === (followOnParent?.sender.profileId ?? sender.profileId));
   const createReady = Boolean(
-    selectedRecipientIds.length === 5 &&
+    (followOnParent ? selectedRecipientIds.length >= 1 && selectedRecipientIds.length <= 10 : selectedRecipientIds.length === 5) &&
     campaign &&
     activation &&
     !activation.candidateSummary.truncated &&
     selectedProfile &&
-    sender.senderName.trim() &&
+    (followOnParent || (sender.senderName.trim() &&
     sender.legalEntity.trim() &&
     sender.replyTo.trim() &&
     sender.physicalPostalAddress.trim() &&
     (!hasArtwork(sender.contentMode) ||
-      (sender.artworkApproved && sender.artworkEvidenceNote.trim())) &&
+      (sender.artworkApproved && sender.artworkEvidenceNote.trim())))) &&
     !activePilot,
   );
   const verifiedGates = useMemo(
@@ -566,7 +590,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
               Permission first. Approval and launch stay separate.
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              No address becomes opted in automatically. Marcus reviews each relationship before the server can prepare one exact five-person pilot.
+              Review the first five recipients, then continue in batches of up to ten using the same approved email. Each list is reviewed before sending, and invitations never subscribe anyone automatically.
             </p>
           </div>
           <div className="flex items-center gap-2 self-start rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100">
@@ -575,6 +599,10 @@ export function WarmReconnectActivation({ campaign }: Props) {
           </div>
         </div>
       </header>
+
+      <div className="px-4 pt-4 sm:px-6">
+        <WarmReconnectResults refreshKey={resultsRefresh} onLoaded={receiveResults} />
+      </div>
 
       <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-2">
         <article className="rounded-xl border border-white/10 bg-black/25 p-4">
@@ -660,7 +688,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
           <div className="flex items-start gap-3">
             <UsersRound className="mt-0.5 h-5 w-5 shrink-0 text-cyan-200" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold text-white">3. Reconcile exactly five people</h3>
+              <h3 className="font-semibold text-white">{followOnParent || activePilot?.tranche === "follow_on" ? "3. Review the next batch" : "3. Reconcile exactly five people"}</h3>
               <p className="mt-1 text-xs leading-5 text-zinc-400">
                 An address-book entry is relationship evidence, not opt-in. Names and emails below are visible only in this authenticated owner review.
               </p>
@@ -671,21 +699,21 @@ export function WarmReconnectActivation({ campaign }: Props) {
                 </div>
               )}
 
-              {!activePilot && !activation?.candidateSummary.truncated && Boolean(activation?.candidates.length) && (
+              {!activePilot && !activation?.candidateSummary.truncated && Boolean(availableCandidates.length) && (
                 <div className="mt-4 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                   <fieldset className="max-h-[28rem] space-y-2 overflow-y-auto rounded-xl border border-white/10 p-3">
                     <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
-                      Select 5 · {selectedRecipientIds.length} selected
+                      {followOnParent ? "Select 1–10" : "Select 5"} · {selectedRecipientIds.length} selected
                     </legend>
-                    {activation?.candidates.map((candidate) => {
+                    {availableCandidates.map((candidate) => {
                       const checked = candidateSelected(selectedRecipientIds, candidate);
-                      const selectionFull = selectedRecipientIds.length >= 5 && !checked;
+                      const selectionFull = selectedRecipientIds.length >= selectionCap && !checked;
                       return (
                         <label key={candidate.recipientId} className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-3">
                           <input
                             type="checkbox"
                             checked={checked}
-                            disabled={selectionFull || activation.candidateSummary.truncated}
+                            disabled={selectionFull || activation?.candidateSummary.truncated}
                             onChange={() => setSelectedRecipientIds((current) =>
                               checked
                                 ? current.filter((id) => id !== candidate.recipientId)
@@ -705,7 +733,19 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     })}
                   </fieldset>
 
-                  <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                  {followOnParent ? (
+                    <div className="space-y-3 rounded-xl border border-emerald-300/20 bg-emerald-300/[0.04] p-4">
+                      <p className="text-sm font-semibold text-emerald-100">Keep the approved email</p>
+                      <p className="text-xs leading-5 text-zinc-300">The next batch uses the same design, sender, reply-to, address and preference links as your completed batch. Review the new people, then approve and start this list.</p>
+                      <p className="text-xs text-zinc-400">From: {followOnParent.sender.fromEmail}</p>
+                      <p className="text-xs text-zinc-400">Reply to: {followOnParent.sender.replyTo}</p>
+                      <p className="text-xs text-zinc-400">Up to ten invitations. Previously invited people remain excluded.</p>
+                      <Button type="button" disabled={!createReady || Boolean(mutation)} onClick={() => void createPilot()} className="w-full bg-cyan-200 text-[#061012] hover:bg-cyan-100">
+                        {mutation?.action === "create" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <UsersRound aria-hidden="true" />}
+                        Prepare next batch for review
+                      </Button>
+                    </div>
+                  ) : <div className="space-y-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Frozen sender configuration</p>
                     <input aria-label="Sender name" value={sender.senderName} onChange={(event) => setSender((current) => ({ ...current, senderName: event.target.value }))} placeholder="Sender name" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <input aria-label="Legal entity" value={sender.legalEntity} onChange={(event) => setSender((current) => ({ ...current, legalEntity: event.target.value }))} placeholder="Legal sender entity" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
@@ -743,13 +783,13 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       {mutation?.action === "create" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <UsersRound aria-hidden="true" />}
                       Prepare exact five-person review
                     </Button>
-                  </div>
+                  </div>}
                 </div>
               )}
 
-              {!activePilot && !activation?.candidateSummary.truncated && !activation?.candidates.length && (
+              {!activePilot && !activation?.candidateSummary.truncated && !availableCandidates.length && (
                 <div className="mt-3 rounded-lg border border-dashed border-amber-300/25 bg-amber-300/[0.04] p-3 text-xs leading-5 text-amber-100/75">
-                  Zero opted-in contacts are recorded, and the server has not returned any relationship-evidence candidates for review. Approval and launch remain disabled.
+                  No new relationship-evidence candidates are available for review. Previously invited people are excluded.
                 </div>
               )}
 
@@ -804,7 +844,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
             <div className="min-w-0 flex-1">
               <h3 className="font-semibold text-white">4. Approve, then request launch</h3>
               <p className="mt-1 text-xs leading-5 text-zinc-400">
-                Approval binds the exact five people, copy, sender account, and fingerprints for 24 hours. Launch is the separate action that authorizes those five Gmail sends. {providerStatus} The provider setting does not approve or launch a pilot.
+                Approval covers only this recipient list and the reviewed email for 24 hours. Starting a follow-on batch lets the dispatcher send one invitation at a time. {providerStatus}
               </p>
 
               {activePilot ? (
@@ -830,7 +870,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                           <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Exact approval confirmations</legend>
                           {visibleConfirmations.map(([key, label]) => (
                             <label key={key} className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
-                              <input type="checkbox" checked={confirmations[key]} onChange={(event) => setConfirmations((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" /> {label}
+                              <input type="checkbox" checked={confirmations[key]} onChange={(event) => setConfirmations((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" /> {key === "exactAudienceReviewed" && activePilot.tranche === "follow_on" ? `Exact ${activePilot.recipientCap}-person audience` : label}
                             </label>
                           ))}
                         </fieldset>
@@ -882,7 +922,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       </div>
                     )}
                     <Button type="button" disabled={!activePilot.availableActions.canLaunch || !activePilot.approval || Boolean(mutation)} onClick={() => void launchPilot(activePilot)} className="w-full bg-emerald-300 text-emerald-950 hover:bg-emerald-200">
-                      {mutation?.action === "launch" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MailCheck aria-hidden="true" />} Authorize exact five-email launch · {providerLaunchLabel}
+                      {mutation?.action === "launch" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <MailCheck aria-hidden="true" />} {activePilot.tranche === "follow_on" ? `Start approved ${activePilot.recipientCap}-email batch` : "Authorize exact five-email launch"} · {providerLaunchLabel}
                     </Button>
                     <input aria-label="Stop reason" value={stopReason} onChange={(event) => setStopReason(event.target.value)} placeholder="Reason to stop this pilot" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-red-200/50" />
                     <Button type="button" variant="outline" disabled={!activePilot.availableActions.canStop || !stopReason.trim() || Boolean(mutation)} onClick={() => void stopPilot(activePilot)} className="w-full border-red-300/25 bg-red-300/[0.04] text-red-100 hover:bg-red-300/10 hover:text-red-50">
@@ -892,7 +932,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                 </div>
               ) : (
                 <p className="mt-3 rounded-lg border border-dashed border-white/15 p-3 text-xs text-zinc-500">
-                  No pilot exists. Approval and launch have zero authority.
+                  {followOnParent ? "The previous batch is complete. Prepare the next recipient list above." : "Prepare a recipient list before approving and starting a batch."}
                 </p>
               )}
             </div>
@@ -908,7 +948,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
             ) : loading ? (
               <p className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Checking live activation controls…</p>
             ) : (
-              <p>{activation ? `${activation.candidateSummary.returned} candidates returned · ${activation.candidateSummary.excluded} excluded · provider actions: none.` : "No activation contract loaded."}</p>
+              <p>{activation ? `${availableCandidates.length} contacts available for review · ${activation.candidateSummary.excluded} excluded.` : "No activation contract loaded."}</p>
             )}
           </div>
           <Button type="button" size="sm" variant="ghost" disabled={loading || Boolean(mutation)} onClick={refreshConnectionStatus} className="self-start text-zinc-300 hover:bg-white/10 hover:text-white sm:self-auto">

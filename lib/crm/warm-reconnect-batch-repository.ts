@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { FieldValue, type DocumentData, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
-import type { WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
+import { WARM_RECONNECT_MAX_PILOT_SIZE, type WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
 import { assertWarmReconnectPilotFingerprints, canReleaseWarmReconnectInitialPilotLock, warmReconnectInitialPilotLockId, WARM_RECONNECT_EXECUTION_POLICY } from "@/lib/crm/warm-reconnect-activation";
 import { assertWarmReconnectFollowOnContent, assertWarmReconnectFollowOnReservation, assertWarmReconnectParentCompletion, warmReconnectFollowOnPilotLockId, warmReconnectBatchReceiptId, WARM_RECONNECT_CAMPAIGN_LOCK_COLLECTION, WARM_RECONNECT_FOLLOW_ON_LOCK_SCHEMA_VERSION } from "@/lib/crm/warm-reconnect-batches";
 import { WARM_RECONNECT_INVITATION_LEDGER_COLLECTION, parseWarmReconnectInvitationLedgerDocument, warmReconnectInvitationBindingMatches, warmReconnectInvitationReservationBindingForPilot } from "@/lib/crm/warm-reconnect-invitation-ledger";
@@ -41,7 +41,7 @@ async function assertReleasedHolderNeverSent(input: {
   const ref = input.db.collection(PILOTS).doc(String(input.lock.pilotId || "invalid"));
   const [snapshot, state, receipts] = await Promise.all([
     input.transaction.get(ref), input.transaction.get(ref.collection("executor").doc("state")),
-    input.transaction.get(ref.collection("delivery_receipts").limit(11)),
+    input.transaction.get(ref.collection("delivery_receipts").limit(WARM_RECONNECT_MAX_PILOT_SIZE + 1)),
   ]);
   const holder = snapshot.data() as WarmReconnectPilot | undefined;
   if (!holder || holder.pilotId !== snapshot.id || holder.pilotId !== input.lock.pilotId ||

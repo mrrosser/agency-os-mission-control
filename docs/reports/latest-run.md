@@ -1,5 +1,12 @@
 # Latest Verification Run
 
+## 2026-10-08 Reviewed outreach capacity: 20 recipients
+
+- Raises executable follow-on batches from 10 to 20 across API validation, CRM selection, dispatcher, reporting and receipt reconciliation. Reply metadata reads stay bounded at ten concurrent threads. Initial-five behavior, exact audience fingerprints, approved message/sender, expiry, cadence and duplicate protection remain unchanged.
+- Focused boundary and compatibility verification: **386 tests / 9 files passed**. Independent final diff review found no blocking issue. Full lint passed with zero errors and two existing Google callback warnings. Fresh official-registry audit passed the unchanged high threshold: zero high/critical, 18 moderate. Dependencies unchanged.
+- Protected PR unit/smoke and production-build validation are required before release. Deployment remains held for the existing Google billing failure from PR #62; no new scheduler, CRM approval, launch or provider send occurred. The saved four-person human approval remains exact and does not grow to fill the new capacity.
+- [Execution plan](../execplans/2026-10-08-follow-on-batches-and-results.md) and [local run/deploy guide](../runbook-warm-reconnect-batches.md).
+
 ## 2026-10-07 CRM dependency release repair
 
 - Repairs the audit blocker on recovery PR #60: Sharp 0.35.5, compatible proxy-addr 2.0.8/source-map-js 1.2.2 locks and development-only Vitest 4.1.11. Existing Vite 7.3.6 is explicitly pinned; Next/PostCSS and all 409 tracked application/source/artwork files are unchanged. Tinypool is removed through the supported runner upgrade.

@@ -82,4 +82,33 @@ describe("existing Gallery read connection",()=>{
     await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"correlation",db,fetchImpl:fetchMock});
     expect(saved).toMatchObject({status:"partial",inspectedThreads:0,expectedThreads:1});expect(JSON.stringify(saved)).not.toContain("private-provider-error");
   });
+
+  it("observes twenty exact threads in two bounded metadata waves without persisting raw mail",async()=>{
+    const batchRecipients=Array.from({length:20},(_,index)=>({...recipient,recipientId:`recipient-${index}`,personId:`person-${index}`,contactPointId:`point-${index}`,emailKey:warmReconnectEmailKey(workspaceId,`person${index}@example.test`)}));
+    const batchPilot={...pilot,tranche:"follow_on",recipientCap:20,recipients:batchRecipients};
+    const batchReceipts=batchRecipients.map((row,index)=>({...receipt,...row,receiptId:`receipt-${index}`,providerMessageId:`ab${index.toString(16)}`,providerThreadId:`ab${index.toString(16)}`}));
+    const threads=new Map(batchReceipts.map((row,index)=>{
+      const threadId=row.providerThreadId;const messageId=`<original-${index}@example.test>`;const address=`person${index}@example.test`;
+      return [threadId,{id:threadId,messages:[
+        message(row.providerMessageId,{From:"Marcus <mrosser@rossergallery.com>",To:address,"Message-ID":messageId},{threadId,labelIds:["SENT"],internalDate:String(date)}),
+        message(`cd${index.toString(16)}`,{From:address,"In-Reply-To":messageId},{threadId}),
+      ]}];
+    }));
+    let saved:ResultDocument|undefined;let cap=Infinity;
+    const ref=(path:string):unknown=>({collection:(name:string)=>ref(`${path}/${name}`),doc:(id:string)=>ref(`${path}/${id}`),select:()=>ref(path),limit:(value:number)=>{cap=value;return ref(path);},get:async()=>path.endsWith("/delivery_receipts")?{size:Math.min(cap,batchReceipts.length),docs:batchReceipts.slice(0,cap).map(row=>({id:row.receiptId,data:()=>row}))}:{exists:true,data:()=>batchPilot}});
+    const db={collection:(name:string)=>ref(name),runTransaction:async(fn:(tx:unknown)=>Promise<void>)=>fn({get:async()=>({data:()=>undefined}),set:(_ref:unknown,value:ResultDocument)=>{saved=value;}})} as unknown as Firestore;
+    let active=0;let peak=0;const readIds:string[]=[];
+    const fetchMock=vi.fn().mockImplementation(async(url:string)=>{
+      if(url.includes("/profile"))return json({emailAddress:"mrosser@rossergallery.com"});
+      const parsed=new URL(url);expect(parsed.searchParams.get("format")).toBe("metadata");
+      const id=parsed.pathname.split("/").at(-1)!;readIds.push(id);active++;peak=Math.max(peak,active);
+      await new Promise(resolve=>setTimeout(resolve,0));active--;
+      return json(threads.get(id));
+    });
+    await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"twenty-thread-observation",db,fetchImpl:fetchMock});
+    expect(peak).toBe(10);expect(active).toBe(0);expect(readIds.sort()).toEqual([...threads.keys()].sort());
+    expect(fetchMock).toHaveBeenCalledTimes(21);expect(cap).toBe(21);
+    expect(saved).toMatchObject({status:"complete",inspectedThreads:20,expectedThreads:20});expect(saved?.events).toHaveLength(20);
+    expect(JSON.stringify(saved)).not.toMatch(/headers|payload|in-memory-token|original-\d+@|person\d+@|private-body/);
+  });
 });

@@ -5,13 +5,14 @@ import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { assertPortfolioRegistryAccess } from "@/lib/crm/portfolio-registry";
 import type { Logger } from "@/lib/logging";
+import { WARM_RECONNECT_MAX_PILOT_SIZE } from "./warm-reconnect-activation-types";
 import type { WarmReconnectOutcomeMetric, WarmReconnectPilotResult, WarmReconnectResultsResponse } from "./warm-reconnect-results-types";
 
 export const RESULTS_PILOT_COLLECTION = "crm_warm_reconnect_pilots";
 export const RESULTS_OBSERVATION_COLLECTION = "response_observations";
 const MAX_PILOTS = 100;
 const MAX_EVENTS = 100;
-const MAX_RECIPIENTS = 10;
+const MAX_RECIPIENTS = WARM_RECONNECT_MAX_PILOT_SIZE;
 const RECEIPT_STATUSES = new Set(["claimed", "capabilities_prepared", "provider_inflight", "sent", "delivery_unknown", "stopped_before_provider"]);
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROVIDER_ID = /^[a-f0-9]{1,64}$/;

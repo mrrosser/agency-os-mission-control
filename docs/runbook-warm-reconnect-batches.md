@@ -4,7 +4,7 @@
 
 The CRM Outreach panel reports each batch's durable send receipts and confirmed
 preference choices. A completed first pilot unlocks a next recipient list of
-1–10 people. Subsequent batches inherit the completed predecessor's approved
+1–20 people. Subsequent batches inherit the completed predecessor's approved
 email, sender, artwork approval and preference contract. Each new list still
 requires its individual relationship review, current gates, exact-list approval
 and an explicit **Start approved N-email batch** action. Creating a list or
@@ -14,6 +14,8 @@ The approval lasts 24 hours. This is an expiry, not a waiting period. A launched
 batch sends at most one invitation per dispatcher invocation, at least 60 seconds
 after the previous provider attempt. A scheduler tick every two minutes is a
 suitable cadence. Drift, suppression or uncertain delivery stops execution.
+At that cadence, a full 20-person batch takes roughly 40 minutes; the larger
+batch reduces repeated list review, while each provider invocation stays bounded.
 An uncertain provider outcome is never retried automatically.
 
 Completed predecessors and the original campaign lock are immutable. An atomic

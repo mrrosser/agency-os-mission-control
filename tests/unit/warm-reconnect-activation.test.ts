@@ -150,7 +150,7 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
-  it.each([1, 10])("requires fresh exact audience approval and the batch launch acknowledgement for %i follow-on recipients", (size) => {
+  it.each([1, 4, 10, 11, 20])("requires fresh exact audience approval and the batch launch acknowledgement for %i follow-on recipients", (size) => {
     const candidates = Array.from({ length: size }, (_, index) => candidate(index + 20));
     const pilot = createWarmReconnectPilot({
       pilotId: "follow-on", workspaceId: "workspace-1", ownerUid: "owner-1", legacyDncOrgId: "org-1",

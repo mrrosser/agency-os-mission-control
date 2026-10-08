@@ -92,7 +92,7 @@ describe("warm reconnect batch dispatcher", () => {
     ["campaignId", "other-campaign"], ["campaignVersion", "other-version"],
     ["tranche", "initial_5"], ["pilotId", "../other-pilot"], ["parentPilotId", "invalid"],
     ["batchSequence", 0], ["batchSequence", 1.5], ["recipientCap", 0],
-    ["recipientCap", 11], ["recipientCap", 2.5], ["state", "unknown"],
+    ["recipientCap", 21], ["recipientCap", 2.5], ["state", "unknown"],
   ])("rejects a malformed or foreign lock: %s = %j", async (key, value) => {
     const { lock, db, reads } = fixture();
     lock[key as string] = value;
@@ -166,6 +166,24 @@ describe("warm reconnect batch dispatcher", () => {
     executorMock.mockRejectedValue(changedLock);
     await expect(dispatch(db)).rejects.toBe(changedLock);
     expect(executorMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([11, 20])("dispatches one recipient per invocation for a launched %i-person batch", async (cap) => {
+    const { lock, pilot, db } = fixture();
+    lock.recipientCap = cap;
+    pilot.recipientCap = cap;
+    pilot.recipients = Array.from({ length: cap }, (_, index) => ({ recipientId: `recipient-${index}` }));
+    expect(await dispatch(db)).toMatchObject({ outcome: "sent", pilotId, complete: false });
+    expect(executorMock).toHaveBeenCalledExactlyOnceWith({ uid, pilotId, correlationId: "dispatch-correlation-1", log, db });
+  });
+
+  it.each([19, 20])("requires the exact twenty-recipient completion count, not %i alone", async (sentCount) => {
+    const { lock, pilot, db, documents } = fixture();
+    lock.recipientCap = pilot.recipientCap = 20;
+    pilot.recipients = Array.from({ length: 20 }, (_, index) => ({ recipientId: `recipient-${index}` }));
+    documents.set(`${pilotPath}/executor/state`, { pilotId, workspaceId, complete: true, sentCount, claimedCount: 20, activeReceiptId: null, halted: false });
+    expect((await dispatch(db)).outcome).toBe(sentCount === 20 ? "complete" : "sent");
+    expect(executorMock).toHaveBeenCalledTimes(sentCount === 20 ? 0 : 1);
   });
 
   it.each([

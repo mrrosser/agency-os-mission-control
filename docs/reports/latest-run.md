@@ -252,3 +252,13 @@ Artifacts:
 - focused API smoke tests: PASS (5)
 - `git diff --cached --check`: PASS
 - `gitleaks git --staged --redact --no-banner .`: PASS (no leaks)
+# 2026-10-08 Warm reconnect capability timing repair
+
+- Scope: bind capability expiry to the durable claim plus the existing 90-day lifetime; preserve approval, ledger, lock, digest and provider boundaries. See `2026-10-08-warm-reconnect-capability-timing.md`.
+- Focused real-transaction and worker-route regression suites: **38 passed**.
+- Full unit suite: **1,320 passed**, one unrelated ESLint integration case timed out under local worker contention. Its complete ten-case suite then passed with two workers (3.7 seconds). No timeout or assertion was weakened.
+- Full smoke suite: **500 passed** across 93 files.
+- Lint: **passed**, two unchanged Google callback warnings; standalone TypeScript: **passed**.
+- Dependency audit at high severity: **passed**, zero high/critical and 18 remaining moderate findings; dependency files unchanged.
+- Staged Gitleaks and whitespace checks: **passed**.
+- Production build: **passed**, all 91 static pages generated. Protected PR checks and normal merge/deployment workflow remain required; CI supplies a clean full-suite validation after the local contention timeout.

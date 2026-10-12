@@ -45,4 +45,10 @@ describe("client-project-autopilot-verify route probe", () => {
     expect(script).toContain("$env:SOCIALOPS_SIGNIN_URL = $null");
     expect(script).toContain("Storage state refreshed via Secret Manager");
   });
+
+  test("serializes bootstrap diagnostics as plain text before writing evidence", () => {
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain('$bootstrapSummary = [string]($bootstrapOutput | Select-Object -First 1)');
+  });
 });

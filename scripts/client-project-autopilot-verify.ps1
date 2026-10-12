@@ -871,7 +871,10 @@ if (-not $env:SOCIALOPS_GCP_PROJECT_ID) { $env:SOCIALOPS_GCP_PROJECT_ID = $gclou
 try {
   $bootstrapOutput = & node scripts\\bootstrap_socialops_storage_state.cjs 2>&1
   Add-Content -Path $authBootstrapLogPath -Encoding UTF8 -Value $bootstrapOutput
-  $bootstrapSummary = ($bootstrapOutput | Select-Object -First 1)
+  # Node stderr entries can arrive as rich ErrorRecord objects. Persist only
+  # plain text so a failed bootstrap never prevents the evidence bundle itself
+  # from being serialized and recorded.
+  $bootstrapSummary = [string]($bootstrapOutput | Select-Object -First 1)
   $bootstrapStatus = if ($LASTEXITCODE -eq 0) { "passed" } else { "failed" }
 } catch {
   Add-Content -Path $authBootstrapLogPath -Encoding UTF8 -Value $_.Exception.Message

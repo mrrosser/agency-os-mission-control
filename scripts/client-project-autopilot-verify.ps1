@@ -255,7 +255,11 @@ function Resolve-SecretText {
   )
 
   try {
-    $secretLines = & gcloud secrets versions access latest --secret=$SecretName --project=$ProjectId 2>$null
+    # Invoke the command shim explicitly. In PowerShell, the gcloud.ps1 wrapper
+    # turns a non-zero Secret Manager exit into a terminating NativeCommandError,
+    # which would otherwise prevent the blocked evidence bundle from being written.
+    $secretLines = & gcloud.cmd secrets versions access latest --secret=$SecretName --project=$ProjectId 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "Secret Manager access failed for $SecretName." }
     $secretText = ($secretLines -join "`n").Trim()
     Append-Jsonl -Path $SecretAccessJsonlPath -Value @{
       project = $ProjectNumber
@@ -800,53 +804,48 @@ $testResults += @{
 
 # Secret Manager: SocialOps review token (redacted)
 $reviewSecret = "socialops-public-review-tokens"
-$reviewToken = $null
-try {
-  $reviewTokenLines = & gcloud secrets versions access latest --secret=$reviewSecret --project=$gcloudProjectId 2>$null
-  $reviewToken = ($reviewTokenLines -join "`n").Trim()
-  Append-Jsonl -Path $secretAccessJsonlPath -Value @{
-    project = $gcloudProjectNumber
-    secret = $reviewSecret
-    run_id = $runId
-    correlation_id = $correlationId
-    captured_at = (Get-Date).ToString("o")
-    event = "secret_manager.socialops_review_token.access"
-    version = "latest"
-    ok = $true
+$reviewToken = Resolve-SecretText `
+  -ProjectId $gcloudProjectId `
+  -ProjectNumber $gcloudProjectNumber `
+  -SecretName $reviewSecret `
+  -EventName "secret_manager.socialops_review_token.access" `
+  -RunId $runId `
+  -CorrelationId $correlationId `
+  -SecretAccessJsonlPath $secretAccessJsonlPath
+
+if (-not $reviewToken) {
+  $testResults += @{
+    name = "secret-manager-public-review-token"
+    command = "gcloud.cmd secrets versions access latest --secret=$reviewSecret"
+    status = "failed"
+    artifact_path = $secretAccessJsonlPath
+    summary = "The public-review token was unavailable; Playwright public review was not run."
   }
-} catch {
-  Append-Jsonl -Path $secretAccessJsonlPath -Value @{
-    project = $gcloudProjectNumber
-    secret = $reviewSecret
-    run_id = $runId
-    correlation_id = $correlationId
-    captured_at = (Get-Date).ToString("o")
-    event = "secret_manager.socialops_review_token.access"
-    version = "latest"
-    ok = $false
-  }
-  throw
 }
 
 # Playwright: public review
-New-Item -ItemType Directory -Path $publicPwOutDir -Force | Out-Null
-Push-Location "C:\\CTO Projects\\ui-tests"
-$env:CI = "1"
-$env:ALLOW_MISSING_STORAGE = "1"
-$env:BASE_URL = $BaseUrl
-$env:STORAGE_STATE = "storage/public-review-no-auth-state.json"
-$env:FORCE_TRACE = "1"
-$env:SOCIALOPS_REVIEW_TOKEN = $reviewToken
+if ($reviewToken) {
+  New-Item -ItemType Directory -Path $publicPwOutDir -Force | Out-Null
+  Push-Location "C:\\CTO Projects\\ui-tests"
+  $env:CI = "1"
+  $env:ALLOW_MISSING_STORAGE = "1"
+  $env:BASE_URL = $BaseUrl
+  $env:STORAGE_STATE = "storage/public-review-no-auth-state.json"
+  $env:FORCE_TRACE = "1"
+  $env:SOCIALOPS_REVIEW_TOKEN = $reviewToken
 
-try {
-  & npx playwright test tests\\socialops-client-public-review.spec.ts --reporter=list --output="$publicPwOutDir" *> $publicPwLogPath
-  $pwPublicStatus = if ($LASTEXITCODE -eq 0) { "passed" } else { "failed" }
-} catch {
-  $pwPublicStatus = "failed"
+  try {
+    & npx playwright test tests\\socialops-client-public-review.spec.ts --reporter=list --output="$publicPwOutDir" *> $publicPwLogPath
+    $pwPublicStatus = if ($LASTEXITCODE -eq 0) { "passed" } else { "failed" }
+  } catch {
+    $pwPublicStatus = "failed"
+  }
+  Pop-Location
+
+  $pwPublicOutcome = Get-PlaywrightOutcome -LogPath $publicPwLogPath -FallbackStatus $pwPublicStatus -OutputDir $publicPwOutDir
+} else {
+  $pwPublicOutcome = @{ status = "failed"; summary = "Skipped because the redacted public-review token was unavailable." }
 }
-Pop-Location
-
-$pwPublicOutcome = Get-PlaywrightOutcome -LogPath $publicPwLogPath -FallbackStatus $pwPublicStatus -OutputDir $publicPwOutDir
 
 $testResults += @{
   name = "playwright-public-review"

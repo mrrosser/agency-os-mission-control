@@ -51,4 +51,13 @@ describe("client-project-autopilot-verify route probe", () => {
 
     expect(script).toContain('$bootstrapSummary = [string]($bootstrapOutput | Select-Object -First 1)');
   });
+
+  test("records Secret Manager denials instead of terminating before evidence is written", () => {
+    const script = readFileSync(scriptPath, "utf8");
+
+    expect(script).toContain("& gcloud.cmd secrets versions access latest");
+    expect(script).toContain('if ($LASTEXITCODE -ne 0) { throw "Secret Manager access failed for $SecretName." }');
+    expect(script).toContain('name = "secret-manager-public-review-token"');
+    expect(script).toContain('Skipped because the redacted public-review token was unavailable.');
+  });
 });

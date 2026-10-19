@@ -6,7 +6,7 @@ import {
   renderWarmReconnectEmail, warmReconnectRendererImplementationFingerprint, warmReconnectRenderedContractFingerprint,
   type WarmReconnectEmailRenderInput,
 } from "@/lib/crm/warm-reconnect-email-renderer";
-import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID, WARM_RECONNECT_QA_REVISED_TEST_ID, type WarmReconnectQaTestId } from "@/lib/crm/warm-reconnect-qa-version";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID, WARM_RECONNECT_QA_REVISED_TEST_ID, WARM_RECONNECT_QA_RECOVERY_TEST_ID, type WarmReconnectQaTestId } from "@/lib/crm/warm-reconnect-qa-version";
 import { OWNER_QA_DESIGN_KIT } from "@/lib/crm/warm-reconnect-qa-design-kit";
 import { warmReconnectChoiceUrl } from "@/lib/crm/warm-reconnect-preference-choice";
 import type { WarmReconnectInlineAsset } from "@/lib/google/gmail-campaign";
@@ -18,7 +18,7 @@ import type { WarmReconnectInlineAsset } from "@/lib/google/gmail-campaign";
  */
 export function warmReconnectQaDesignReady(testId: WarmReconnectQaTestId): boolean {
   if (testId === WARM_RECONNECT_QA_ORIGINAL_TEST_ID) return true;
-  if (testId !== WARM_RECONNECT_QA_REVISED_TEST_ID) return false;
+  if (testId !== WARM_RECONNECT_QA_REVISED_TEST_ID && testId !== WARM_RECONNECT_QA_RECOVERY_TEST_ID) return false;
   try { verifyKit(); return true; } catch { return false; }
 }
 
@@ -59,7 +59,7 @@ export function warmReconnectQaPreviewHtml(html: string): string {
 }
 
 export function assertWarmReconnectQaDesignReady(testId: WarmReconnectQaTestId): void {
-  if (testId !== WARM_RECONNECT_QA_ORIGINAL_TEST_ID && testId !== WARM_RECONNECT_QA_REVISED_TEST_ID) {
+  if (testId !== WARM_RECONNECT_QA_ORIGINAL_TEST_ID && testId !== WARM_RECONNECT_QA_REVISED_TEST_ID && testId !== WARM_RECONNECT_QA_RECOVERY_TEST_ID) {
     throw new ApiError(400, "Unknown owner test version.");
   }
   if (!warmReconnectQaDesignReady(testId)) throw new ApiError(409, "The exact revised design kit is not integrated. This version cannot be prepared or sent.");

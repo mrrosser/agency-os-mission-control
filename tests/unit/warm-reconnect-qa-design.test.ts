@@ -6,7 +6,7 @@ import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import { renderWarmReconnectEmail, warmReconnectRendererImplementationFingerprint } from "@/lib/crm/warm-reconnect-email-renderer";
 import { renderWarmReconnectQaDesign, warmReconnectQaAssetManifest, warmReconnectQaDesignReady, warmReconnectQaInlineAssets, warmReconnectQaPreviewHtml, warmReconnectQaRendererFingerprint } from "@/lib/crm/warm-reconnect-qa-design";
 import { OWNER_QA_DESIGN_KIT } from "@/lib/crm/warm-reconnect-qa-design-kit";
-import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, warmReconnectQaVersion } from "@/lib/crm/warm-reconnect-qa-version";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, WARM_RECONNECT_QA_RECOVERY_TEST_ID as RECOVERY, isWarmReconnectQaTestId, warmReconnectQaVersion } from "@/lib/crm/warm-reconnect-qa-version";
 import { buildWarmReconnectCampaignMimeWithInlineAssets } from "@/lib/google/gmail-campaign";
 
 const summary = {
@@ -25,6 +25,24 @@ const input = {
 const sha = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 
 describe("exact version-1 Library design integration", () => {
+  it("adds only the fixed recovery identity while preserving both historical versions", () => {
+    expect(warmReconnectQaVersion(RECOVERY)).toEqual({
+      testId: "gallery-owner-recovery-2026-10-19", label: "Recovery verification owner test - October 19",
+      designVersion: "rosser-rt-library-kit-v1", subject: "[TEST · CRM recovery verification] A quick hello from Marcus",
+    });
+    expect(warmReconnectQaVersion(ORIGINAL)).toMatchObject({ subject: "[TEST] A quick hello from Marcus", designVersion: "preference-buttons-original" });
+    expect(warmReconnectQaVersion(REVISED)).toMatchObject({ subject: "[TEST · revised design] A quick hello from Marcus", designVersion: "rosser-rt-library-kit-v1" });
+    for (const testId of [ORIGINAL, REVISED, RECOVERY]) expect(isWarmReconnectQaTestId(testId)).toBe(true);
+    for (const testId of ["gallery-owner-recovery-2026-10-20", "arbitrary", null]) expect(isWarmReconnectQaTestId(testId)).toBe(false);
+  });
+
+  it("reuses the exact revised rendering, assets and renderer fingerprint for recovery", () => {
+    expect(warmReconnectQaDesignReady(RECOVERY)).toBe(true);
+    expect(renderWarmReconnectQaDesign(RECOVERY, input)).toEqual(renderWarmReconnectQaDesign(REVISED, input));
+    expect(warmReconnectQaRendererFingerprint(RECOVERY)).toBe(warmReconnectQaRendererFingerprint(REVISED));
+    expect(warmReconnectQaAssetManifest()).toHaveLength(3);
+  });
+
   it("retains the original rendering and implementation fingerprint byte for byte", () => {
     expect(renderWarmReconnectQaDesign(ORIGINAL, input)).toEqual(renderWarmReconnectEmail(input));
     expect(warmReconnectQaRendererFingerprint(ORIGINAL)).toBe(warmReconnectRendererImplementationFingerprint());
@@ -74,15 +92,17 @@ describe("exact version-1 Library design integration", () => {
     try {
       asset.base64 = "";
       expect(warmReconnectQaDesignReady(REVISED)).toBe(false);
+      expect(warmReconnectQaDesignReady(RECOVERY)).toBe(false);
       expect(() => renderWarmReconnectQaDesign(REVISED, input)).toThrow("cannot be prepared or sent");
+      expect(() => renderWarmReconnectQaDesign(RECOVERY, input)).toThrow("cannot be prepared or sent");
       expect(() => warmReconnectQaInlineAssets()).toThrow("asset mismatch");
       expect(warmReconnectQaDesignReady(ORIGINAL)).toBe(true);
     } finally { asset.base64 = before; }
   });
 
-  it("rejects production preference URLs, changed copy and nonowner content", () => {
-    expect(() => renderWarmReconnectQaDesign(REVISED, { ...input, preferencesUrl: input.preferencesUrl.replace("&mode=qa", "") })).toThrow("Invalid preferences URL");
-    expect(() => renderWarmReconnectQaDesign(REVISED, { ...input, purpose: "campaign" })).toThrow("fixed to this owner test");
-    expect(() => renderWarmReconnectQaDesign(REVISED, { ...input, campaign: { ...input.campaign, copy: { ...input.campaign.copy, paragraphs: ["Different introduction", input.campaign.copy.paragraphs[1], input.campaign.copy.paragraphs[2]] } } })).toThrow("copy changed");
+  it.each([REVISED, RECOVERY])("rejects production preference URLs, changed copy and nonowner content for %s", testId => {
+    expect(() => renderWarmReconnectQaDesign(testId, { ...input, preferencesUrl: input.preferencesUrl.replace("&mode=qa", "") })).toThrow("Invalid preferences URL");
+    expect(() => renderWarmReconnectQaDesign(testId, { ...input, purpose: "campaign" })).toThrow("fixed to this owner test");
+    expect(() => renderWarmReconnectQaDesign(testId, { ...input, campaign: { ...input.campaign, copy: { ...input.campaign.copy, paragraphs: ["Different introduction", input.campaign.copy.paragraphs[1], input.campaign.copy.paragraphs[2]] } } })).toThrow("copy changed");
   });
 });

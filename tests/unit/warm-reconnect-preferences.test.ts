@@ -627,4 +627,85 @@ describe("warm reconnect preference capabilities", () => {
     expect(result).toMatchObject({ globallyUnsubscribed: true, canUpdatePreferences: false });
     expect(fake.writes).toHaveLength(0);
   });
+
+  it.each([
+    { label: "canonical opt-out", contact: { defaultPermissionState: "opted_out" }, globallyUnsubscribed: true },
+    { label: "normalized canonical opt-out", contact: { defaultPermissionState: "  OPTED_OUT  " }, globallyUnsubscribed: true },
+    { label: "delivery suppression", contact: { suppressed: true, suppressionReason: "policy_rejection_5.7.1" }, globallyUnsubscribed: false },
+  ])("blocks new choices for $label without rewriting consent history", async ({ contact, globallyUnsubscribed }) => {
+    const historicalTopics = { marcus_rosser_art: true, rosser_gallery: false, rt_solutions: true };
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: { ...contactDocument(), ...contact },
+      [preferenceStatePath()]: { topics: historicalTopics, globallyUnsubscribed: false },
+      "crm_permission_events/historical": { permissionState: "topic_opted_in", topics: historicalTopics },
+    });
+    const before = [...fake.records.entries()];
+    const options = { db: fake.db, observedNowMs: Date.parse("2026-10-19T12:00:00Z") };
+    const inspected = await processWarmReconnectPreferenceMutation({ action: "inspect", token: preferenceToken }, options);
+    const saved = await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "canonical-blocked-choice",
+      topics: { rosser_gallery: true, rt_solutions: false },
+    }, options);
+    for (const result of [inspected, saved]) {
+      expect(result).toMatchObject({
+        available: true, expired: false, canUpdatePreferences: false, canUnsubscribe: true,
+        globallyUnsubscribed,
+        topics: globallyUnsubscribed
+          ? { rosser_gallery: false, rt_solutions: false }
+          : { rosser_gallery: false, rt_solutions: true },
+      });
+    }
+    expect(fake.writes).toHaveLength(0);
+    expect([...fake.records.entries()]).toEqual(before);
+    if (!globallyUnsubscribed) {
+      expect(fake.records.get(`crm_contact_points/${contactPointId}`)).toMatchObject({
+        defaultPermissionState: "unknown", suppressed: true, suppressionReason: "policy_rejection_5.7.1",
+      });
+    }
+    const unsubscribe = await globallyUnsubscribeWarmReconnectCapability(preferenceToken, options);
+    expect(unsubscribe).toMatchObject({ globallyUnsubscribed: true, canUpdatePreferences: false });
+    expect(fake.records.get(preferenceStatePath())).toMatchObject({ topics: { marcus_rosser_art: true } });
+    expect(fake.records.get("crm_permission_events/historical")).toEqual(before.find(([path]) => path === "crm_permission_events/historical")?.[1]);
+  });
+
+  it.each(["unknown", "reconfirm_required", "opted_in"])("allows an explicit choice for an unsuppressed %s contact", async defaultPermissionState => {
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: { ...contactDocument(), defaultPermissionState, suppressed: false },
+    });
+    const options = { db: fake.db, observedNowMs: Date.parse("2026-10-19T12:00:00Z") };
+    expect(await processWarmReconnectPreferenceMutation({ action: "inspect", token: preferenceToken }, options))
+      .toMatchObject({ canUpdatePreferences: true, globallyUnsubscribed: false });
+    expect(fake.writes).toHaveLength(0);
+    const topics = { rosser_gallery: true, rt_solutions: false };
+    expect(await processWarmReconnectPreferenceMutation({
+      action: "save_preferences", token: preferenceToken, requestId: "allowed-choice", topics,
+    }, options)).toMatchObject({ canUpdatePreferences: true, globallyUnsubscribed: false, topics });
+    expect(fake.writes).toHaveLength(2);
+    expect(fake.records.get(`crm_contact_points/${contactPointId}`)).toEqual({ ...contactDocument(), defaultPermissionState, suppressed: false });
+  });
+
+  it.each([
+    { label: "opt-out", contact: { defaultPermissionState: "opted_out" }, globallyUnsubscribed: true },
+    { label: "suppression", contact: { suppressed: true }, globallyUnsubscribed: false },
+  ])("rechecks a new canonical $label before replay or a later choice", async ({ contact, globallyUnsubscribed }) => {
+    const fake = fakeDb({
+      [tokenPath(preferenceToken)]: tokenDocument("preferences"),
+      [`crm_contact_points/${contactPointId}`]: contactDocument(),
+    });
+    const options = { db: fake.db, observedNowMs: Date.parse("2026-10-19T12:00:00Z") };
+    const mutation = { action: "save_preferences" as const, token: preferenceToken, requestId: "before-block",
+      topics: { rosser_gallery: true, rt_solutions: false } };
+    await processWarmReconnectPreferenceMutation(mutation, options);
+    fake.records.set(`crm_contact_points/${contactPointId}`, { ...contactDocument(), ...contact });
+    const before = [...fake.records.entries()];
+    const writesBefore = fake.writes.length;
+    for (const request of [mutation, { ...mutation, requestId: "after-block", topics: { rosser_gallery: false, rt_solutions: true } }]) {
+      expect(await processWarmReconnectPreferenceMutation(request, options))
+        .toMatchObject({ canUpdatePreferences: false, canUnsubscribe: true, globallyUnsubscribed });
+    }
+    expect(fake.writes).toHaveLength(writesBefore);
+    expect([...fake.records.entries()]).toEqual(before);
+  });
 });

@@ -24,6 +24,20 @@ campaign invitation records exclude previously invited people and addresses,
 including changed addresses or merged CRM identities. Never clear a lock or
 delete a receipt to make a batch available.
 
+The activation view resolves the current batch and completed predecessor from
+their exact campaign locks, independently of the displayed history page. History
+is paged in bounded document-ID order, not globally by creation time. Changing
+pages must not change which batch can be reviewed, approved or launched.
+Invitation-ledger exclusions cover the bounded workspace history, including
+people and addresses outside the displayed page; incomplete or malformed
+evidence blocks preparation rather than silently dropping duplicate protection.
+
+New pilots freeze their greeting before audience approval. Uncertain labels
+such as a nameless contact, honorific, reversed name or recognized organization
+use the neutral greeting **Hi there,**. Review the displayed frozen greeting
+alongside the recipient. Existing pilots keep their previously approved
+greetings and fingerprints; this does not rename a CRM person or change consent.
+
 ## Results and measurement limits
 
 `GET /api/crm/warm-reconnect/results` returns owner-only batch summaries and

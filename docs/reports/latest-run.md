@@ -1,5 +1,21 @@
 # Latest Verification Run
 
+## 2026-10-19 CRM recovery after billing restoration
+
+- Fourteen Hosting/direct-runtime reads passed. Existing owner QA links inspect correctly as expired without preference writes. The serving source remains the older release; this candidate has not been deployed.
+- Recovered the exact reviewed October 10 patch in a separate checkout. Canonical contact opt-out or delivery suppression now blocks preference confirmation transactionally, including replay, while preserving history, unsubscribe and the distinction between policy restrictions and voluntary opt-out.
+- Full unit/smoke: **2,264 tests / 268 files passed**, zero failed or pending. Focused CRM verification: **768 tests / 33 files passed**. Independent review found no blocking issue. TypeScript, lint and production build passed; lint has zero errors and two unchanged warnings. Fresh official-registry audit: zero high/critical and 18 moderate findings, dependencies unchanged. The exact external release manifest records source hashes, patch application and complete-patch secret scanning.
+- No email, subscription, live campaign mutation, credential, IAM, billing, scheduler or remote publication change. Fresh owner-only QA needs a new fixed test version and an exact confirmed send action; do not reset consumed tests. Reconcile current replies, policy rejections and sent ledgers before any new batch.
+- [Verification evidence and limits](2026-10-19-crm-recovery-verification.md) and [execution plan](../execplans/2026-10-19-crm-recovery-verification.md).
+
+## 2026-10-10 Full-audience CRM preparation (local only)
+
+- Retrieves the current holder and completed parent from exact campaign locks and verified evidence, independently of bounded history. Twenty-row document-ID pagination supports the planned nineteen follow-on batches plus two existing pilots; invitation exclusions use the complete bounded workspace ledger. Production read-only query checks passed without index changes.
+- New pilots freeze a neutral greeting for uncertain imported names. Current-audience parity is exactly ten intended fallbacks and 366 unchanged greetings. Existing pilots, fingerprints, copy and consent behavior are preserved. The UI displays the frozen greeting and requires successful authoritative refresh after failed reads or attempted campaign mutations.
+- Full unit/smoke: **2,256 tests / 268 files passed**. Standalone TypeScript, production build and full lint passed; lint has zero errors and two unchanged callback warnings. Official-registry audit passed the unchanged high threshold: zero high/critical and 18 moderate findings. Dependencies unchanged. Independent manual review found no blocking or unresolved findings. Complete-patch secret scan, exact source hashes and apply-check evidence are retained in the external packaging manifest.
+- No verified supported localhost CRM send route was found. Both public preference endpoints returned HTTP 503 on a fresh token-free read; ordinary Gmail availability does not establish the application sender runtime or working recipient pages. No send, remote publication, deployment, credential, billing or campaign-state change occurred.
+- [Verification and operational limits](2026-10-10-full-audience-local-fixes.md), [execution plan](../execplans/2026-10-10-full-audience-local-fixes.md), and [batch runbook](../runbook-warm-reconnect-batches.md).
+
 ## 2026-10-08 Reviewed outreach capacity: 20 recipients
 
 - Raises executable follow-on batches from 10 to 20 across API validation, CRM selection, dispatcher, reporting and receipt reconciliation. Reply metadata reads stay bounded at ten concurrent threads. Initial-five behavior, exact audience fingerprints, approved message/sender, expiry, cadence and duplicate protection remain unchanged.

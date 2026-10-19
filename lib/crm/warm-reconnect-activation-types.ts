@@ -287,6 +287,21 @@ export interface WarmReconnectActivationResponse {
   };
   candidates: WarmReconnectCandidate[];
   pilots: WarmReconnectPilotView[];
+  /** Exact lock-backed controls, independent of the paginated history/results. */
+  control: {
+    initialPilotId: string | null;
+    activePilotId: string | null;
+    followOnParentPilotId: string | null;
+    canCreateInitialPilot: boolean;
+    blockedReason: string | null;
+  };
+  history: {
+    pageSize: number;
+    after: string | null;
+    nextCursor: string | null;
+    /** Document-ID order, not chronological order. */
+    pilotIds: string[];
+  };
   constraints: {
     initialPilotSize: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
     expandedPilotRange: readonly [6, 10];

@@ -19,6 +19,12 @@ import {
   type WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
+import {
+  applyWarmReconnectRecipientCopy, assertWarmReconnectRecipientCopyIdentity,
+  warmReconnectRecipientCopyInputSchema, warmReconnectRecipientCopyContentFingerprint,
+  warmReconnectRecipientCopyImplementationFingerprint, warmReconnectRecipientCopyReviewFingerprint,
+  warmReconnectRecipientRenderedOutputFingerprint,
+} from "@/lib/crm/warm-reconnect-recipient-copy";
 import { resolveWarmReconnectGreetingName } from "@/lib/crm/warm-reconnect-greeting";
 import {
   WARM_RECONNECT_EMAIL_RENDERER_VERSION,
@@ -211,20 +217,67 @@ function exactDeliveryTemplateFingerprint(
   });
 }
 
+function renderRecipientDeliveryTemplate(
+  pilot: Pick<WarmReconnectPilot, "sender" | "preferenceContract" | "contentMode">,
+  recipient: WarmReconnectPilotRecipient,
+) {
+  return applyWarmReconnectRecipientCopy(renderDeliveryTemplate(pilot, recipient.greetingName), recipient);
+}
+
+function recipientRenderedFingerprint(
+  pilot: Pick<WarmReconnectPilot, "sender" | "preferenceContract" | "contentMode">,
+  recipient: WarmReconnectPilotRecipient,
+): string {
+  return warmReconnectRecipientRenderedOutputFingerprint(renderRecipientDeliveryTemplate(pilot, recipient),
+    `${pilot.preferenceContract.origin}/preferences#token=${"p".repeat(43)}`,
+    `${pilot.preferenceContract.origin}/api/crm/warm-reconnect/unsubscribe/${"u".repeat(43)}`);
+}
+
+function assertRecipientCopyContract(
+  pilot: Pick<WarmReconnectPilot, "sender" | "preferenceContract" | "contentMode">,
+  recipient: WarmReconnectPilotRecipient,
+): void {
+  if (recipient.recipientCopy === undefined) return;
+  assertWarmReconnectRecipientCopyIdentity(recipient);
+  if (recipient.recipientCopy.implementationFingerprint !== warmReconnectRecipientCopyImplementationFingerprint() ||
+      recipient.recipientCopy.renderedOutputFingerprint !== recipientRenderedFingerprint(pilot, recipient)) {
+    throw new ApiError(409, "The reviewed recipient renderer or exact output changed.");
+  }
+}
+
 /** Authenticated review only: no issued capability and no active preview links. */
-export function buildWarmReconnectPilotEmailPreview(pilot: WarmReconnectPilot) {
+export function buildWarmReconnectPilotEmailPreview(pilot: WarmReconnectPilot, recipientId?: string) {
   if (pilot.contentMode !== "approved_design_v2") return undefined;
-  const recipient = pilot.recipients[0];
+  const recipient = recipientId === undefined ? pilot.recipients[0] :
+    pilot.recipients.find(value => value.recipientId === recipientId);
   if (!recipient) throw new ApiError(409, "The reviewed audience is missing.");
-  const rendered = renderDeliveryTemplate(pilot, recipient.greetingName);
+  assertRecipientCopyContract(pilot, recipient);
+  const rendered = renderRecipientDeliveryTemplate(pilot, recipient);
   return {
     designVersion: WARM_RECONNECT_CAMPAIGN_DESIGN_VERSION,
     recipientId: recipient.recipientId,
-    greetingName: recipient.greetingName,
+    greetingName: recipient.recipientCopy?.greetingName ?? recipient.greetingName,
     subject: rendered.subject,
     plainText: rendered.plainText,
     html: warmReconnectCampaignPreviewHtml(rendered.html).replace(/\s+href=(?:"[^"]*"|'[^']*')/gi, ""),
   };
+}
+
+/** Every recipient, including late variants, is reviewable in the authenticated UI. */
+export function buildWarmReconnectPilotRecipientEmailPreviews(pilot: WarmReconnectPilot) {
+  if (!warmReconnectRecipientCopyReviewFingerprint(pilot.recipients)) return undefined;
+  return pilot.recipients.map(recipient => {
+    const { html: _html, ...preview } = buildWarmReconnectPilotEmailPreview(pilot, recipient.recipientId)!;
+    void _html;
+    return preview;
+  });
+}
+
+function exactRecipientCopyReviewMatches(pilot: WarmReconnectPilot, request: Extract<WarmReconnectPilotApprovalRequest, { decision: "approve" }>) {
+  const expected = warmReconnectRecipientCopyReviewFingerprint(pilot.recipients);
+  return expected === request.expectedRecipientCopyReviewFingerprint &&
+    (expected ? request.confirmations.exactRecipientCopyReviewed === true :
+      request.confirmations.exactRecipientCopyReviewed === undefined);
 }
 
 type ApprovalConfirmations = Extract<
@@ -288,6 +341,7 @@ export function computeWarmReconnectPilotFingerprints(
     deliveryImplementation,
     fromPolicy: "selected_google_profile_with_exact_sender_display_name.v1",
   });
+  pilot.recipients.forEach(recipient => assertRecipientCopyContract(pilot, recipient));
   const audienceFingerprint = warmReconnectFingerprint({
     contract: "warm-reconnect-audience.v1",
     recipients: [...pilot.recipients]
@@ -299,6 +353,7 @@ export function computeWarmReconnectPilotFingerprints(
         emailKey: recipient.emailKey,
         candidateFingerprint: recipient.candidateFingerprint,
         greetingName: recipient.greetingName,
+        ...(recipient.recipientCopy === undefined ? {} : { recipientCopy: recipient.recipientCopy }),
         permissionState: recipient.decision.permissionState,
         decisionId: recipient.decision.decisionId,
         decisionStatus: recipient.decision.status,
@@ -378,8 +433,11 @@ export function isWarmReconnectPilotApprovalReplay(input: {
   request: WarmReconnectPilotApprovalRequest;
   now?: Date;
 }): boolean {
+  try { assertWarmReconnectPilotFingerprints(input.pilot); } catch { return false; }
   return (
     input.request.decision === "approve" &&
+    exactRecipientCopyReviewMatches(input.pilot, input.request) &&
+    input.pilot.approval?.recipientCopyReviewFingerprint === warmReconnectRecipientCopyReviewFingerprint(input.pilot.recipients) &&
     Boolean(
       input.pilot.approval &&
         Date.parse(input.pilot.approval.expiresAt) > (input.now || new Date()).getTime() &&
@@ -617,7 +675,8 @@ export function isWarmReconnectApprovalCurrent(
       Date.parse(pilot.approval.expiresAt) > now.getTime() &&
       pilot.approval.artifactFingerprint === pilot.fingerprints.artifactFingerprint &&
       pilot.approval.audienceFingerprint === pilot.fingerprints.audienceFingerprint &&
-      pilot.approval.actionFingerprint === pilot.fingerprints.actionFingerprint
+      pilot.approval.actionFingerprint === pilot.fingerprints.actionFingerprint &&
+      pilot.approval.recipientCopyReviewFingerprint === warmReconnectRecipientCopyReviewFingerprint(pilot.recipients)
   );
 }
 
@@ -777,6 +836,31 @@ export function createWarmReconnectPilot(input: {
     stoppedAt: null,
     stopReason: null,
   };
+  if (input.request.recipientCopies !== undefined) {
+    if (contentMode !== "approved_design_v2" || !Array.isArray(input.request.recipientCopies) ||
+        !input.request.recipientCopies.length || input.request.recipientCopies.length > recipients.length) {
+      throw new ApiError(400, "Recipient copy requires a nonempty, bounded reviewed-design selection.");
+    }
+    const seen = new Set<string>();
+    for (const value of input.request.recipientCopies) {
+      const parsed = warmReconnectRecipientCopyInputSchema.safeParse(value);
+      if (!parsed.success) throw new ApiError(400, "Invalid recipient copy request.");
+      const { expectedContentFingerprint, ...copy } = parsed.data;
+      const recipient = recipients.find(row => row.recipientId === copy.recipientId);
+      if (!recipient || seen.has(copy.recipientId)) throw new ApiError(409, "Recipient copy must identify one selected recipient exactly once.");
+      seen.add(copy.recipientId);
+      if (warmReconnectRecipientCopyContentFingerprint(copy) !== expectedContentFingerprint) {
+        throw new ApiError(409, "The proposed recipient copy changed.");
+      }
+      recipient.recipientCopy = {
+        ...copy, contentFingerprint: expectedContentFingerprint,
+        implementationFingerprint: warmReconnectRecipientCopyImplementationFingerprint(),
+        renderedOutputFingerprint: `sha256:${"0".repeat(64)}`,
+      };
+      assertWarmReconnectRecipientCopyIdentity(recipient);
+      recipient.recipientCopy.renderedOutputFingerprint = recipientRenderedFingerprint(base, recipient);
+    }
+  }
   const fingerprints = computeWarmReconnectPilotFingerprints(base);
   const pilot: WarmReconnectPilot = {
     ...base,
@@ -931,6 +1015,7 @@ export function decideWarmReconnectPilotApproval(input: {
   googleReady: boolean;
 }): WarmReconnectPilot {
   assertExpectedFingerprints(input.pilot, input.request);
+  assertWarmReconnectPilotFingerprints(input.pilot);
   if (["launch_requested", "stopped", "rejected"].includes(input.pilot.status)) {
     throw new ApiError(409, "Campaign approval is closed for this pilot.");
   }
@@ -947,6 +1032,9 @@ export function decideWarmReconnectPilotApproval(input: {
       },
       { googleReady: input.googleReady, now: nowDate }
     );
+  }
+  if (!exactRecipientCopyReviewMatches(input.pilot, input.request)) {
+    throw new ApiError(409, "Review every exact recipient greeting and opening before approval.");
   }
   if (input.request.approvalScope !== warmReconnectApprovalScopeForPilot(input.pilot)) {
     throw new ApiError(409, "Approval must authorize this exact batch scope.");
@@ -986,6 +1074,7 @@ export function decideWarmReconnectPilotApproval(input: {
       note: input.request.note,
       ...input.pilot.fingerprints,
       approvalScope: warmReconnectApprovalScopeForPilot(input.pilot),
+      ...(input.request.expectedRecipientCopyReviewFingerprint ? { recipientCopyReviewFingerprint: input.request.expectedRecipientCopyReviewFingerprint } : {}),
       excludedScope: EXCLUDED_SCOPE,
     },
     updatedAt: now,

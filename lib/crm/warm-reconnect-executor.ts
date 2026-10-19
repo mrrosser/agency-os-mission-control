@@ -1,4 +1,5 @@
 import "server-only";
+import { applyWarmReconnectRecipientCopy, warmReconnectRecipientRenderedOutputFingerprint } from "@/lib/crm/warm-reconnect-recipient-copy";
 import { assertOwnedWarmReconnectFollowOnLock, warmReconnectFollowOnPilotLockId, warmReconnectApprovalScopeForPilot } from "@/lib/crm/warm-reconnect-batches";
 import { assertWarmReconnectNoHistoricalInvitation } from "@/lib/crm/warm-reconnect-batch-repository";
 
@@ -2424,7 +2425,7 @@ export async function runWarmReconnectPilotExecutor(input: {
       claim.pilot.preferenceContract.origin
     ).toString();
     const contentMode = resolveWarmReconnectCampaignContentMode(claim.pilot.contentMode);
-    const rendered = dependencies.renderMessage({
+    const baseRendered = dependencies.renderMessage({
       campaign,
       contentMode,
       firstName: claim.recipient.greetingName || null,
@@ -2435,6 +2436,15 @@ export async function runWarmReconnectPilotExecutor(input: {
       unsubscribeUrl,
       publicOrigin: claim.pilot.preferenceContract.origin,
     });
+    const rendered = applyWarmReconnectRecipientCopy(baseRendered, claim.recipient);
+    if (claim.recipient.recipientCopy !== undefined || claim.pilot.recipients.some(row => row.recipientCopy !== undefined)) {
+      assertWarmReconnectPilotFingerprints(claim.pilot);
+      const frozenRecipient = claim.pilot.recipients.find(row => row.recipientId === claim.recipient.recipientId);
+      if (!frozenRecipient || warmReconnectFingerprint(frozenRecipient) !== warmReconnectFingerprint(claim.recipient) ||
+          (claim.recipient.recipientCopy !== undefined && warmReconnectRecipientRenderedOutputFingerprint(rendered, preferenceUrl, unsubscribeUrl) !== claim.recipient.recipientCopy.renderedOutputFingerprint)) {
+        throw new ApiError(409, "The exact reviewed recipient output changed before provider execution.");
+      }
+    }
     if (rendered.contentMode !== contentMode) throw new ApiError(409, "The approved delivery mode changed.");
     outbound = {
       to: claim.email,

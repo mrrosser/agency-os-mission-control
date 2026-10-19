@@ -23,6 +23,7 @@ const bodySchema = z.discriminatedUnion("decision", [
       decision: z.literal("approve"),
       ...common,
       approvalScope: z.enum(["exact_five_one_time_reconnection_emails", "exact_batch_one_time_reconnection_emails"]),
+      expectedRecipientCopyReviewFingerprint: sha256.optional(),
       confirmations: z
         .object({
           senderLegalIdentityVerified: z.literal(true),
@@ -33,6 +34,7 @@ const bodySchema = z.discriminatedUnion("decision", [
           replyToMonitored: z.literal(true),
           artworkApprovedForEmail: z.literal(true).optional(),
           exactAudienceReviewed: z.literal(true),
+          exactRecipientCopyReviewed: z.literal(true).optional(),
         })
         .strict(),
     })

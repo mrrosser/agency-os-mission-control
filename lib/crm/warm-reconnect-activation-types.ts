@@ -100,6 +100,24 @@ export type WarmReconnectRecipientDecision =
       note: string;
     };
 
+export interface WarmReconnectRecipientCopyInput {
+  version: "warm-reconnect-recipient-copy.v1";
+  recipientId: string;
+  personId: string;
+  contactPointId: string;
+  emailKey: string;
+  expectedCandidateFingerprint: string;
+  greetingName: string;
+  openingParagraph: string;
+  expectedContentFingerprint: string;
+}
+
+export interface WarmReconnectFrozenRecipientCopy extends Omit<WarmReconnectRecipientCopyInput, "expectedContentFingerprint"> {
+  contentFingerprint: string;
+  implementationFingerprint: string;
+  renderedOutputFingerprint: string;
+}
+
 export interface WarmReconnectPilotRecipient {
   recipientId: string;
   personId: string;
@@ -108,6 +126,7 @@ export interface WarmReconnectPilotRecipient {
   candidateFingerprint: string;
   sourceEvidence: WarmReconnectSourceEvidence[];
   greetingName: string;
+  recipientCopy?: WarmReconnectFrozenRecipientCopy;
   decision: WarmReconnectRecipientDecision;
 }
 
@@ -174,6 +193,7 @@ export interface WarmReconnectPilotApproval {
   audienceFingerprint: string;
   actionFingerprint: string;
   approvalScope: WarmReconnectApprovalScope;
+  recipientCopyReviewFingerprint?: string;
   excludedScope: readonly [
     "audience_expansion",
     "provider_draft_create",
@@ -252,6 +272,14 @@ export type WarmReconnectPilotView = Omit<
   "recipients" | "workspaceId" | "ownerUid" | "legacyDncOrgId"
 > & {
   recipients: WarmReconnectPilotRecipientView[];
+  recipientCopyReviewFingerprint?: string;
+  recipientEmailPreviews?: Array<{
+    designVersion: string;
+    recipientId: string;
+    greetingName: string;
+    subject: string;
+    plainText: string;
+  }>;
   emailPreview?: {
     designVersion: string;
     recipientId: string;
@@ -318,6 +346,8 @@ interface CreateWarmReconnectPilotBase {
   campaignPreviewFingerprint: string;
   sender: WarmReconnectPilotSenderInput;
   contentMode?: WarmReconnectContentMode;
+  /** Proposed copy only. Relationship and exact-content approval are separate. */
+  recipientCopies?: WarmReconnectRecipientCopyInput[];
   artworkEmailApproval?: {
     approvedForThisEmailCampaign: true;
     evidenceNote: string;
@@ -361,6 +391,7 @@ export type WarmReconnectPilotApprovalRequest =
       expectedAudienceFingerprint: string;
       expectedActionFingerprint: string;
       approvalScope: WarmReconnectApprovalScope;
+      expectedRecipientCopyReviewFingerprint?: string;
       confirmations: {
         senderLegalIdentityVerified: true;
         physicalPostalAddressVerified: true;
@@ -370,6 +401,7 @@ export type WarmReconnectPilotApprovalRequest =
         replyToMonitored: true;
         artworkApprovedForEmail?: true;
         exactAudienceReviewed: true;
+        exactRecipientCopyReviewed?: true;
       };
       note: string;
     }

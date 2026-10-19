@@ -184,11 +184,15 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const [results, setResults] = useState<{ownerUid: string; data: WarmReconnectResultsResponse} | null>(null);
   const [resultsRefresh, setResultsRefresh] = useState(0);
   const [activationNeedsRefresh, setActivationNeedsRefresh] = useState(false);
+  const [recipientCopyAssent, setRecipientCopyAssent] = useState<string | null>(null);
   const receiveResults = useCallback((data: WarmReconnectResultsResponse) => {
     if (user && currentOwnerRef.current === user.uid) setResults({ownerUid: user.uid, data});
   }, [user]);
   const currentResults = results?.ownerUid === user?.uid ? results?.data : null;
   const activePilot = activation?.pilots.find(pilot => pilot.pilotId === activation.control?.activePilotId) ?? null;
+  const copyReviewBinding = activePilot?.recipientCopyReviewFingerprint
+    ? [activePilot.pilotId, activePilot.fingerprints.audienceFingerprint, activePilot.fingerprints.actionFingerprint, activePilot.recipientCopyReviewFingerprint].join(":") : null;
+  const recipientCopyConfirmed = !copyReviewBinding || recipientCopyAssent === copyReviewBinding;
   const followOnParent = activation?.pilots.find(pilot => pilot.pilotId === activation.control?.followOnParentPilotId) ?? null;
   const selectionCap = followOnParent ? WARM_RECONNECT_MAX_PILOT_SIZE : 5;
   const availableCandidates = activation?.candidates ?? [];
@@ -462,7 +466,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
 
   async function approvePilot(pilot: WarmReconnectPilotView) {
     if (controlsUnavailable || !pilot.availableActions.canApprove || mutation || !approvalNote.trim()) return;
-    if (!requiredConfirmations(pilot.contentMode).every(([key]) => confirmations[key])) return;
+    if (!requiredConfirmations(pilot.contentMode).every(([key]) => confirmations[key]) || !recipientCopyConfirmed) return;
 
     const payload: WarmReconnectPilotApprovalRequest = {
       decision: "approve",
@@ -470,7 +474,9 @@ export function WarmReconnectActivation({ campaign }: Props) {
       expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
       expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
       approvalScope: pilot.tranche === "follow_on" ? "exact_batch_one_time_reconnection_emails" : "exact_five_one_time_reconnection_emails",
+      ...(pilot.recipientCopyReviewFingerprint ? { expectedRecipientCopyReviewFingerprint: pilot.recipientCopyReviewFingerprint } : {}),
       confirmations: {
+        ...(pilot.recipientCopyReviewFingerprint ? { exactRecipientCopyReviewed: true as const } : {}),
         senderLegalIdentityVerified: true,
         physicalPostalAddressVerified: true,
         preferencesAndUnsubscribeVerified: true,
@@ -491,6 +497,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         payload,
       );
       setApprovalNote("");
+      setRecipientCopyAssent(null);
       setConfirmations({ ...EMPTY_CONFIRMATIONS });
       await loadActivation();
     } catch (caught) {
@@ -581,7 +588,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
       ? "provider currently disabled"
       : "provider status unknown";
   const visibleConfirmations = requiredConfirmations(activePilot?.contentMode);
-  const allConfirmationsChecked = visibleConfirmations.every(([key]) => confirmations[key]);
+  const allConfirmationsChecked = visibleConfirmations.every(([key]) => confirmations[key]) && recipientCopyConfirmed;
   const selectedProfile = activation?.googleProfiles.find((profile) => profile.profileId === (followOnParent?.sender.profileId ?? sender.profileId));
   const createReady = Boolean(
     (followOnParent ? selectedRecipientIds.length >= 1 && selectedRecipientIds.length <= WARM_RECONNECT_MAX_PILOT_SIZE : selectedRecipientIds.length === 5) &&
@@ -923,6 +930,12 @@ export function WarmReconnectActivation({ campaign }: Props) {
                               <input type="checkbox" checked={confirmations[key]} onChange={(event) => setConfirmations((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" /> {key === "exactAudienceReviewed" && activePilot.tranche === "follow_on" ? `Exact ${activePilot.recipientCap}-person audience` : label}
                             </label>
                           ))}
+                          {copyReviewBinding && (
+                            <label className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
+                              <input type="checkbox" aria-label="Exact recipient copy reviewed" checked={recipientCopyConfirmed} onChange={(event) => setRecipientCopyAssent(event.target.checked ? copyReviewBinding : null)} className="mt-1 h-4 w-4 accent-cyan-300" />
+                              I reviewed every recipient&apos;s exact greeting and opening below, including the accuracy of contextual details.
+                            </label>
+                          )}
                         </fieldset>
                         <textarea aria-label="Approval note" value={approvalNote} onChange={(event) => setApprovalNote(event.target.value)} placeholder="Approval note for this exact pilot" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-cyan-200/50" />
                         <Button type="button" disabled={controlsUnavailable || !activePilot.availableActions.canApprove || !allConfirmationsChecked || !approvalNote.trim() || Boolean(mutation)} onClick={() => void approvePilot(activePilot)} className="w-full bg-cyan-200 text-[#061012] hover:bg-cyan-100">
@@ -940,8 +953,21 @@ export function WarmReconnectActivation({ campaign }: Props) {
                           <p>Preview for {activePilot.emailPreview.greetingName}. Links are inactive; delivery creates each recipient&apos;s own links.</p>
                           <iframe title="Approved campaign email preview" srcDoc={activePilot.emailPreview.html} sandbox="" referrerPolicy="no-referrer" className="mt-3 h-[820px] w-full rounded border border-white/10 bg-white" />
                           <details className="mt-2"><summary className="cursor-pointer">Plain-text alternative</summary><pre className="mt-2 whitespace-pre-wrap font-sans">{activePilot.emailPreview.plainText}</pre></details>
-                          <p className="mt-2">Reviewed greetings: {activePilot.recipients.map((recipient) => recipient.greetingName).join(", ")}</p>
+                          <p className="mt-2">Reviewed greetings: {activePilot.recipients.map((recipient) => (recipient.recipientCopy?.greetingName ?? recipient.greetingName)).join(", ")}</p>
                         </details>
+                      )}
+                      {activePilot.recipientEmailPreviews && (
+                        <div className="mt-3 space-y-2">
+                          <p className="font-semibold">Exact recipient copy for review</p>
+                          <p>Contextual details require your review. They do not establish newsletter permission.</p>
+                          {activePilot.recipientEmailPreviews.map((preview, index) => (
+                            <details key={preview.recipientId} className="rounded border border-white/10 p-2">
+                              <summary className="cursor-pointer">{index + 1}. {preview.greetingName} — {activePilot.recipients.find(row => row.recipientId === preview.recipientId)?.email}</summary>
+                              <p className="mt-2 font-semibold">Subject: {preview.subject}</p>
+                              <pre className="mt-2 whitespace-pre-wrap font-sans">{preview.plainText}</pre>
+                            </details>
+                          ))}
+                        </div>
                       )}
                       {!hasArtwork(activePilot.contentMode) && campaign && campaign.review.previewFingerprint === activePilot.campaignPreviewFingerprint && (
                         <details className="mt-2">

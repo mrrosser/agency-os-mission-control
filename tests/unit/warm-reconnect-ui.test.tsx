@@ -168,6 +168,13 @@ function treeButton(node: React.ReactNode, label: string): React.ReactElement<{ 
   return treeButton(node.props.children, label);
 }
 
+function copyReviewCheckbox(node: React.ReactNode): React.ReactElement<{ checked: boolean; onChange: (event: { target: { checked: boolean } }) => void }> | undefined {
+  if (Array.isArray(node)) return node.map(copyReviewCheckbox).find(Boolean);
+  if (!React.isValidElement<{ children?: React.ReactNode; "aria-label"?: string }>(node)) return undefined;
+  if (node.props["aria-label"] === "Exact recipient copy reviewed") return node as never;
+  return copyReviewCheckbox(node.props.children);
+}
+
 function renderInteractive() {
   hookState.index = 0;
   hookState.refIndex = 0;
@@ -223,6 +230,44 @@ describe("warm reconnect campaign UI", () => {
     hookState.refIndex = 0;
     authState.user = null;
     vi.unstubAllGlobals();
+  });
+
+  it("shows later exact variants and scopes copy assent to the current pilot and fingerprints", () => {
+    const base = activationFixture(false);
+    const pilot = {
+      ...base.pilots[0], contentMode: "approved_design_v2",
+      recipientCopyReviewFingerprint: "copy-review-1",
+      recipientEmailPreviews: Array.from({ length: 20 }, (_, index) => ({
+        designVersion: "synthetic-design", recipientId: `recipient-${index + 1}`,
+        greetingName: `Person ${index + 1}`, subject: "A quick hello from Marcus",
+        plainText: index === 16 ? "Hi Person 17,\n\nReviewed website correspondence opening." : `Hi Person ${index + 1},\n\nReviewed opening.`,
+      })),
+    };
+    const activation = { ...base, pilots: [pilot] };
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    hookState.interactive = true;
+    let tree = renderInteractive();
+    expect(treeText(tree)).toContain("Reviewed website correspondence opening.");
+    expect(treeText(tree)).toContain("20. Person 20");
+    expect(copyReviewCheckbox(tree)?.props.checked).toBe(false);
+    copyReviewCheckbox(tree)!.props.onChange({ target: { checked: true } });
+    tree = renderInteractive();
+    expect(copyReviewCheckbox(tree)?.props.checked).toBe(true);
+    for (const field of ["audienceFingerprint", "actionFingerprint"] as const) {
+      pilot.fingerprints[field] += "-changed";
+      tree = renderInteractive();
+      expect(copyReviewCheckbox(tree)?.props.checked).toBe(false);
+      copyReviewCheckbox(tree)!.props.onChange({ target: { checked: true } });
+    }
+    pilot.recipientCopyReviewFingerprint = "copy-review-2";
+    expect(copyReviewCheckbox(renderInteractive())?.props.checked).toBe(false);
+    copyReviewCheckbox(renderInteractive())!.props.onChange({ target: { checked: true } });
+    pilot.pilotId = "new-pilot";
+    activation.control.activePilotId = pilot.pilotId;
+    activation.control.initialPilotId = pilot.pilotId;
+    activation.history.pilotIds = [pilot.pilotId];
+    expect(copyReviewCheckbox(renderInteractive())?.props.checked).toBe(false);
   });
 
   it("renders the copy, owned artwork, exact aggregates, and zero-authority boundary", () => {

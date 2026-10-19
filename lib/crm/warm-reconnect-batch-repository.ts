@@ -1,4 +1,5 @@
 import "server-only";
+import { warmReconnectRecipientCreationIdentity } from "@/lib/crm/warm-reconnect-recipient-copy";
 import { randomUUID } from "node:crypto";
 import { FieldValue, type DocumentData, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
@@ -127,7 +128,7 @@ export async function reserveWarmReconnectFollowOnBatch(input: {
       workspaceId: value.workspaceId, ownerUid: value.ownerUid, artifact: value.fingerprints.artifactFingerprint,
       tranche: value.tranche, cap: value.recipientCap, parent: value.parentPilotId,
       sequence: value.batchSequence, notBefore: value.followOnNotBeforeMs,
-      recipients: value.recipients.map(recipient => ({ recipientId: recipient.recipientId, candidateFingerprint: recipient.candidateFingerprint })),
+      recipients: value.recipients.map(warmReconnectRecipientCreationIdentity),
     });
     if (existing.exists) {
       const stored = existing.data() as WarmReconnectPilot;

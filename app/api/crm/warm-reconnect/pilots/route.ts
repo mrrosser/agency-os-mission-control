@@ -4,6 +4,7 @@ import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { parseBoundedWarmReconnectJson } from "@/lib/crm/warm-reconnect-activation";
 import { createWarmReconnectPilotForUid } from "@/lib/crm/warm-reconnect-repository";
+import { warmReconnectRecipientCopyInputSchema } from "@/lib/crm/warm-reconnect-recipient-copy";
 import { WARM_RECONNECT_MAX_PILOT_SIZE } from "@/lib/crm/warm-reconnect-activation-types";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ const commonFields = {
     idempotencyKey: identifier,
     campaignPreviewFingerprint: sha256,
     sender: senderSchema,
+    recipientCopies: z.array(warmReconnectRecipientCopyInputSchema).min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE).optional(),
     contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons", "approved_design_v2"]).optional(),
     artworkEmailApproval: z
       .object({
@@ -68,6 +70,11 @@ const bodySchema = z.discriminatedUnion("tranche", [
     if (body.candidateRecipientIds.length !== body.recipientCap ||
       new Set(body.candidateRecipientIds).size !== body.recipientCap) {
       context.addIssue({code: "custom", path: ["candidateRecipientIds"], message: "The exact batch size must match distinct recipient ids."});
+    }
+    if (body.recipientCopies && (body.contentMode !== "approved_design_v2" ||
+        new Set(body.recipientCopies.map(copy => copy.recipientId)).size !== body.recipientCopies.length ||
+        body.recipientCopies.some(copy => !body.candidateRecipientIds.includes(copy.recipientId)))) {
+      context.addIssue({ code: "custom", path: ["recipientCopies"], message: "Recipient copy must match distinct selected recipients in the reviewed design." });
     }
     const artworkMode = body.contentMode === "approved_design_v2" || (body.contentMode ?? "artwork_html") === "artwork_html";
     if (artworkMode ? !body.artworkEmailApproval : body.artworkEmailApproval !== undefined) {

@@ -1,4 +1,5 @@
 import "server-only";
+import { warmReconnectRecipientCopyReviewFingerprint, warmReconnectRecipientCreationIdentity } from "@/lib/crm/warm-reconnect-recipient-copy";
 
 import { createHash, randomUUID } from "node:crypto";
 import type {
@@ -35,6 +36,8 @@ import {
 import {
   createWarmReconnectPilot,
   buildWarmReconnectPilotEmailPreview,
+  assertWarmReconnectPilotFingerprints,
+  buildWarmReconnectPilotRecipientEmailPreviews,
   decideWarmReconnectPilotApproval,
   decideWarmReconnectRecipient,
   materializeWarmReconnectPilot,
@@ -546,7 +549,10 @@ async function hydratePilotView(
   void _legacyDncOrgId;
   void _storedRecipients;
   const emailPreview = buildWarmReconnectPilotEmailPreview(pilot);
-  return { ...publicPilot, recipients, ...(emailPreview ? { emailPreview } : {}) };
+  const recipientEmailPreviews = buildWarmReconnectPilotRecipientEmailPreviews(pilot);
+  const recipientCopyReviewFingerprint = warmReconnectRecipientCopyReviewFingerprint(pilot.recipients);
+  return { ...publicPilot, recipients, ...(emailPreview ? { emailPreview } : {}),
+    ...(recipientEmailPreviews ? { recipientEmailPreviews, recipientCopyReviewFingerprint } : {}) };
 }
 
 function assertOwnerAccess(
@@ -827,6 +833,7 @@ export async function createWarmReconnectPilotForUid(input: {
     assertWarmReconnectInitialPilotLock(lockSnapshot.data(), pilotId);
     if (existing.exists) {
       const stored = pilotFromSnapshot(existing);
+      assertWarmReconnectPilotFingerprints(stored);
       if (
         stored.workspaceId !== access.workspaceId ||
         stored.ownerUid !== input.uid ||
@@ -836,10 +843,7 @@ export async function createWarmReconnectPilotForUid(input: {
           contentMode: resolveWarmReconnectCampaignContentMode(stored.contentMode),
           artwork: stored.artworkEmailApproval,
           preference: stored.preferenceContract,
-          recipients: stored.recipients.map((recipient) => ({
-            recipientId: recipient.recipientId,
-            candidateFingerprint: recipient.candidateFingerprint,
-          })),
+          recipients: stored.recipients.map(warmReconnectRecipientCreationIdentity),
           tranche: stored.tranche,
           cap: stored.recipientCap,
         }) !==
@@ -849,10 +853,7 @@ export async function createWarmReconnectPilotForUid(input: {
             contentMode: resolveWarmReconnectCampaignContentMode(pilot.contentMode),
             artwork: pilot.artworkEmailApproval,
             preference: pilot.preferenceContract,
-            recipients: pilot.recipients.map((recipient) => ({
-              recipientId: recipient.recipientId,
-              candidateFingerprint: recipient.candidateFingerprint,
-            })),
+            recipients: pilot.recipients.map(warmReconnectRecipientCreationIdentity),
             tranche: pilot.tranche,
             cap: pilot.recipientCap,
           })

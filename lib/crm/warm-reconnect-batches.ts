@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { warmReconnectRecipientCopyReviewFingerprint } from "@/lib/crm/warm-reconnect-recipient-copy";
 import { ApiError } from "@/lib/api/handler";
 import { WARM_RECONNECT_INITIAL_PILOT_SIZE, WARM_RECONNECT_MAX_PILOT_SIZE, type WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
 import { resolveWarmReconnectCampaignContentMode } from "@/lib/crm/warm-reconnect-campaign-design";
@@ -115,6 +116,7 @@ export function assertWarmReconnectParentCompletion(input: {
   assertWarmReconnectBatchShape(parent);
   if (parent.status !== "launch_requested" || !parent.launchRequestedAt || !parent.approval ||
       parent.approval.decision !== "approved" || parent.approval.approvalScope !== warmReconnectApprovalScopeForPilot(parent) ||
+      parent.approval.recipientCopyReviewFingerprint !== warmReconnectRecipientCopyReviewFingerprint(parent.recipients) ||
       Object.entries(parent.fingerprints).some(([key, value]) => parent.approval?.[key as keyof typeof parent.fingerprints] !== value) ||
       parent.recipients.length !== parent.recipientCap || !state ||
       state.schemaVersion !== "crm.warm-reconnect-executor-state.v1" || state.pilotId !== parent.pilotId ||

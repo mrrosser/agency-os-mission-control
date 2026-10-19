@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { warmReconnectRecipientCopyContentFingerprint, warmReconnectRecipientCopyReviewFingerprint } from "@/lib/crm/warm-reconnect-recipient-copy";
+import type { WarmReconnectRecipientCopyInput } from "@/lib/crm/warm-reconnect-activation-types";
 import {
   WARM_RECONNECT_EXECUTION_POLICY,
   assertWarmReconnectPilotFingerprints,
@@ -26,6 +28,7 @@ import {
   markWarmReconnectCapabilitiesPrepared,
   recordWarmReconnectSent,
   claimNextWarmReconnectRecipient,
+  beginWarmReconnectProviderAttempt,
   reconcileWarmReconnectExecutorProgress,
   reconcileWarmReconnectPermission,
   reconcileWarmReconnectSourceEvidence,
@@ -88,7 +91,8 @@ function launchedPilot(
   approvalId = "approval-1",
   contentMode: WarmReconnectContentMode = "artwork_html",
   workspaceId = "workspace-1",
-  legacyDncOrgId = "org-1"
+  legacyDncOrgId = "org-1",
+  recipientCopies?: WarmReconnectRecipientCopyInput[],
 ): WarmReconnectPilot {
   let pilot = createWarmReconnectPilot({
     pilotId,
@@ -97,6 +101,7 @@ function launchedPilot(
     legacyDncOrgId,
     request: {
       idempotencyKey: `request-${pilotId}`,
+      ...(recipientCopies ? { recipientCopies } : {}),
       campaignPreviewFingerprint: PREVIEW_FINGERPRINT,
       tranche: "initial_5",
       recipientCap: 5,
@@ -154,11 +159,13 @@ function launchedPilot(
     approvalId,
     request: {
       decision: "approve",
+      ...(recipientCopies ? { expectedRecipientCopyReviewFingerprint: warmReconnectRecipientCopyReviewFingerprint(pilot.recipients) } : {}),
       expectedArtifactFingerprint: pilot.fingerprints.artifactFingerprint,
       expectedAudienceFingerprint: pilot.fingerprints.audienceFingerprint,
       expectedActionFingerprint: pilot.fingerprints.actionFingerprint,
       approvalScope: "exact_five_one_time_reconnection_emails",
       confirmations: {
+        ...(recipientCopies ? { exactRecipientCopyReviewed: true as const } : {}),
         senderLegalIdentityVerified: true,
         physicalPostalAddressVerified: true,
         preferencesAndUnsubscribeVerified: true,
@@ -843,6 +850,87 @@ describe("warm reconnect provider executor", () => {
     }
     expect(capabilitiesSeen.size).toBe(10);
   });
+
+  it.each(["claim-copy", "claim-review", "provider-copy", "provider-review"] as const)(
+    "rejects personalized approval drift at the actual transaction boundary: %s", async (scenario) => {
+      const row = candidate(1);
+      const copy = { version: "warm-reconnect-recipient-copy.v1" as const,
+        recipientId: row.recipientId, personId: row.personId, contactPointId: row.contactPointId,
+        emailKey: row.emailKey, expectedCandidateFingerprint: row.candidateFingerprint,
+        greetingName: "Avery Studio", openingParagraph: "It's Marcus Rosser. We met at a local workshop." };
+      const pilot = launchedPilot(undefined, undefined, "approved_design_v2",
+        "workspace_default_owner-1", "workspace_default_owner-1",
+        [{ ...copy, expectedContentFingerprint: warmReconnectRecipientCopyContentFingerprint(copy) }]);
+      const fixture = capabilityReceiptFixture(pilot);
+      const stored = structuredClone(pilot);
+      if (scenario.endsWith("copy")) stored.recipients[0].recipientCopy!.openingParagraph = "Changed after approval.";
+      else delete stored.approval!.recipientCopyReviewFingerprint;
+      fixture.documents.set(`crm_warm_reconnect_pilots/${pilot.pilotId}`, stored as unknown as Record<string, unknown>);
+      const expectedFailure = scenario.endsWith("copy") ? /recipient identity or exact copy changed/ : /exact campaign approval is missing or expired/;
+      if (scenario.startsWith("claim")) {
+        await expect(claimNextWarmReconnectRecipient({ uid: pilot.ownerUid, pilotId: pilot.pilotId,
+          correlationId: "copy-claim-drift", now: RUN_AT, db: fixture.input.db })).rejects.toThrow(expectedFailure);
+      } else {
+        await expect(beginWarmReconnectProviderAttempt({ claim: fixture.claim,
+          preferenceDigest: fixture.input.preferenceDigest, unsubscribeDigest: fixture.input.unsubscribeDigest,
+          correlationId: "copy-provider-drift", now: RUN_AT, db: fixture.input.db })).rejects.toThrow(expectedFailure);
+      }
+      expect(fixture.set).not.toHaveBeenCalled();
+    });
+
+  it.each(["unchanged", "ambiguous", "altered-output", "removed-layer", "swapped-identity", "stale-layer"] as const)(
+    "binds recipient copy before token refresh and provider boundary: %s", async (scenario) => {
+      const row = candidate(1);
+      const copy = {
+        version: "warm-reconnect-recipient-copy.v1" as const,
+        recipientId: row.recipientId, personId: row.personId, contactPointId: row.contactPointId,
+        emailKey: row.emailKey, expectedCandidateFingerprint: row.candidateFingerprint,
+        greetingName: "Avery Studio",
+        openingParagraph: "It's Marcus Rosser. We met at a local workshop. I wanted to say hello and share a simple way to stay connected with my work.",
+      };
+      const pilot = launchedPilot(undefined, undefined, "approved_design_v2", undefined, undefined,
+        [{ ...copy, expectedContentFingerprint: warmReconnectRecipientCopyContentFingerprint(copy) }]);
+      const claim = claimFor(pilot);
+      // The claim and stored pilot are distinct snapshots at the real boundary.
+      claim.recipient = structuredClone(claim.recipient);
+      if (scenario === "removed-layer") delete claim.recipient.recipientCopy;
+      if (scenario === "swapped-identity") claim.recipient.personId = "different-person";
+      if (scenario === "stale-layer") pilot.recipients[0].recipientCopy!.openingParagraph = "Unreviewed changed copy.";
+      const baseCampaign = buildWarmReconnectCampaignDraft({
+        schemaVersion: 1, sourceOfTruth: "firestore_portfolio_registry", dataClassification: "aggregate_only", readOnly: true,
+        outreach: { status: "blocked", eligibleContacts: 0 }, permissions: { contactPointStates: { unknown: 0 }, sourceRecordsWithNoPermissionBasis: 0 },
+        totals: { people: 0, contactPoints: 0, emailContactPoints: 0 }, brands: { unassigned: 0 }, freshness: { observedAt: START.toISOString() },
+      } as never);
+      const deps = dependencies({
+        claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim })),
+        renderMessage: vi.fn(input => {
+          const rendered = renderWarmReconnectCampaignEmail(input);
+          return scenario === "altered-output" ? { ...rendered, plainText: rendered.plainText + "\nUnreviewed footer." } : rendered;
+        }),
+        loadCampaign: vi.fn(async () => ({ ...baseCampaign, review: { ...baseCampaign.review, previewFingerprint: PREVIEW_FINGERPRINT } })),
+      });
+      if (scenario === "ambiguous") deps.sendMessage = vi.fn(async () => { throw new Error("Synthetic ambiguous result"); });
+      const result = await runWarmReconnectPilotExecutor({ uid: "owner-1", pilotId: pilot.pilotId, correlationId: "recipient-copy", log, db, now: RUN_AT, dependencies: deps });
+      if (scenario === "ambiguous") {
+        expect(result).toMatchObject({ outcome: "delivery_unknown", providerCalled: true });
+        expect(deps.sendMessage).toHaveBeenCalledOnce();
+        expect(deps.recordDeliveryUnknown).toHaveBeenCalledOnce();
+        expect(deps.recordSent).not.toHaveBeenCalled();
+      } else if (scenario === "unchanged") {
+        expect(result).toMatchObject({ outcome: "sent", providerCalled: true });
+        expect(deps.sendMessage).toHaveBeenCalledOnce();
+        const outbound = vi.mocked(deps.sendMessage).mock.calls[0][1];
+        expect(outbound.plainText).toContain("Hi Avery Studio,");
+        expect(outbound.plainText).toContain(copy.openingParagraph);
+        expect(outbound.html).toContain("Hi Avery Studio,");
+      } else {
+        expect(result).toMatchObject({ outcome: "stopped", providerCalled: false, reason: "pre_provider_readiness_failed" });
+        expect(deps.resolveAccessToken).not.toHaveBeenCalled();
+        expect(deps.beginProviderAttempt).not.toHaveBeenCalled();
+        expect(deps.sendMessage).not.toHaveBeenCalled();
+        expect(deps.recordStoppedBeforeProvider).toHaveBeenCalledOnce();
+      }
+    });
 
   it("rejects malformed revised CID rendering before sender refresh or provider-inflight marking", async () => {
     const pilot = launchedPilot("wrp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "approval-design", "approved_design_v2");

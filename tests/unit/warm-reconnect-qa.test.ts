@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { Firestore } from "firebase-admin/firestore";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
 import historical from "@/tests/fixtures/warm-reconnect-qa-original.json";
-import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED } from "@/lib/crm/warm-reconnect-qa-version";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, WARM_RECONNECT_QA_RECOVERY_TEST_ID as RECOVERY, type WarmReconnectQaTestId } from "@/lib/crm/warm-reconnect-qa-version";
 
 const mocks = vi.hoisted(() => ({
   access: vi.fn(), summary: vi.fn(), account: vi.fn(), accessToken: vi.fn(), sender: vi.fn(), scope: vi.fn(),
@@ -69,16 +69,16 @@ function account() {
     },
   } };
 }
-async function prepare(fixture: ReturnType<typeof fakeDb>) {
-  return prepareWarmReconnectQa({ uid, recipient, log, db: fixture.db, now: NOW });
+async function prepare(fixture: ReturnType<typeof fakeDb>, testId: WarmReconnectQaTestId = ORIGINAL) {
+  return prepareWarmReconnectQa({ uid, recipient, log, db: fixture.db, now: NOW, testId });
 }
-async function send(fixture: ReturnType<typeof fakeDb>, artifactFingerprint: string) {
-  return sendWarmReconnectQa({ uid, recipient, artifactFingerprint, confirmSendOneTest: true, db: fixture.db, now: NOW + 1000 });
+async function send(fixture: ReturnType<typeof fakeDb>, artifactFingerprint: string, testId: WarmReconnectQaTestId = ORIGINAL) {
+  return sendWarmReconnectQa({ uid, recipient, artifactFingerprint, confirmSendOneTest: true, db: fixture.db, now: NOW + 1000, testId });
 }
-async function delivered() {
+async function delivered(testId: WarmReconnectQaTestId = ORIGINAL) {
   const fixture = fakeDb();
-  const prepared = await prepare(fixture);
-  await send(fixture, prepared.artifactFingerprint);
+  const prepared = await prepare(fixture, testId);
+  await send(fixture, prepared.artifactFingerprint, testId);
   const message = mocks.sender.mock.calls[0][1];
   const preferenceToken = new URLSearchParams(new URL(message.preferencesUrl).hash.slice(1)).get("token")!;
   const unsubscribeToken = new URL(message.oneClickUnsubscribeUrl).pathname.split("/").at(-1)!;
@@ -317,6 +317,136 @@ describe("separately authorized revised design", () => {
     expect(await readWarmReconnectQaForOwner(uid, f.db)).toMatchObject({ qaPreferenceState: { topics: { rosser_gallery: true, rt_solutions: false } } });
     expect(await readWarmReconnectQaForOwner(uid, f.db, REVISED)).toMatchObject({ qaPreferenceState: { topics: { rosser_gallery: false, rt_solutions: true } } });
     expect(f.writes.every(path => Object.values(C).some(collection => path.startsWith(`${collection}/`)))).toBe(true);
+  });
+});
+
+describe("fixed recovery owner test", () => {
+  it("prepares a distinct frozen run without replacing either historical run or issuing capabilities", async () => {
+    const f = fakeDb();
+    for (const [key, value] of historical.records) f.records.set(key as string, structuredClone(value) as Stored);
+    const revised = await prepare(f, REVISED);
+    await send(f, revised.artifactFingerprint, REVISED);
+    const historicalEntries = structuredClone([...f.records]);
+    const before = f.writes.length;
+    const tokensBefore = [...f.records.keys()].filter(key => key.startsWith(`${C.tokens}/`));
+    mocks.sender.mockClear(); mocks.accessToken.mockClear();
+    expect(await readWarmReconnectQaForOwner(uid, f.db, RECOVERY)).toMatchObject({ testId: RECOVERY, status: "not_prepared" });
+    expect(f.writes).toHaveLength(before);
+    const recovery = await prepare(f, RECOVERY);
+    expect(recovery).toMatchObject({
+      testId: RECOVERY, subject: "[TEST · CRM recovery verification] A quick hello from Marcus",
+      recipient, from: "mrosser@rossergallery.com", status: "prepared", designVersion: "rosser-rt-library-kit-v1",
+      previewLinksOnly: true, capabilityExpiresAtMs: null, maximumProviderAttempts: 1,
+    });
+    expect(recovery.plainText).toBe(revised.plainText);
+    expect(recovery.html).toBe(revised.html);
+    expect(recovery.inlineAssetManifest).toEqual(revised.inlineAssetManifest);
+    expect(recovery.rendererImplementationFingerprint).toBe(revised.rendererImplementationFingerprint);
+    expect(recovery.mimeImplementationFingerprint).toBe(revised.mimeImplementationFingerprint);
+    expect(recovery.artifactFingerprint).not.toBe(revised.artifactFingerprint);
+    expect(f.writes.slice(before)).toEqual([`${C.runs}/${hash(`${RECOVERY}:workspace_default_owner`)}`]);
+    expect([...f.records.keys()].filter(key => key.startsWith(`${C.tokens}/`))).toEqual(tokensBefore);
+    expect(await prepare(f, RECOVERY)).toMatchObject({ replayed: true, artifactFingerprint: recovery.artifactFingerprint });
+    for (const [key, value] of historicalEntries) expect(f.records.get(key)).toEqual(value);
+    expect(mocks.sender).not.toHaveBeenCalled(); expect(mocks.accessToken).not.toHaveBeenCalled();
+  });
+
+  it("requires the pinned recipient, owner, current Gallery account and exact recovery artifact", async () => {
+    const f = fakeDb(); const revised = await prepare(f, REVISED); const recovery = await prepare(f, RECOVERY);
+    const base = { uid, recipient, artifactFingerprint: recovery.artifactFingerprint, confirmSendOneTest: true as const, db: f.db, now: NOW + 1000, testId: RECOVERY };
+    await expect(prepareWarmReconnectQa({ uid, recipient: "other@example.test", log, db: f.db, testId: RECOVERY })).rejects.toMatchObject({ status: 400 });
+    await expect(sendWarmReconnectQa({ ...base, recipient: "other@example.test" })).rejects.toMatchObject({ status: 400 });
+    await expect(sendWarmReconnectQa({ ...base, uid: "not-owner" })).rejects.toMatchObject({ status: 403 });
+    await expect(sendWarmReconnectQa({ ...base, confirmSendOneTest: false as never })).rejects.toMatchObject({ status: 400 });
+    await expect(send(f, revised.artifactFingerprint, RECOVERY)).rejects.toMatchObject({ status: 409 });
+    await expect(send(f, recovery.artifactFingerprint, REVISED)).rejects.toMatchObject({ status: 409 });
+    const changed = account(); changed.record.accountId = "replacement-account";
+    mocks.account.mockResolvedValue(changed);
+    await expect(send(f, recovery.artifactFingerprint, RECOVERY)).rejects.toMatchObject({ status: 409 });
+    expect(mocks.sender).not.toHaveBeenCalled(); expect(mocks.accessToken).not.toHaveBeenCalled();
+    expect([...f.records.keys()].every(key => key.startsWith(`${C.runs}/`))).toBe(true);
+  });
+
+  it("claims recovery once under concurrency and issues exactly two fresh, run-bound seven-day capabilities", async () => {
+    const f = fakeDb(); const recovery = await prepare(f, RECOVERY);
+    await Promise.all([send(f, recovery.artifactFingerprint, RECOVERY), send(f, recovery.artifactFingerprint, RECOVERY)]);
+    expect(mocks.sender).toHaveBeenCalledTimes(1);
+    const message = mocks.sender.mock.calls[0][1];
+    expect(message).toMatchObject({ to: recipient, from: "mrosser@rossergallery.com", replyTo: "mrosser@rossergallery.com", subject: recovery.subject, purpose: "owner_qa" });
+    expect(message.inlineAssets).toHaveLength(3);
+    const preferenceToken = new URLSearchParams(new URL(message.preferencesUrl).hash.slice(1)).get("token")!;
+    const unsubscribeToken = new URL(message.oneClickUnsubscribeUrl).pathname.split("/").at(-1)!;
+    expect(preferenceToken).not.toBe("p".repeat(43)); expect(unsubscribeToken).not.toBe("u".repeat(43));
+    expect(preferenceToken).not.toBe(unsubscribeToken);
+    const tokens = [...f.records].filter(([key]) => key.startsWith(`${C.tokens}/`));
+    expect(tokens).toHaveLength(2);
+    for (const [token, scope] of [[preferenceToken, "preferences"], [unsubscribeToken, "unsubscribe_only"]]) {
+      expect(f.records.get(`${C.tokens}/${hash(token)}`)).toMatchObject({
+        purpose: "owner_qa", scope, runId: hash(`${RECOVERY}:workspace_default_owner`),
+        artifactFingerprint: recovery.artifactFingerprint, expiresAtMs: NOW + 1000 + 7 * 24 * 3600000,
+      });
+      expect(JSON.stringify([...f.records])).not.toContain(token);
+    }
+    expect(await readWarmReconnectQaForOwner(uid, f.db, RECOVERY)).toMatchObject({ status: "sent", capabilityExpiresAtMs: NOW + 1000 + 7 * 24 * 3600000 });
+    expect(await send(f, recovery.artifactFingerprint, RECOVERY)).toMatchObject({ testId: RECOVERY, status: "sent", replayed: true, providerAction: false });
+    expect(mocks.sender).toHaveBeenCalledTimes(1);
+    expect(f.writes.every(path => Object.values(C).some(collection => path.startsWith(`${collection}/`)))).toBe(true);
+  });
+
+  it.each(["timeout", "missing-receipt", "receipt-write-failure", "inflight"])("never retries a recovery attempt with %s", async kind => {
+    const f = fakeDb(); const recovery = await prepare(f, RECOVERY);
+    if (kind === "inflight") {
+      const [key, value] = [...f.records][0]; f.records.set(key, { ...value, status: "provider_inflight" });
+    } else if (kind === "timeout") mocks.sender.mockRejectedValue(new Error("synthetic provider timeout"));
+    else if (kind === "missing-receipt") mocks.sender.mockResolvedValue({ id: "", threadId: "" });
+    else f.failStatus("sent");
+    await send(f, recovery.artifactFingerprint, RECOVERY);
+    expect(await send(f, recovery.artifactFingerprint, RECOVERY)).toMatchObject({ testId: RECOVERY, providerAction: false, status: kind === "inflight" ? "provider_inflight" : "delivery_unknown" });
+    expect(mocks.sender).toHaveBeenCalledTimes(kind === "inflight" ? 0 : 1);
+  });
+
+  it("keeps all three choices, explicit confirmation, request replay and sticky unsubscribe isolated to recovery QA state", async () => {
+    const f = await delivered(RECOVERY);
+    for (const [key, value] of historical.records) f.records.set(key as string, structuredClone(value) as Stored);
+    // Representative real campaign/consent records must be byte-for-byte untouched.
+    f.records.set("crm_contact_preferences/real-contact", { topics: { rosser_gallery: true, rt_solutions: false } });
+    f.records.set("crm_suppressions/real-contact", { globallyUnsubscribed: true });
+    f.records.set("crm_warm_reconnect_pilots/real-campaign", { status: "completed", providerAttempts: 5 });
+    const preserved = [...f.records].filter(([key]) => !key.includes(hash(`${RECOVERY}:workspace_default_owner`)));
+    const base = { action: "save_preferences" as const, token: f.preferenceToken, confirmationNonce: f.nonce };
+    const choices = [{ rosser_gallery: true, rt_solutions: false }, { rosser_gallery: false, rt_solutions: true }, { rosser_gallery: true, rt_solutions: true }];
+    const beforeInspect = f.writes.length;
+    expect(await processWarmReconnectQaPreference({ action: "inspect", token: f.preferenceToken }, { db: f.db, now: NOW })).toMatchObject({ testMode: true, topics: { rosser_gallery: false, rt_solutions: false }, canUpdatePreferences: true });
+    expect(await processWarmReconnectQaPreference({ ...base, requestId: "missing-confirmation", confirmationNonce: "bad", topics: choices[0] }, { db: f.db, now: NOW })).toMatchObject({ available: false });
+    expect(f.writes).toHaveLength(beforeInspect);
+    for (const [index, topics] of choices.entries()) {
+      expect(await processWarmReconnectQaPreference({ ...base, requestId: `choice-${index}`, topics }, { db: f.db, now: NOW })).toMatchObject({ testMode: true, topics, globallyUnsubscribed: false });
+    }
+    const beforeReplay = f.writes.length;
+    expect(await processWarmReconnectQaPreference({ ...base, requestId: "choice-0", topics: choices[0] }, { db: f.db, now: NOW })).toMatchObject({ topics: choices[2] });
+    expect(f.writes).toHaveLength(beforeReplay);
+    expect(await processWarmReconnectQaPreference({ action: "unsubscribe", token: f.preferenceToken, confirmationNonce: f.nonce, requestId: "unsubscribe-last" }, { db: f.db, now: NOW })).toMatchObject({ testMode: true, globallyUnsubscribed: true, canUpdatePreferences: false });
+    const afterUnsubscribe = f.writes.length;
+    for (const requestId of ["choice-0", "new-after-unsubscribe"]) {
+      expect(await processWarmReconnectQaPreference({ ...base, requestId, topics: choices[0] }, { db: f.db, now: NOW })).toMatchObject({ globallyUnsubscribed: true, canUpdatePreferences: false, topics: { rosser_gallery: false, rt_solutions: false } });
+    }
+    expect(await unsubscribeWarmReconnectQaToken(f.unsubscribeToken, { db: f.db, now: NOW })).toMatchObject({ globallyUnsubscribed: true });
+    expect(f.writes).toHaveLength(afterUnsubscribe);
+    for (const [key, value] of preserved) expect(f.records.get(key)).toEqual(value);
+    expect(f.writes.every(path => Object.values(C).some(collection => path.startsWith(`${collection}/`)))).toBe(true);
+    expect(await readWarmReconnectQaForOwner(uid, f.db, RECOVERY)).toMatchObject({ qaPreferenceState: { globallyUnsubscribed: true, confirmations: 4 } });
+  });
+
+  it("expires recovery preference updates at seven days while retaining scoped unsubscribe", async () => {
+    const f = await delivered(RECOVERY); const expires = NOW + 1000 + 7 * 24 * 3600000;
+    const before = f.writes.length;
+    expect(await processWarmReconnectQaPreference({ action: "inspect", token: f.preferenceToken }, { db: f.db, now: expires - 1 })).toMatchObject({ expired: false, canUpdatePreferences: true });
+    expect(await processWarmReconnectQaPreference({ action: "inspect", token: f.preferenceToken }, { db: f.db, now: expires })).toMatchObject({ expired: true, canUpdatePreferences: false, canUnsubscribe: true });
+    expect(await processWarmReconnectQaPreference({ action: "save_preferences", token: f.preferenceToken, confirmationNonce: f.nonce, requestId: "expired", topics: { rosser_gallery: true, rt_solutions: true } }, { db: f.db, now: expires })).toMatchObject({ expired: true, topics: { rosser_gallery: false, rt_solutions: false } });
+    expect(await processWarmReconnectQaPreference({ action: "inspect", token: f.unsubscribeToken }, { db: f.db, now: NOW })).toMatchObject({ available: false });
+    expect(await unsubscribeWarmReconnectQaToken(f.preferenceToken, { db: f.db, now: NOW })).toMatchObject({ available: false });
+    expect(f.writes).toHaveLength(before);
+    expect(await unsubscribeWarmReconnectQaToken(f.unsubscribeToken, { db: f.db, now: expires })).toMatchObject({ globallyUnsubscribed: true });
   });
 });
 

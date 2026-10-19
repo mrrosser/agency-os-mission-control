@@ -18,7 +18,9 @@ import { GET as read, POST as prepare } from "@/app/api/crm/warm-reconnect/qa/pr
 import { POST as send } from "@/app/api/crm/warm-reconnect/qa/send/route";
 import { GET as revisedRead, POST as revisedPrepare } from "@/app/api/crm/warm-reconnect/qa/revised/prepare/route";
 import { POST as revisedSend } from "@/app/api/crm/warm-reconnect/qa/revised/send/route";
-import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, warmReconnectQaVersion } from "@/lib/crm/warm-reconnect-qa-version";
+import { GET as recoveryRead, POST as recoveryPrepare } from "@/app/api/crm/warm-reconnect/qa/recovery/prepare/route";
+import { POST as recoverySend } from "@/app/api/crm/warm-reconnect/qa/recovery/send/route";
+import { WARM_RECONNECT_QA_ORIGINAL_TEST_ID as ORIGINAL, WARM_RECONNECT_QA_REVISED_TEST_ID as REVISED, WARM_RECONNECT_QA_RECOVERY_TEST_ID as RECOVERY, warmReconnectQaVersion } from "@/lib/crm/warm-reconnect-qa-version";
 import { GET as preferenceGet, HEAD as preferenceHead, POST as preference } from "@/app/api/crm/warm-reconnect/qa/preferences/route";
 import { GET as unsubscribeGet, HEAD as unsubscribeHead, POST as unsubscribe } from "@/app/api/crm/warm-reconnect/qa/unsubscribe/[token]/route";
 
@@ -81,6 +83,73 @@ describe("fixed revised owner test routes", () => {
     expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
     mocks.auth.mockResolvedValue({ uid: "owner" });
     expect((await revisedPrepare(request("revised/prepare?testId=other", { recipient, testOnly: true }), context())).status).toBe(400);
+  });
+});
+
+describe("fixed recovery owner test routes", () => {
+  const valid = { recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true, reviewedTestId: RECOVERY, reviewedDesignVersion: "rosser-rt-library-kit-v1" };
+
+  it("reads without preparing and binds both mutations only to the server-defined recovery version", async () => {
+    const response = await recoveryRead(new Request("https://leadflow-review.web.app/api/crm/warm-reconnect/qa/recovery/prepare") as never, context());
+    expect(response.status).toBe(200);
+    expect(mocks.read).toHaveBeenCalledWith("owner", undefined, RECOVERY);
+    expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    const prepared = await recoveryPrepare(request("recovery/prepare", { recipient: "  OWNER-QA@EXAMPLE.TEST  ", testOnly: true }), context());
+    expect(prepared.status).toBe(200);
+    expect(mocks.prepare).toHaveBeenCalledWith({ uid: "owner", recipient, log: expect.anything(), testId: RECOVERY });
+    const sent = await recoverySend(request("recovery/send", valid), context());
+    expect(sent.status).toBe(200);
+    expect(mocks.send).toHaveBeenCalledWith({ uid: "owner", recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true, testId: RECOVERY });
+    for (const result of [response, prepared, sent]) {
+      expect(result.headers.get("cache-control")).toContain("private, no-store");
+      expect(result.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(result.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      expect(result.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+  });
+
+  it("rejects old-version, arbitrary-ID, recipient and caller-content substitutions", async () => {
+    for (const body of [
+      { recipient, artifactFingerprint: fingerprint, confirmSendOneTest: true },
+      { ...valid, reviewedTestId: ORIGINAL }, { ...valid, reviewedTestId: REVISED }, { ...valid, reviewedTestId: "arbitrary" },
+      { ...valid, reviewedDesignVersion: "another-design" }, { ...valid, confirmSendOneTest: false },
+      { ...valid, recipient: "other@example.test" }, { ...valid, artifactFingerprint: "invalid" },
+      { ...valid, html: "<p>override</p>" }, { ...valid, from: "other@example.test" },
+      { ...valid, inlineAssets: [] }, { ...valid, testId: ORIGINAL }, { ...valid, reset: true },
+    ]) expect((await recoverySend(request("recovery/send", body), context())).status).toBe(400);
+    for (const body of [
+      { recipient: "other@example.test", testOnly: true }, { recipient, testOnly: false },
+      ...[{ testId: ORIGINAL }, { testId: REVISED }, { testId: RECOVERY }, { from: "other@example.test" }, { html: "override" }, { inlineAssets: [] }, { reset: true }]
+        .map(extra => ({ recipient, testOnly: true, ...extra })),
+    ]) expect((await recoveryPrepare(request("recovery/prepare", body), context())).status).toBe(400);
+    expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("authenticates recovery reads and mutations and only admits the existing explicit OIDC mode", async () => {
+    mocks.auth.mockRejectedValue(new ApiError(401, "Missing authorization"));
+    expect((await recoveryRead(new Request("https://leadflow-review.web.app/api/crm/warm-reconnect/qa/recovery/prepare") as never, context())).status).toBe(401);
+    expect((await recoveryPrepare(request("recovery/prepare", { recipient, testOnly: true }), context())).status).toBe(401);
+    expect((await recoverySend(request("recovery/send", valid), context())).status).toBe(401);
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    const header = { "x-warm-reconnect-auth": "worker_oidc" };
+    expect((await recoveryPrepare(request("recovery/prepare", { recipient, testOnly: true }, header), context())).status).toBe(200);
+    expect((await recoverySend(request("recovery/send", valid, header), context())).status).toBe(200);
+    expect(mocks.worker).toHaveBeenCalledTimes(2);
+    mocks.prepare.mockClear(); mocks.send.mockClear(); mocks.worker.mockResolvedValue({ mode: "legacy_token" });
+    expect((await recoveryPrepare(request("recovery/prepare", { recipient, testOnly: true }, header), context())).status).toBe(403);
+    expect((await recoverySend(request("recovery/send", valid, header), context())).status).toBe(403);
+    expect((await recoverySend(request("recovery/send", valid, { "x-warm-reconnect-auth": "anything" }), context())).status).toBe(400);
+    expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects queries, oversized JSON and non-JSON bodies before recovery actions", async () => {
+    expect((await recoveryRead(new Request("https://leadflow-review.web.app/api/crm/warm-reconnect/qa/recovery/prepare?testId=other") as never, context())).status).toBe(400);
+    for (const [handler, path, body] of [[recoveryPrepare, "recovery/prepare", { recipient, testOnly: true }], [recoverySend, "recovery/send", valid]] as const) {
+      expect((await handler(request(`${path}?uid=other`, body), context())).status).toBe(400);
+      expect((await handler(request(path, body, { "content-type": "text/plain" }), context())).status).toBe(415);
+      expect((await handler(request(path, { ...body, padding: "x".repeat(1024) }), context())).status).toBe(413);
+    }
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.prepare).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
   });
 });
 

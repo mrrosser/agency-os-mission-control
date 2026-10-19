@@ -1,5 +1,12 @@
 # Latest Verification Run
 
+## 2026-10-19 Fresh isolated recovery owner QA
+
+- Adds one fixed recovery test version and protected prepare/send routes for the explicitly approved owner email. The existing exact artwork/body, historical IDs, owner/recipient/account checks, frozen artifact and durable one-attempt claim remain intact; real campaign and newsletter consent code is unchanged.
+- Full unit/smoke: **2,280 tests / 268 files passed**, zero failed or pending. Focused QA: **68/68 passed**. Types, production build and lint passed (zero errors/two unchanged warnings); dependency audit has zero high/critical findings and unchanged packages. Independent source review passed. The reviewed release manifest records source hashes, complete-patch secret scanning and the exact-base apply check before publication.
+- Test provider access was disabled, credentials excluded, and external API connections blocked. Eight full-suite connections served only in-process loopback fixtures. Fresh live QA delivery remains a separate, explicitly authorized post-release operation; user confirmation/unsubscribe will affect isolated QA state only.
+- [Verification report](2026-10-19-owner-recovery-qa.md) and [execution plan](../execplans/2026-10-19-owner-recovery-qa.md).
+
 ## 2026-10-19 CRM recovery after billing restoration
 
 - Fourteen Hosting/direct-runtime reads passed. Existing owner QA links inspect correctly as expired without preference writes. The serving source remains the older release; this candidate has not been deployed.

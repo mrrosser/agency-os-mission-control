@@ -4,6 +4,7 @@ import { ApiError, withApiHandler } from "@/lib/api/handler";
 import { requireFirebaseAuth } from "@/lib/api/auth";
 import { parseBoundedWarmReconnectJson } from "@/lib/crm/warm-reconnect-activation";
 import { createWarmReconnectPilotForUid } from "@/lib/crm/warm-reconnect-repository";
+import { WARM_RECONNECT_MAX_PILOT_SIZE } from "@/lib/crm/warm-reconnect-activation-types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,8 +60,8 @@ const bodySchema = z.discriminatedUnion("tranche", [
     tranche: z.literal("follow_on"),
     parentPilotId: z.string().regex(/^wrp_[a-f0-9]{32}$/),
     batchSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    recipientCap: z.number().int().min(1).max(10),
-    candidateRecipientIds: z.array(identifier).min(1).max(10),
+    recipientCap: z.number().int().min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE),
+    candidateRecipientIds: z.array(identifier).min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE),
   }).strict(),
 ])
   .superRefine((body, context) => {

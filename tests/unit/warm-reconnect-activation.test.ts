@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api/handler";
 import {
   assertWarmReconnectStopBoundary,
+  assertWarmReconnectPilotFingerprints,
   canReleaseWarmReconnectInitialPilotLock,
   computeWarmReconnectPilotFingerprints,
   buildWarmReconnectPilotEmailPreview,
@@ -11,6 +12,7 @@ import {
   isWarmReconnectPilotApprovalReplay,
   isWarmReconnectPilotLaunchReplay,
   isWarmReconnectRecipientDecisionReplay,
+  materializeWarmReconnectPilot,
   requestWarmReconnectPilotLaunch,
   WARM_RECONNECT_EXECUTION_POLICY,
 } from "@/lib/crm/warm-reconnect-activation";
@@ -150,7 +152,52 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
-  it.each([1, 10])("requires fresh exact audience approval and the batch launch acknowledgement for %i follow-on recipients", (size) => {
+  it("freezes neutral greetings before review without changing source names or consent", () => {
+    const candidates = [1, 2, 3, 4, 5].map(candidate);
+    const names = ["Contact", "Dr. Taylor Example", "Example, Jordan", "Screen Printing", "alex Example"];
+    candidates.forEach((row, index) => { row.displayName = names[index]; });
+    const pilot = create({ candidates, request: request({
+      contentMode: "approved_design_v2",
+      sender: { ...request().sender, legalEntity: "Marcus Rosser / Rosser Gallery", replyTo: "mrosser@rossergallery.com" },
+    }) });
+
+    expect(pilot.recipients.map(row => row.greetingName)).toEqual(["there", "there", "there", "there", "Alex"]);
+    expect(candidates.map(row => row.displayName)).toEqual(names);
+    expect(pilot.recipients.every(row => row.decision.permissionState === "unknown" && !row.decision.relationshipAttested)).toBe(true);
+    expect(pilot.approval).toBeNull();
+    const preview = buildWarmReconnectPilotEmailPreview(pilot)!;
+    expect(preview.greetingName).toBe("there");
+    expect(preview.plainText).toContain("Hi there,");
+    expect(preview.html).toContain("Hi there,");
+
+    const changed = structuredClone(pilot);
+    changed.recipients[0].greetingName = "Taylor";
+    const fingerprints = computeWarmReconnectPilotFingerprints(changed);
+    expect(fingerprints.artifactFingerprint).toBe(pilot.fingerprints.artifactFingerprint);
+    expect(fingerprints.audienceFingerprint).not.toBe(pilot.fingerprints.audienceFingerprint);
+    expect(fingerprints.actionFingerprint).not.toBe(pilot.fingerprints.actionFingerprint);
+    expect(() => assertWarmReconnectPilotFingerprints(changed)).toThrow(/changed|drift/i);
+  });
+
+  it("keeps already stored greetings and fingerprints when materializing or previewing a pilot", () => {
+    const stored = create({ request: request({
+      contentMode: "approved_design_v2",
+      sender: { ...request().sender, legalEntity: "Marcus Rosser / Rosser Gallery", replyTo: "mrosser@rossergallery.com" },
+    }) });
+    // Synthetic pre-change pilot: an uncertain label was already reviewed.
+    stored.recipients[0].greetingName = "Contact";
+    stored.fingerprints = computeWarmReconnectPilotFingerprints(stored);
+    const original = structuredClone(stored);
+    const materialized = materializeWarmReconnectPilot(stored, { googleReady: true, now: new Date("2026-08-12T12:00:00.000Z") });
+
+    expect(materialized.recipients).toEqual(original.recipients);
+    expect(materialized.fingerprints).toEqual(original.fingerprints);
+    expect(assertWarmReconnectPilotFingerprints(materialized)).toEqual(original.fingerprints);
+    expect(buildWarmReconnectPilotEmailPreview(materialized)!.plainText).toContain("Hi Contact,");
+    expect(stored).toEqual(original);
+  });
+
+  it.each([1, 4, 10, 11, 20])("requires fresh exact audience approval and the batch launch acknowledgement for %i follow-on recipients", (size) => {
     const candidates = Array.from({ length: size }, (_, index) => candidate(index + 20));
     const pilot = createWarmReconnectPilot({
       pilotId: "follow-on", workspaceId: "workspace-1", ownerUid: "owner-1", legacyDncOrgId: "org-1",

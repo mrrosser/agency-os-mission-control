@@ -6,6 +6,7 @@ import { POST as postApproval } from "@/app/api/crm/warm-reconnect/pilots/[pilot
 import { POST as postLaunch } from "@/app/api/crm/warm-reconnect/pilots/[pilotId]/launch/route";
 import { POST as postStop } from "@/app/api/crm/warm-reconnect/pilots/[pilotId]/stop/route";
 import { requireFirebaseAuth } from "@/lib/api/auth";
+import { ApiError } from "@/lib/api/handler";
 import {
   createWarmReconnectPilotForUid,
   decideWarmReconnectPilotApprovalForUid,
@@ -131,7 +132,39 @@ describe("warm reconnect activation routes", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(response.headers.get("pragma")).toBe("no-cache");
     expect(response.headers.get("x-correlation-id")).toBe("cid");
-    expect(loadMock).toHaveBeenCalledWith("owner-1", expect.anything());
+    expect(loadMock).toHaveBeenCalledWith("owner-1", expect.anything(), undefined, { historyAfter: undefined });
+  });
+
+  it("passes only the authenticated owner's validated history cursor without changing execution routes", async () => {
+    const cursor = "wrp_0123456789abcdef0123456789abcdef";
+    const response = await getActivation(new Request(`http://localhost/api/crm/warm-reconnect/activation?historyAfter=${cursor}`) as never, context() as never);
+    expect(response.status).toBe(200);
+    expect(loadMock).toHaveBeenCalledExactlyOnceWith("owner-1", expect.anything(), undefined, { historyAfter: cursor });
+    expect(createMock).not.toHaveBeenCalled();
+    expect(launchMock).not.toHaveBeenCalled();
+    expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  });
+
+  it.each(["historyAfter=", "historyAfter=a&historyAfter=b", "historyAfter=a%2Fb", "historyAfter=..", "historyAfter=" + "x".repeat(201), "historyAfter=a&ownerUid=other", "limit=1000"])("rejects unsupported or unsafe history parameters: %s", async query => {
+    const response = await getActivation(new Request(`http://localhost/api/crm/warm-reconnect/activation?${query}`) as never, context() as never);
+    expect(response.status).toBe(400);
+    expect(loadMock).not.toHaveBeenCalled();
+    expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  });
+
+  it("requires Firebase authentication before any history read or cursor validation", async () => {
+    authMock.mockRejectedValueOnce(new ApiError(401, "Authentication required"));
+    const response = await getActivation(new Request("http://localhost/api/crm/warm-reconnect/activation?historyAfter=bad%2Fpath") as never, context() as never);
+    expect(response.status).toBe(401);
+    expect(loadMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the repository owner-role rejection for a history read", async () => {
+    loadMock.mockRejectedValueOnce(new ApiError(403, "Owner access required"));
+    const response = await getActivation(new Request("http://localhost/api/crm/warm-reconnect/activation?historyAfter=pilot-1") as never, context() as never);
+    expect(response.status).toBe(403);
+    expect(loadMock).toHaveBeenCalledExactlyOnceWith("owner-1", expect.anything(), undefined, { historyAfter: "pilot-1" });
+    expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
   });
 
   it("accepts only a strict exact-five pilot request", async () => {

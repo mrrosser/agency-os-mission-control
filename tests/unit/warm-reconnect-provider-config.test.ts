@@ -23,12 +23,14 @@ vi.mock("@/lib/google/account-token-store", () => ({
 
 function emptyReadOnlyDb(): Firestore {
   const query = {
-    collection: vi.fn(), doc: vi.fn(), where: vi.fn(), limit: vi.fn(),
-    get: vi.fn(async () => ({ docs: [], size: 0 })),
+    collection: vi.fn(), doc: vi.fn(), where: vi.fn(), limit: vi.fn(), orderBy: vi.fn(),
+    get: vi.fn(async () => ({ docs: [], size: 0, data: () => undefined })),
+    runTransaction: vi.fn(),
   };
-  for (const method of [query.collection, query.doc, query.where, query.limit]) {
+  for (const method of [query.collection, query.doc, query.where, query.limit, query.orderBy]) {
     method.mockReturnValue(query);
   }
+  query.runTransaction.mockImplementation(async callback => callback({ get: query.get }));
   return query as unknown as Firestore;
 }
 

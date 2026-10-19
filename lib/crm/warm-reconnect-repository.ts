@@ -12,12 +12,14 @@ import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { resolveWarmReconnectCampaignContentMode } from "@/lib/crm/warm-reconnect-campaign-design";
 import { isWarmReconnectProviderSendEnabled } from "@/lib/crm/warm-reconnect-provider-config";
+import { loadWarmReconnectHistory } from "@/lib/crm/warm-reconnect-history";
 import type { Logger } from "@/lib/logging";
 import {
   WARM_RECONNECT_ACTIVATION_SCHEMA_VERSION,
   WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES,
   WARM_RECONNECT_APPROVAL_TTL_HOURS,
   WARM_RECONNECT_INITIAL_PILOT_SIZE,
+  WARM_RECONNECT_MAX_PILOT_SIZE,
   type CreateWarmReconnectPilotRequest,
   type WarmReconnectActivationResponse,
   type WarmReconnectCandidate,
@@ -82,7 +84,6 @@ const COLLECTIONS = {
 } as const;
 
 const MAX_CONTACT_POINT_SCAN = 500;
-const MAX_PILOTS_RETURNED = 20;
 const MAX_SOURCE_EVIDENCE_PER_CANDIDATE = 25;
 
 type GoogleProfileState = WarmReconnectActivationResponse["googleProfiles"][number];
@@ -684,36 +685,33 @@ function preferenceOriginFromEnv(): string {
 export async function loadWarmReconnectActivationForUid(
   uid: string,
   log: Logger,
-  db: Firestore = getAdminDb()
+  db: Firestore = getAdminDb(),
+  options: { historyAfter?: string } = {}
 ): Promise<WarmReconnectActivationResponse> {
   const access = await assertPortfolioRegistryAccess(uid, db);
   assertOwnerAccess(uid, access.workspaceId, access.role);
   const legacyDncOrgId = resolveWarmReconnectLegacyDncOrgId(uid, access.workspaceId);
-  const [pool, googleProfiles, pilotSnapshots] = await Promise.all([
+  const [pool, googleProfiles, history] = await Promise.all([
     loadCandidatePool(access.workspaceId, db, legacyDncOrgId),
     loadGoogleProfileStates(uid),
-    db
-      .collection(COLLECTIONS.pilots)
-      .where("workspaceId", "==", access.workspaceId)
-      .where("ownerUid", "==", uid)
-      .limit(MAX_PILOTS_RETURNED)
-      .get(),
+    loadWarmReconnectHistory({ db, workspaceId: access.workspaceId, uid, historyAfter: options.historyAfter }),
   ]);
+  const candidates = pool.candidates.filter(candidate =>
+    !history.excludedPersonIds.has(candidate.personId) && !history.excludedEmailKeys.has(candidate.emailKey));
+  const excludedCount = pool.excludedCount + pool.candidates.length - candidates.length;
   const pilots = await Promise.all(
-    pilotSnapshots.docs.map(async (snapshot) => {
-      const stored = pilotFromSnapshot(snapshot);
+    history.pilots.map(async (stored) => {
       const materialized = materializeWarmReconnectPilot(stored, {
         googleReady: googleReady(googleProfiles, stored),
       });
       return hydratePilotView(materialized, db);
     })
   );
-  pilots.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
   log.info("crm.warm_reconnect.activation_loaded", {
     sourceScope: "authenticated_default_workspace_owner",
-    candidateCount: pool.candidates.length,
-    excludedCount: pool.excludedCount,
+    candidateCount: candidates.length,
+    excludedCount,
     pilotCount: pilots.length,
     contactScanTruncated: pool.truncated,
   });
@@ -724,18 +722,20 @@ export async function loadWarmReconnectActivationForUid(
     workspace: { accessRole: "owner" },
     googleProfiles,
     candidateSummary: {
-      eligibleForReview: pool.candidates.length,
-      excluded: pool.excludedCount,
-      returned: pool.candidates.length,
+      eligibleForReview: candidates.length,
+      excluded: excludedCount,
+      returned: candidates.length,
       truncated: pool.truncated,
     },
-    candidates: pool.candidates,
+    candidates,
     pilots,
+    control: history.control,
+    history: history.history,
     constraints: {
       initialPilotSize: WARM_RECONNECT_INITIAL_PILOT_SIZE,
       expandedPilotRange: [6, 10],
       expandedPilotRequiresNewApproval: true,
-      followOnBatchRange: [1, 10],
+      followOnBatchRange: [1, WARM_RECONNECT_MAX_PILOT_SIZE],
       approvalTtlHours: WARM_RECONNECT_APPROVAL_TTL_HOURS,
       launchAuthorizesExactProviderExecution: true,
       providerExecutionEnabled: isWarmReconnectProviderSendEnabled(),

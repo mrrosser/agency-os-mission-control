@@ -4,7 +4,7 @@
 
 The CRM Outreach panel reports each batch's durable send receipts and confirmed
 preference choices. A completed first pilot unlocks a next recipient list of
-1–10 people. Subsequent batches inherit the completed predecessor's approved
+1–20 people. Subsequent batches inherit the completed predecessor's approved
 email, sender, artwork approval and preference contract. Each new list still
 requires its individual relationship review, current gates, exact-list approval
 and an explicit **Start approved N-email batch** action. Creating a list or
@@ -14,6 +14,8 @@ The approval lasts 24 hours. This is an expiry, not a waiting period. A launched
 batch sends at most one invitation per dispatcher invocation, at least 60 seconds
 after the previous provider attempt. A scheduler tick every two minutes is a
 suitable cadence. Drift, suppression or uncertain delivery stops execution.
+At that cadence, a full 20-person batch takes roughly 40 minutes; the larger
+batch reduces repeated list review, while each provider invocation stays bounded.
 An uncertain provider outcome is never retried automatically.
 
 Completed predecessors and the original campaign lock are immutable. An atomic
@@ -21,6 +23,20 @@ follow-on lock prevents parallel successor batches and stale workers. Durable
 campaign invitation records exclude previously invited people and addresses,
 including changed addresses or merged CRM identities. Never clear a lock or
 delete a receipt to make a batch available.
+
+The activation view resolves the current batch and completed predecessor from
+their exact campaign locks, independently of the displayed history page. History
+is paged in bounded document-ID order, not globally by creation time. Changing
+pages must not change which batch can be reviewed, approved or launched.
+Invitation-ledger exclusions cover the bounded workspace history, including
+people and addresses outside the displayed page; incomplete or malformed
+evidence blocks preparation rather than silently dropping duplicate protection.
+
+New pilots freeze their greeting before audience approval. Uncertain labels
+such as a nameless contact, honorific, reversed name or recognized organization
+use the neutral greeting **Hi there,**. Review the displayed frozen greeting
+alongside the recipient. Existing pilots keep their previously approved
+greetings and fingerprints; this does not rename a CRM person or change consent.
 
 ## Results and measurement limits
 

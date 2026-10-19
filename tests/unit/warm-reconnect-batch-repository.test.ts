@@ -234,10 +234,10 @@ function releasedHistoricalLedger(recipient: WarmReconnectCandidate) {
   };
 }
 
-function seedReleasedHolder(f: ReturnType<typeof fixture>) {
+function seedReleasedHolder(f: ReturnType<typeof fixture>, size = 2) {
   // This prior audience differs from the proposed child, so the holder proof
   // must catch corruption independently of the new audience's history queries.
-  const holder = createPilot("released-holder", [40, 41].map(candidate), f.parent, f.notBeforeMs);
+  const holder = createPilot("released-holder", Array.from({ length: size }, (_, index) => candidate(40 + index)), f.parent, f.notBeforeMs);
   holder.recipients = holder.recipients.map((recipient) => ({
     ...recipient,
     decision: {
@@ -348,6 +348,24 @@ describe("warm reconnect follow-on repository transactions", () => {
     expect((await f.reserve()).replayed).toBe(false);
     expect(f.records.get(FOLLOW_ON_LOCK)).toMatchObject({ state: "active", pilotId: "child-a", priorPilotId: "released-holder" });
     for (const [path, data] of preserved) expect(f.records.get(path)).toEqual(data);
+  });
+
+  it("checks a twenty-person released holder beyond the former eleven-receipt read bound", async () => {
+    const f = fixture();
+    const old = seedReleasedHolder(f, 20);
+    const base = f.records.get(old.receiptPath)!;
+    // The first eleven rows are benign pre-provider stops. The twelfth row
+    // must not be hidden by the old query limit when the audience is larger.
+    for (let index = 1; index <= 11; index += 1) {
+      const receiptId = `extra-${index}`;
+      f.put(`${old.holderPath}/delivery_receipts/${receiptId}`, {
+        ...base, receiptId, status: index === 11 ? "delivery_unknown" : "stopped_before_provider",
+      });
+    }
+    const lock = structuredClone(f.records.get(FOLLOW_ON_LOCK));
+    await expect(f.reserve()).rejects.toThrow("unresolved execution evidence");
+    expect(f.writes).toEqual([]);
+    expect(f.records.get(FOLLOW_ON_LOCK)).toEqual(lock);
   });
 
   it.each([

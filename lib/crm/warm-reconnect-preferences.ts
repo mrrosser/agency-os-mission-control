@@ -116,6 +116,11 @@ function normalizeTopics(value: unknown): WarmReconnectTopics {
   };
 }
 
+function contactIsOptedOut(contact: Record<string, unknown>): boolean {
+  return typeof contact.defaultPermissionState === "string" &&
+    contact.defaultPermissionState.trim().toLowerCase() === "opted_out";
+}
+
 function requestedBusinessTopics(value: unknown): WarmReconnectTopics | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
@@ -459,14 +464,15 @@ async function inspectPreferences(
     return genericResult();
   }
   const state = (stateSnapshot.data() || {}) as PreferenceStateDocument;
-  const globallyUnsubscribed = suppressionSnapshot.exists || state.globallyUnsubscribed === true;
+  const globallyUnsubscribed = suppressionSnapshot.exists || state.globallyUnsubscribed === true ||
+    contactIsOptedOut(contactData);
   const expired = tokenDocument.capabilityExpiresAtMs <= observedNowMs;
   return {
     ok: true,
     message: GENERIC_MESSAGE,
     available: true,
     expired,
-    canUpdatePreferences: !expired && !globallyUnsubscribed,
+    canUpdatePreferences: !expired && !globallyUnsubscribed && contactData.suppressed !== true,
     canUnsubscribe: true,
     globallyUnsubscribed,
     topics: globallyUnsubscribed ? emptyTopics() : normalizeTopics(state.topics),
@@ -518,15 +524,18 @@ async function savePreferences(
     const contactData = contactSnapshot.data() || {};
     if (!contactSnapshot.exists || !contactMatchesToken(contactData, tokenDocument)) return;
     const expired = tokenDocument.capabilityExpiresAtMs <= observedNowMs;
-    const suppressed = suppressionSnapshot.exists ||
-      (stateSnapshot.data() as PreferenceStateDocument | undefined)?.globallyUnsubscribed === true;
-    if (expired || suppressed) {
+    const state = (stateSnapshot.data() || {}) as PreferenceStateDocument;
+    const globallyUnsubscribed = suppressionSnapshot.exists || state.globallyUnsubscribed === true ||
+      contactIsOptedOut(contactData);
+    // A delivery suppression blocks new choices without becoming an opt-out.
+    if (expired || globallyUnsubscribed || contactData.suppressed === true) {
       outcome = {
         ...genericResult(),
         available: true,
         expired,
         canUnsubscribe: true,
-        globallyUnsubscribed: suppressed,
+        globallyUnsubscribed,
+        topics: globallyUnsubscribed ? emptyTopics() : normalizeTopics(state.topics),
       };
       return;
     }

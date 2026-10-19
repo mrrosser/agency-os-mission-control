@@ -20,6 +20,8 @@ const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_MESSAGES = 100;
 const MAX_EVENTS = 200;
+// At most two 20-second waves for a full batch, within the UI refresh deadline.
+const MAX_CONCURRENT_THREADS = 10;
 const PROVIDER_ID = /^[a-f0-9]{1,64}$/;
 const HEADERS = ["From","To","Message-ID","In-Reply-To","References","Auto-Submitted","Content-Type"];
 
@@ -115,8 +117,8 @@ export async function refreshWarmReconnectResponsesForUid(input:{uid:string;pilo
   const token=await resolveWarmReconnectReadToken(input.uid,expectedEmail,{fetchImpl,log:input.log});
   const observedAt=new Date().toISOString();
   const events:WarmReconnectReplyEvent[]=[];let inspectedThreads=0;
-  for(let start=0;start<sent.length;start+=5){
-    await Promise.all(sent.slice(start,start+5).map(async receipt=>{
+  for(let start=0;start<sent.length;start+=MAX_CONCURRENT_THREADS){
+    await Promise.all(sent.slice(start,start+MAX_CONCURRENT_THREADS).map(async receipt=>{
       const params=new URLSearchParams({format:"metadata",fields:"id,messages(id,threadId,labelIds,internalDate,payload(headers))"});
       for(const name of HEADERS)params.append("metadataHeaders",name);
       try{const thread=await metadataRequest(`/threads/${receipt.providerThreadId}?${params}`,token,fetchImpl,input.log);events.push(...classifyWarmReconnectThread({pilot,receipt,thread}));inspectedThreads++;}

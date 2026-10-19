@@ -355,7 +355,7 @@ function followOnExecutorFixture(cap: number) {
 }
 
 describe("warm reconnect provider executor", () => {
-  it.each([1, 4, 10])("completes a follow-on batch at its exact cap %i", async (cap) => {
+  it.each([1, 4, 10, 11, 20])("completes a follow-on batch at its exact cap %i", async (cap) => {
     const fixture = followOnExecutorFixture(cap);
     const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-final", providerThreadId: "thread-final", correlationId: "batch-completion", now: RUN_AT, db: fixture.input.db });
     expect(result).toEqual({ complete: true });
@@ -370,6 +370,17 @@ describe("warm reconnect provider executor", () => {
     fixture.documents.get(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`)!.sentCount = 4;
     const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-fifth", providerThreadId: "thread-fifth", correlationId: "batch-midpoint", now: RUN_AT, db: fixture.input.db });
     expect(result).toEqual({ complete: false });
+  });
+
+  it.each([4, 9, 18])("keeps a twenty-person batch open after advancing from %i prior sends", async (priorSends) => {
+    const fixture = followOnExecutorFixture(20);
+    fixture.documents.get(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`)!.sentCount = priorSends;
+    const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-next", providerThreadId: "thread-next", correlationId: "batch-progress", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ complete: false });
+    expect(fixture.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: `crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state` }),
+      expect.objectContaining({ sentCount: priorSends + 1, complete: false }), { merge: true }
+    );
   });
 
   it("waits for the parent cadence without creating an executor or claiming a recipient", async () => {

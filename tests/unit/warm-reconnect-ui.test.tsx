@@ -8,11 +8,24 @@ import { WarmReconnectActivation } from "@/components/crm/warm-reconnect-activat
 import { buildWarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect";
 import type { PortfolioCrmRegistrySummary } from "@/lib/crm/portfolio-registry-types";
 
-const hookState = vi.hoisted(() => ({ values: null as unknown[] | null, overrides: {} as Record<number, unknown>, index: 0 }));
+const hookState = vi.hoisted(() => ({
+  values: null as unknown[] | null, overrides: {} as Record<number, unknown>, index: 0,
+  interactive: false, refs: [] as Array<{ current: unknown }>, refIndex: 0,
+}));
 const authState = vi.hoisted(() => ({ user: null as { uid: string } | null }));
 
 vi.mock("@/components/providers/auth-provider", () => ({
   useAuth: () => authState,
+}));
+
+vi.mock("@/lib/api/client", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/api/client")>(),
+  buildAuthHeaders: vi.fn(async () => ({ Authorization: "Bearer synthetic-test-token" })),
+}));
+
+vi.mock("@/components/crm/google-sender-connection-client", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/components/crm/google-sender-connection-client")>(),
+  requestGoogleSenderConnection: vi.fn(async () => { throw new Error("Synthetic connection did not finish"); }),
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -21,27 +34,60 @@ vi.mock("react", async (importOriginal) => {
     ...react,
     useState: (initial: unknown) => {
       const index = hookState.index++;
+      if (hookState.interactive) {
+        const values = hookState.values ||= [];
+        if (!(index in values)) values[index] = Object.hasOwn(hookState.overrides, index)
+          ? hookState.overrides[index] : typeof initial === "function" ? initial() : initial;
+        return [values[index], (next: unknown) => {
+          values[index] = typeof next === "function" ? next(values[index]) : next;
+        }];
+      }
       return react.useState(
         Object.hasOwn(hookState.overrides, index) ? hookState.overrides[index]
           : hookState.values && index < hookState.values.length ? hookState.values[index] : initial
       );
     },
+    useRef: (initial: unknown) => {
+      if (!hookState.interactive) return react.useRef(initial);
+      const index = hookState.refIndex++;
+      return hookState.refs[index] ||= { current: initial };
+    },
+    useEffect: (effect: React.EffectCallback, deps?: React.DependencyList) => {
+      if (!hookState.interactive) react.useEffect(effect, deps);
+    },
+    useCallback: (callback: (...args: never[]) => unknown, deps: React.DependencyList) =>
+      hookState.interactive ? callback : react.useCallback(callback, deps),
+    useMemo: (factory: () => unknown, deps: React.DependencyList) =>
+      hookState.interactive ? factory() : react.useMemo(factory, deps),
   };
 });
 
 function activationFixture(providerExecutionEnabled: unknown, approved = false) {
   return {
+    schemaVersion: "crm.warm-reconnect-activation.v1",
+    dataClassification: "authenticated_contact_review",
+    providerActions: "none",
+    workspace: { accessRole: "owner" },
     googleProfiles: [],
     candidates: [],
     candidateSummary: { eligibleForReview: 0, returned: 0, excluded: 0, truncated: false },
     constraints: { providerExecutionEnabled },
+    control: {
+      initialPilotId: "fixture-pilot" as string | null,
+      activePilotId: "fixture-pilot" as string | null,
+      followOnParentPilotId: null as string | null,
+      canCreateInitialPilot: false,
+      blockedReason: null as string | null,
+    },
+    history: { pageSize: 20, after: null as string | null, nextCursor: null as string | null, pilotIds: ["fixture-pilot"] },
     pilots: [{
       pilotId: "fixture-pilot",
       status: approved ? "approved" : "needs_campaign_approval",
       contentMode: "plain_text",
+      fingerprints: { artifactFingerprint: "artifact", audienceFingerprint: "audience", actionFingerprint: "action" },
       recipients: [],
       gates: [],
-      approval: approved ? { expiresAt: "2030-01-01T00:00:00.000Z" } : null,
+      approval: approved ? { approvalId: "synthetic-approval", expiresAt: "2030-01-01T00:00:00.000Z" } : null,
       availableActions: { canApprove: false, canLaunch: approved, canStop: true },
     }],
   };
@@ -61,6 +107,7 @@ function completedInitialFixture() {
   const activation = activationFixture(true);
   const recipient = (id: string, name: string) => ({
     recipientId: id, displayName: name, email: `${id}@example.test`,
+    greetingName: name.split(" ")[0],
     permissionState: "unknown", sourceEvidence: [], decision: { status: "eligible" },
   });
   const oldRecipients = Array.from({ length: 5 }, (_, index) => recipient(`invited-${index + 1}`, `Invited ${index + 1}`));
@@ -70,7 +117,9 @@ function completedInitialFixture() {
       profileId: "rosser_gallery_send", businessId: "rosser_nft_gallery", label: "Gallery",
       connected: true, gmailCapable: true, accountEmail: "mrosser@rossergallery.com", state: "connected",
     }],
-    candidates: [...oldRecipients, ...Array.from({ length: 11 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`))],
+    candidates: Array.from({ length: 21 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`)),
+    control: { ...activation.control, initialPilotId: "completed-initial" as string | null, activePilotId: null as string | null, followOnParentPilotId: "completed-initial" as string | null },
+    history: { ...activation.history, pilotIds: ["completed-initial"] },
     pilots: [{
       ...activation.pilots[0], pilotId: "completed-initial", status: "launch_requested",
       tranche: "initial_5", recipientCap: 5, recipients: oldRecipients,
@@ -87,6 +136,10 @@ function completedInitialFixture() {
 
 function loadCompletedInitialResults(complete: boolean, selected: string[] = []) {
   const activation = completedInitialFixture();
+  if (!complete) {
+    activation.control.activePilotId = "completed-initial";
+    activation.control.followOnParentPilotId = null;
+  }
   authState.user = { uid: "synthetic-owner" };
   hookState.values = [activation, authState.user.uid, false, null];
   hookState.overrides[4] = selected;
@@ -100,6 +153,25 @@ function loadCompletedInitialResults(complete: boolean, selected: string[] = [])
 
 function buttonContaining(html: string, label: string) {
   return html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g)?.find((button) => button.includes(label));
+}
+
+function treeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(treeText).join("");
+  return React.isValidElement<{ children?: React.ReactNode }>(node) ? treeText(node.props.children) : "";
+}
+
+function treeButton(node: React.ReactNode, label: string): React.ReactElement<{ onClick: () => void; disabled?: boolean }> | undefined {
+  if (Array.isArray(node)) return node.map(child => treeButton(child, label)).find(Boolean);
+  if (!React.isValidElement<{ children?: React.ReactNode; onClick?: () => void; disabled?: boolean }>(node)) return undefined;
+  if (node.props.onClick && treeText(node).trim().startsWith(label)) return node as React.ReactElement<{ onClick: () => void; disabled?: boolean }>;
+  return treeButton(node.props.children, label);
+}
+
+function renderInteractive() {
+  hookState.index = 0;
+  hookState.refIndex = 0;
+  return WarmReconnectActivation({ campaign: buildWarmReconnectCampaignDraft(summary) });
 }
 
 const summary: PortfolioCrmRegistrySummary = {
@@ -146,7 +218,11 @@ describe("warm reconnect campaign UI", () => {
     hookState.values = null;
     hookState.overrides = {};
     hookState.index = 0;
+    hookState.interactive = false;
+    hookState.refs = [];
+    hookState.refIndex = 0;
     authState.user = null;
+    vi.unstubAllGlobals();
   });
 
   it("renders the copy, owned artwork, exact aggregates, and zero-authority boundary", () => {
@@ -245,7 +321,7 @@ describe("warm reconnect campaign UI", () => {
       ? "provider currently disabled"
       : "provider enabled");
     expect(launchButton(html)).toContain(enabled
-      ? "Authorize exact five-email launch · provider enabled"
+      ? "Authorize exact five-email launch"
       : "Authorize exact five-email launch · provider currently disabled");
     expect(launchButton(html)).toContain('disabled=""');
   });
@@ -333,11 +409,11 @@ describe("warm reconnect campaign UI", () => {
     expect(html).not.toContain("fixture-pilot");
   });
 
-  it.each([1, 10])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
+  it.each([1, 4, 10, 11, 20])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
     loadCompletedInitialResults(true, Array.from({ length: count }, (_, index) => `next-${index + 1}`));
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
 
-    expect(html).toContain("Select 1–10");
+    expect(html).toContain("Select 1–20");
     expect(html).toContain("Keep the approved email");
     expect(html).toContain("next-1@example.test");
     expect(html).not.toContain("invited-1@example.test");
@@ -345,9 +421,9 @@ describe("warm reconnect campaign UI", () => {
     expect(buttonContaining(html, "Prepare next batch for review")).not.toContain('disabled=""');
     expect(launchButton(html)).toBeUndefined();
     expect(buttonContaining(html, "Start approved")).toBeUndefined();
-    if (count === 10) {
-      const eleventhCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-11@example.test"));
-      expect(eleventhCandidate).toContain('disabled=""');
+    if (count === 20) {
+      const extraCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-21@example.test"));
+      expect(extraCandidate).toContain('disabled=""');
     }
   });
 
@@ -355,10 +431,16 @@ describe("warm reconnect campaign UI", () => {
     loadCompletedInitialResults(false, ["next-1"]);
     if (completion === null) hookState.overrides[15] = null;
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
-    expect(html).not.toContain("Select 1–10");
+    expect(html).not.toContain("Select 1–20");
     expect(buttonContaining(html, "Prepare next batch for review")).toBeUndefined();
     expect(html).toContain("invited-1@example.test");
     expect(launchButton(html)).toContain('disabled=""');
+  });
+
+  it("does not prepare a twenty-one-person selection even when client state is oversized", () => {
+    loadCompletedInitialResults(true, Array.from({ length: 21 }, (_, index) => `next-${index + 1}`));
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(buttonContaining(html, "Prepare next batch for review")).toContain('disabled=""');
   });
 
   it.each([false, true])("labels an active three-recipient batch and requires its explicit approval to launch: %s", (approved) => {
@@ -366,10 +448,13 @@ describe("warm reconnect campaign UI", () => {
     activation.pilots[0] = {
       ...activation.pilots[0], pilotId: "follow-on-pilot", tranche: "follow_on", recipientCap: 3,
       status: approved ? "approved" : "needs_campaign_approval",
-      recipients: activation.candidates.slice(5, 8),
-      approval: approved ? { expiresAt: "2030-01-01T00:00:00.000Z" } : null,
+      recipients: activation.candidates.slice(0, 3),
+      approval: approved ? { approvalId: "synthetic-approval", expiresAt: "2030-01-01T00:00:00.000Z" } : null,
       availableActions: { canApprove: !approved, canLaunch: approved, canStop: true },
     };
+    activation.control.activePilotId = "follow-on-pilot";
+    activation.control.followOnParentPilotId = null;
+    activation.history.pilotIds = ["follow-on-pilot"];
     authState.user = { uid: "synthetic-owner" };
     hookState.values = [activation, authState.user.uid, false, null];
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
@@ -382,6 +467,184 @@ describe("warm reconnect campaign UI", () => {
       expect(html).toContain("Exact 3-person audience");
       expect(html).not.toContain("Exact five-person audience");
     }
+  });
+
+  it("keeps the authoritative 21st batch active despite a full history page and truncated results", () => {
+    const activation = completedInitialFixture();
+    const head = {
+      ...activation.pilots[0], pilotId: "zz-current-batch", tranche: "follow_on", recipientCap: 3,
+      recipients: activation.candidates.slice(0, 3), status: "approved",
+      approval: { approvalId: "synthetic-approval", expiresAt: "2030-01-01T00:00:00.000Z" },
+      availableActions: { canApprove: false, canLaunch: true, canStop: true },
+    };
+    const page = Array.from({ length: 20 }, (_, index) => ({
+      ...head, pilotId: `history-${String(index + 1).padStart(2, "0")}`, status: "stopped", recipients: [],
+    }));
+    activation.pilots = [...page, head];
+    activation.control.activePilotId = head.pilotId;
+    activation.control.followOnParentPilotId = null;
+    activation.history.pilotIds = page.map(row => row.pilotId);
+    activation.history.nextCursor = page[19].pilotId;
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    hookState.overrides[15] = { ownerUid: authState.user.uid, data: {
+      pilots: [{ pilotId: page[0].pilotId, complete: true }], pilotsTruncated: true,
+    } };
+
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(html).toContain("Current batch: zz-current-batch");
+    expect(html).toContain("20 batches on this page; more pages available.");
+    expect(html).toContain("listed by document ID, not date");
+    expect(html).toContain("next-1@example.test");
+    expect(buttonContaining(html, "Start approved 3-email batch")).not.toContain('disabled=""');
+    expect(buttonContaining(html, "Prepare next batch for review")).toBeUndefined();
+  });
+
+  it("uses the exact completed parent outside the history and results pages", () => {
+    const activation = loadCompletedInitialResults(true, ["next-1"]);
+    const parent = { ...activation.pilots[0], pilotId: "zz-completed-parent", tranche: "follow_on", batchSequence: 20 };
+    const historical = { ...activation.pilots[0], pilotId: "history-01", status: "stopped", recipients: [] };
+    activation.pilots = [historical, parent];
+    activation.control.followOnParentPilotId = parent.pilotId;
+    activation.history.pilotIds = [historical.pilotId];
+    hookState.overrides[15] = { ownerUid: authState.user!.uid, data: { pilots: [], pilotsTruncated: true } };
+
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(html).toContain("Completed parent batch: zz-completed-parent");
+    expect(buttonContaining(html, "Prepare next batch for review")).not.toContain('disabled=""');
+    expect(launchButton(html)).toBeUndefined();
+  });
+
+  it.each(["control", "history"] as const)("withholds controls when %s metadata is absent", (field) => {
+    const activation = activationFixture(true, true);
+    delete (activation as Partial<typeof activation>)[field];
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+    expect(launchButton(html)).toBeUndefined();
+    expect(html).not.toContain("fixture-pilot");
+    expect(html).toContain("Provider execution status is unknown");
+  });
+
+  it("shows the stored neutral greeting without substituting the contact label", () => {
+    const activation = loadCompletedInitialResults(false);
+    activation.pilots[0].recipients[0].displayName = "Contact";
+    activation.pilots[0].recipients[0].greetingName = "there";
+    const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
+    expect(html).toContain("Email greeting: Hi there,");
+    expect(html).not.toContain("Email greeting: Hi Contact,");
+  });
+
+  it("allows initial preparation only when the server explicitly permits it", () => {
+    const activation = completedInitialFixture();
+    activation.pilots = [];
+    activation.history.pilotIds = [];
+    activation.control = { initialPilotId: null, activePilotId: null, followOnParentPilotId: null, canCreateInitialPilot: true, blockedReason: null };
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    hookState.overrides[4] = activation.candidates.slice(0, 5).map(row => row.recipientId);
+    hookState.overrides[5] = {
+      senderName: "Synthetic Sender", legalEntity: "Synthetic Entity", replyTo: "sender@example.test",
+      physicalPostalAddress: "123 Example Street", profileId: "rosser_gallery_send", contentMode: "plain_text",
+      artworkEvidenceNote: "", artworkApproved: false,
+    };
+    let html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(buttonContaining(html, "Prepare exact five-person review")).not.toContain('disabled=""');
+
+    activation.control.canCreateInitialPilot = false;
+    activation.control.blockedReason = "Reconcile the campaign before preparing another batch.";
+    hookState.index = 0;
+    html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
+    expect(html).toContain(activation.control.blockedReason);
+    expect(buttonContaining(html, "Prepare exact five-person review")).toContain('disabled=""');
+  });
+
+  it("pages history with GET requests while keeping the exact active batch visible", async () => {
+    const first = activationFixture(true, true);
+    const history = { ...first.pilots[0], pilotId: "history-01", status: "stopped" };
+    first.pilots.unshift(history);
+    first.history.pilotIds = [history.pilotId];
+    first.history.nextCursor = history.pilotId;
+    const next = structuredClone(first);
+    next.pilots[0].pilotId = "history-02";
+    next.history = { pageSize: 20, after: history.pilotId, nextCursor: null, pilotIds: ["history-02"] };
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [first, authState.user.uid, false, null];
+    hookState.interactive = true;
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(next)).mockResolvedValueOnce(Response.json(first));
+    vi.stubGlobal("fetch", fetchMock);
+
+    treeButton(renderInteractive(), "Next history page")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[2]).toBe(false));
+    let tree = renderInteractive();
+    expect(treeText(tree)).toContain("Current batch: fixture-pilot");
+    expect(treeText(tree)).toContain("history-02");
+    expect(treeButton(tree, "Next history page")!.props.disabled).toBe(true);
+    expect(treeButton(tree, "First history page")!.props.disabled).toBe(false);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/crm/warm-reconnect/activation?historyAfter=history-01");
+
+    treeButton(tree, "First history page")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[2]).toBe(false));
+    tree = renderInteractive();
+    expect(treeText(tree)).toContain("Current batch: fixture-pilot");
+    expect(treeButton(tree, "First history page")!.props.disabled).toBe(true);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/crm/warm-reconnect/activation");
+    expect(fetchMock.mock.calls.every(([, options]) => options.method === "GET")).toBe(true);
+  });
+
+  it("retains the verified head after a failed page load and pauses launch until refresh succeeds", async () => {
+    const activation = completedInitialFixture();
+    activation.control.activePilotId = "completed-initial";
+    activation.control.followOnParentPilotId = null;
+    activation.pilots[0].availableActions.canLaunch = true;
+    activation.pilots[0].approval = { approvalId: "synthetic-approval", expiresAt: "2030-01-01T00:00:00.000Z" };
+    activation.history.nextCursor = "history-20";
+    authState.user = { uid: "synthetic-owner" };
+    hookState.values = [activation, authState.user.uid, false, null];
+    hookState.interactive = true;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ error: "History page unavailable" }, { status: 503 }))
+      .mockResolvedValueOnce(Response.json(activation));
+    vi.stubGlobal("fetch", fetchMock);
+
+    treeButton(renderInteractive(), "Next history page")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[3]).toBe("History page unavailable"));
+    let tree = renderInteractive();
+    expect(treeText(tree)).toContain("Current batch: completed-initial");
+    const launch = treeButton(tree, "Authorize exact five-email launch")!;
+    expect(launch.props.disabled).toBe(true);
+    launch.props.onClick();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Connecting clears the display error but cannot refresh campaign authority.
+    treeButton(tree, "Reconnect Gallery")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[11]).toBe("Synthetic connection did not finish"));
+    expect(hookState.values?.[3]).toBeNull();
+    tree = renderInteractive();
+    expect(treeButton(tree, "Authorize exact five-email launch")!.props.disabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    treeButton(tree, "Refresh controls")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[2]).toBe(false));
+    tree = renderInteractive();
+    expect(hookState.values?.[3]).toBeNull();
+    expect(treeButton(tree, "Authorize exact five-email launch")!.props.disabled).toBe(false);
+    expect(fetchMock.mock.calls.every(([, options]) => options.method === "GET")).toBe(true);
+
+    // An ambiguous mutation also requires a fresh read, even if another flow
+    // clears the shared display error afterward.
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "Launch outcome unavailable" }, { status: 503 }));
+    treeButton(tree, "Authorize exact five-email launch")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[3]).toBe("Launch outcome unavailable"));
+    expect(fetchMock.mock.calls[2][1].method).toBe("POST");
+    tree = renderInteractive();
+    treeButton(tree, "Reconnect Gallery")!.props.onClick();
+    await vi.waitFor(() => expect(hookState.values?.[11]).toBe("Synthetic connection did not finish"));
+    tree = renderInteractive();
+    expect(hookState.values?.[3]).toBeNull();
+    expect(treeButton(tree, "Authorize exact five-email launch")!.props.disabled).toBe(true);
+    treeButton(tree, "Authorize exact five-email launch")!.props.onClick();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("keeps Google consent and pilot mutations on exact bounded routes", () => {

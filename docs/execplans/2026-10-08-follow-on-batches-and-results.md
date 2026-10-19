@@ -35,8 +35,26 @@ Required: lint, unit, smoke, build, high-severity audit, Gitleaks; mocks for pro
 - [x] Baseline and product gaps verified.
 - [x] Operating-mode preference has no reply; default is review each new list, followed by automatic paced dispatch after launch. Approved email is reused.
 - [x] Core batches, reporting, UI and scoped OIDC dispatcher implemented. Independent review hardened predecessor provider-ID uniqueness, released-holder evidence, receipt document identity and truthful batch unsubscribe reporting.
-- [ ] Meaningful tests and required gates passed.
+- [x] Meaningful tests and required gates passed: protected CI 2,126/2,126 tests across 266 files, production build and audit; local TypeScript/lint and Gitleaks. Two local timing failures passed exact reruns without changed thresholds.
 - [ ] Deployment and live readback verified.
 - [ ] Concrete next recipients reviewed and authorized dispatch configured.
 
-Focused checks passed: 157 batch contract/transaction cases, 158 activation/executor cases, 64 dispatcher cases, 45 follow-on route cases, 23 activation UI cases and 24 results/reader/API cases. TypeScript and full lint passed (two existing warnings). Dependency audit passes the unchanged high threshold (18 moderate, zero high/critical). Staged-patch Gitleaks found no leaks. Full unit/smoke/build release gates and live verification are pending at this checkpoint. Operational evidence is kept outside the source repository; no recipient contact details or capability URLs are included in this plan.
+Focused checks passed: 157 batch contract/transaction cases, 158 activation/executor cases, 64 dispatcher cases, 45 follow-on route cases, 23 activation UI cases and 24 results/reader/API cases. TypeScript and full lint passed (two existing warnings). Dependency audit passes the unchanged high threshold (18 moderate, zero high/critical). Staged-patch Gitleaks found no leaks. Operational evidence is kept outside the source repository; no recipient contact details or capability URLs are included in this plan.
+
+## Release checkpoint
+
+PR62 merged normally as `25e28c21b6c90ed7bab325392a16205ab77c8786` after all protected checks passed. Main deployment run `37840238479` passed tests/build but failed before live promotion: Google Artifact Registry and Cloud Functions returned `BILLING_DISABLED`. The console confirms past-due or invalid payment information on the linked billing account; the current project login has limited billing access. A billing administrator must restore active billing. No billing configuration, payment, IAM grant, scheduler or additional send was performed. Live traffic remains 100% on the prior verified revision `ssrleadflowreview-release-37830871641-1`.
+
+Marcus explicitly recognized and approved the exact next four recipients in this thread after seeing their names, addresses, sender and subject. That authorization is saved privately and persists; do not request it again. Next steps after billing recovery: verify service availability, release the validated 20-person follow-up below through the protected workflow, verify its exact revision and Hosting binding, prove dispatcher idle with the existing OIDC identity, install the single scoped cadence, prepare/record the approved four-person review in CRM, launch, and verify four unique sends. The original five remain complete and excluded. Do not bypass the release or send directly outside the CRM.
+
+## Follow-up: 20-person batch capacity
+
+Marcus requested a maximum of 20 recipients per batch while billing recovery is pending. Increase only the follow-on capacity; retain the original exact-five behavior, existing approved audiences, template, sender, approval expiry, one-recipient worker limit and minimum cadence. The four-person approval does not expand itself to 20 people. New names still need an exact audience decision.
+
+The API, CRM selection, dispatcher, receipt projection and recovery query share the 20-recipient maximum. Reply metadata reads use at most ten parallel exact-thread reads, so a full batch remains two bounded waves within the existing browser deadline. Independent event/history caps are unchanged. The legacy advisory expanded-pilot range remains unchanged for compatibility; the executable follow-on range is 1–20.
+
+- [x] Capacity changes and operating guide prepared on a branch from merged PR62.
+- [x] Boundary, legacy compatibility and reporting tests passed: 386 tests across nine focused suites, including acceptance of 20/rejection of 21, exact completion, approved-four drift rejection, receipt query coverage and bounded reply reads. Independent final diff review found no blocking issue and confirmed unchanged fingerprint algorithms and message content.
+- [ ] Protected PR validation complete; release held until billing is restored.
+
+Once this follow-up is validated, merge it through the protected release path after billing recovery instead of retrying the superseded 10-person source. At the planned two-minute cadence, 20 recipients take roughly 40 minutes; the capacity increase reduces repeated audience review and does not create simultaneous bulk sends. The existing unordered 20-pilot history listing is a separate scalability limit and should be addressed before that history bound is reached.

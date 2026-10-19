@@ -10,6 +10,7 @@ import {
   warmReconnectFollowOnPilotLockId,
 } from "@/lib/crm/warm-reconnect-batches";
 import {
+  assertWarmReconnectPilotFingerprints,
   computeWarmReconnectPilotFingerprints,
   createWarmReconnectPilot,
   WARM_RECONNECT_EXECUTION_POLICY,
@@ -219,7 +220,7 @@ function completionFixture(parent = initialPilot()) {
 }
 
 describe("warm reconnect follow-on batch contract", () => {
-  it.each([1, 4, 10])("accepts an exact follow-on audience of %i", (size) => {
+  it.each([1, 4, 10, 11, 20])("accepts an exact follow-on audience of %i", (size) => {
     const pilot = followOn(undefined, size);
     expect(() => assertWarmReconnectBatchShape(pilot)).not.toThrow();
     expect(warmReconnectApprovalScopeForPilot(pilot)).toBe("exact_batch_one_time_reconnection_emails");
@@ -247,14 +248,26 @@ describe("warm reconnect follow-on batch contract", () => {
     }));
   });
 
+  it("preserves a four-person approval and refuses to enlarge it under the higher maximum", () => {
+    const approved = followOn(undefined, 4);
+    const saved = structuredClone(approved);
+    expect(() => assertWarmReconnectPilotFingerprints(approved)).not.toThrow();
+    expect(approved).toEqual(saved);
+    const largerAudience = followOn(undefined, 20);
+    const changed = { ...approved, recipientCap: 20, recipients: largerAudience.recipients };
+    expect(() => assertWarmReconnectPilotFingerprints(changed)).toThrow("fingerprint contract drifted");
+    expect(saved.approval?.actionFingerprint).not.toBe(largerAudience.fingerprints.actionFingerprint);
+    expect(saved.recipients).toHaveLength(4);
+  });
+
   it.each([
-    { recipientCap: 4 }, { parentPilotId: "other" }, { batchSequence: 1 }, { followOnNotBeforeMs: 0 },
+    { recipientCap: 4 }, { recipientCap: 20 }, { parentPilotId: "other" }, { batchSequence: 1 }, { followOnNotBeforeMs: 0 },
   ])("rejects altered initial-pilot metadata: %j", (change) => {
     expect(() => assertWarmReconnectBatchShape({ ...initialPilot(), ...change })).toThrow();
   });
 
   it.each([
-    { recipientCap: 0 }, { recipientCap: 11 }, { recipientCap: 1.5 },
+    { recipientCap: 0 }, { recipientCap: 21 }, { recipientCap: 1.5 },
     { parentPilotId: "" }, { parentPilotId: undefined },
     { batchSequence: 0 }, { batchSequence: 1.5 }, { batchSequence: Number.MAX_SAFE_INTEGER + 1 },
     { followOnNotBeforeMs: -1 }, { followOnNotBeforeMs: Number.NaN },
@@ -323,7 +336,7 @@ describe("warm reconnect follow-on batch contract", () => {
 });
 
 describe("warm reconnect durable parent completion", () => {
-  it.each([1, 4, 10])("accepts exact durable completion of %i follow-on recipients", (size) => {
+  it.each([1, 4, 10, 11, 20])("accepts exact durable completion of %i follow-on recipients", (size) => {
     const fixture = completionFixture(followOn(undefined, size));
     expect(assertWarmReconnectParentCompletion(fixture)).toEqual({
       notBeforeMs: fixture.state.nextEligibleAtMs,

@@ -19,6 +19,7 @@ import {
   type WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
+import { resolveWarmReconnectGreetingName } from "@/lib/crm/warm-reconnect-greeting";
 import {
   WARM_RECONNECT_EMAIL_RENDERER_VERSION,
   WARM_RECONNECT_RENDERER_CONTRACT_VERSION,
@@ -733,13 +734,7 @@ export function createWarmReconnectPilot(input: {
     sourceEvidence: candidate.sourceEvidence,
     // Freeze bounded personalization inside the reviewed audience. The
     // executor never re-reads a mutable CRM name for delivery content.
-    greetingName:
-      String(candidate.displayName || "")
-        .trim()
-        .split(/\s+/)[0]
-        ?.replace(/[\0\r\n<>]/g, "")
-        .slice(0, 80)
-        .replace(/^./, (letter) => letter.toUpperCase()) || "there",
+    greetingName: resolveWarmReconnectGreetingName(candidate.displayName),
     decision: {
       status: "pending_review",
       decisionId: null,

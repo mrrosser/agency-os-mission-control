@@ -47,6 +47,16 @@ Verifier commands:
 - `scripts\smoke_orchestrator_clients.ps1`.
 - Shared Playwright spec in `C:\CTO Projects\ui-tests\tests\socialops-client.smoke.spec.ts`.
 
+## Client-Project Verification Loop (SocialOps/Fortifyy)
+For verification-only runs (no social publishing, no client email autosend), use the repo-local runner:
+
+- `powershell -ExecutionPolicy Bypass -File scripts\\client-project-autopilot-verify.ps1 -ProjectId socialops -ClientId fortifyy_roofs -DeployTarget production`
+
+Notes:
+- Kill switches are evaluated before any external calls (`MISSION_CONTROL_CLIENT_AUTOFIX_DISABLED`, `CLIENT_AUTOFIX_SOCIALOPS_DISABLED`, `CLIENT_AUTOFIX_SOCIALOPS_READ_ONLY`).
+- The public review Playwright spec requires the SocialOps review token; the runner resolves it from Secret Manager via `gcloud` without printing the value.
+- The authenticated smoke requires `C:\\CTO Projects\\ui-tests\\storage\\socialops-client.json`. If stale/missing, `scripts\\bootstrap_socialops_storage_state.cjs` can refresh it from Secret Manager when configured via `SOCIALOPS_GCP_PROJECT_ID` + `SOCIALOPS_PLAYWRIGHT_STORAGE_STATE_SECRET`.
+
 Deployment commands:
 - Staging: `socialops-client\deploy.ps1 -Service socialops-client-staging`
 - Production: `socialops-client\deploy.ps1 -Service socialops-client`

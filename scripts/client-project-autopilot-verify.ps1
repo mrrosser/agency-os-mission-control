@@ -557,7 +557,25 @@ function Invoke-RouteProbe {
 }
 
 function Get-Sha256([string]$Path) {
-  return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+  $hashCommand = Get-Command Get-FileHash -ErrorAction SilentlyContinue
+  if ($hashCommand) {
+    return (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
+  }
+
+  # The verification runner may execute under a minimal PowerShell host where
+  # Microsoft.PowerShell.Utility (and Get-FileHash) is not imported. Use the
+  # .NET implementation so evidence finalization remains portable.
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "").ToLowerInvariant()
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
 }
 
 function Get-GcloudProjectId {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Firestore } from "firebase-admin/firestore";
 import { resolveGoogleAccountTokens } from "@/lib/google/account-token-store";
 import { getAccessTokenForUser } from "@/lib/google/oauth";
@@ -13,7 +13,7 @@ vi.mock("@/lib/crm/portfolio-registry",()=>({assertPortfolioRegistryAccess:vi.fn
 const workspaceId="workspace";const email="person@example.com";const date=Date.parse("2026-10-08T19:40:00Z");
 const recipient={recipientId:"recipient",personId:"person",contactPointId:"point",emailKey:warmReconnectEmailKey(workspaceId,email)};
 const fingerprints={artifactFingerprint:"artifact",audienceFingerprint:"audience",actionFingerprint:"action"};
-const pilot={pilotId:"pilot",workspaceId,ownerUid:"owner",sender:{fromEmail:"mrosser@rossergallery.com"},approval:{approvalId:"approval"},fingerprints,recipients:[recipient]};
+const pilot={pilotId:"pilot",workspaceId,ownerUid:"owner",sender:{fromEmail:"mrosser@rossergallery.com"},approval:{approvalId:"approval"},fingerprints,recipientCap:1,recipients:[recipient]};
 const receipt={...recipient,...fingerprints,receiptId:"receipt",pilotId:"pilot",workspaceId,ownerUid:"owner",approvalId:"approval",status:"sent",providerMessageId:"ab1",providerThreadId:"ab1",sentAtMs:date+900};
 function message(id:string,headers:Record<string,string>,extra:ResultDocument={}){return{id,threadId:"ab1",labelIds:[],internalDate:String(date+1000),payload:{headers:Object.entries(headers).map(([name,value])=>({name,value}))},...extra};}
 const original=message("ab1",{"From":"Marcus <mrosser@rossergallery.com>","To":email,"Message-ID":"<original@example.com>"},{labelIds:["SENT"],internalDate:String(date)});
@@ -21,6 +21,23 @@ const reply=(id="cd1",headers:Record<string,string>={})=>message(id,{"From":emai
 const thread=(messages:ResultDocument[])=>({id:"ab1",messages:[original,...messages]});
 const resolution={registryFound:true,profileMapped:true,record:{accountId:"account",profileId:"rosser_gallery_work",tokens:{scope:"openid https://www.googleapis.com/auth/gmail.readonly",refreshToken:"existing-secret"}}};
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{"content-type":"application/json"}});
+
+function batchObservationFixture(count:number,previous?:ResultDocument){
+  const recipients=Array.from({length:count},(_,index)=>({...recipient,recipientId:`recipient-${index}`,personId:`person-${index}`,contactPointId:`point-${index}`,emailKey:warmReconnectEmailKey(workspaceId,`person${index}@example.test`)}));
+  const batchPilot={...pilot,tranche:"follow_on",recipientCap:count,recipients};
+  const receipts=recipients.map((row,index)=>({...receipt,...row,receiptId:`receipt-${index}`,providerMessageId:`ab${index.toString(16)}`,providerThreadId:`ab${index.toString(16)}`}));
+  const threads=new Map(receipts.map((row,index)=>{
+    const threadId=row.providerThreadId;const messageId=`<original-${index}@example.test>`;const address=`person${index}@example.test`;
+    return [threadId,{id:threadId,messages:[
+      message(row.providerMessageId,{From:"Marcus <mrosser@rossergallery.com>",To:address,"Message-ID":messageId},{threadId,labelIds:["SENT"],internalDate:String(date)}),
+      message(`cd${index.toString(16)}`,{From:address,"In-Reply-To":messageId},{threadId}),
+    ]}];
+  }));
+  let saved=previous;let cap=Infinity;
+  const ref=(path:string):unknown=>({collection:(name:string)=>ref(`${path}/${name}`),doc:(id:string)=>ref(`${path}/${id}`),select:()=>ref(path),limit:(value:number)=>{cap=value;return ref(path);},get:async()=>path.endsWith("/delivery_receipts")?{size:Math.min(cap,receipts.length),docs:receipts.slice(0,cap).map(row=>({id:row.receiptId,data:()=>row}))}:path.endsWith("/latest")?{data:()=>saved}:{exists:true,data:()=>batchPilot}});
+  const db={collection:(name:string)=>ref(name),runTransaction:async(fn:(tx:unknown)=>Promise<void>)=>fn({get:async()=>({data:()=>saved}),set:(_ref:unknown,value:ResultDocument)=>{saved=value;}})} as unknown as Firestore;
+  return {db,threads,receipts,saved:()=>saved,cap:()=>cap};
+}
 
 describe("exact outreach thread attribution",()=>{
   it("uses original Message-ID references and known recipient instead of subject alone",()=>{
@@ -39,6 +56,7 @@ describe("exact outreach thread attribution",()=>{
 });
 
 describe("existing Gallery read connection",()=>{
+  afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
   beforeEach(()=>{
     vi.mocked(resolveGoogleAccountTokens).mockResolvedValue(resolution);
     vi.mocked(getAccessTokenForUser).mockResolvedValue("in-memory-token");
@@ -83,20 +101,8 @@ describe("existing Gallery read connection",()=>{
     expect(saved).toMatchObject({status:"partial",inspectedThreads:0,expectedThreads:1});expect(JSON.stringify(saved)).not.toContain("private-provider-error");
   });
 
-  it("observes twenty exact threads in two bounded metadata waves without persisting raw mail",async()=>{
-    const batchRecipients=Array.from({length:20},(_,index)=>({...recipient,recipientId:`recipient-${index}`,personId:`person-${index}`,contactPointId:`point-${index}`,emailKey:warmReconnectEmailKey(workspaceId,`person${index}@example.test`)}));
-    const batchPilot={...pilot,tranche:"follow_on",recipientCap:20,recipients:batchRecipients};
-    const batchReceipts=batchRecipients.map((row,index)=>({...receipt,...row,receiptId:`receipt-${index}`,providerMessageId:`ab${index.toString(16)}`,providerThreadId:`ab${index.toString(16)}`}));
-    const threads=new Map(batchReceipts.map((row,index)=>{
-      const threadId=row.providerThreadId;const messageId=`<original-${index}@example.test>`;const address=`person${index}@example.test`;
-      return [threadId,{id:threadId,messages:[
-        message(row.providerMessageId,{From:"Marcus <mrosser@rossergallery.com>",To:address,"Message-ID":messageId},{threadId,labelIds:["SENT"],internalDate:String(date)}),
-        message(`cd${index.toString(16)}`,{From:address,"In-Reply-To":messageId},{threadId}),
-      ]}];
-    }));
-    let saved:ResultDocument|undefined;let cap=Infinity;
-    const ref=(path:string):unknown=>({collection:(name:string)=>ref(`${path}/${name}`),doc:(id:string)=>ref(`${path}/${id}`),select:()=>ref(path),limit:(value:number)=>{cap=value;return ref(path);},get:async()=>path.endsWith("/delivery_receipts")?{size:Math.min(cap,batchReceipts.length),docs:batchReceipts.slice(0,cap).map(row=>({id:row.receiptId,data:()=>row}))}:{exists:true,data:()=>batchPilot}});
-    const db={collection:(name:string)=>ref(name),runTransaction:async(fn:(tx:unknown)=>Promise<void>)=>fn({get:async()=>({data:()=>undefined}),set:(_ref:unknown,value:ResultDocument)=>{saved=value;}})} as unknown as Firestore;
+  it.each([20,100])("observes %i exact threads with bounded concurrency without persisting raw mail",async(count)=>{
+    const fixture=batchObservationFixture(count);const {db,threads}=fixture;
     let active=0;let peak=0;const readIds:string[]=[];
     const fetchMock=vi.fn().mockImplementation(async(url:string)=>{
       if(url.includes("/profile"))return json({emailAddress:"mrosser@rossergallery.com"});
@@ -105,10 +111,64 @@ describe("existing Gallery read connection",()=>{
       await new Promise(resolve=>setTimeout(resolve,0));active--;
       return json(threads.get(id));
     });
-    await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"twenty-thread-observation",db,fetchImpl:fetchMock});
+    await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"bounded-thread-observation",db,fetchImpl:fetchMock});
     expect(peak).toBe(10);expect(active).toBe(0);expect(readIds.sort()).toEqual([...threads.keys()].sort());
-    expect(fetchMock).toHaveBeenCalledTimes(21);expect(cap).toBe(21);
-    expect(saved).toMatchObject({status:"complete",inspectedThreads:20,expectedThreads:20});expect(saved?.events).toHaveLength(20);
-    expect(JSON.stringify(saved)).not.toMatch(/headers|payload|in-memory-token|original-\d+@|person\d+@|private-body/);
+    expect(fetchMock).toHaveBeenCalledTimes(count+1);expect(fixture.cap()).toBe(count+1);
+    expect(fixture.saved()).toMatchObject({status:"complete",inspectedThreads:count,expectedThreads:count});expect(fixture.saved()?.events).toHaveLength(count);
+    expect(JSON.stringify(fixture.saved())).not.toMatch(/headers|payload|in-memory-token|original-\d+@|person\d+@|private-body/);
+  });
+
+  it("inspects all 346 exact sent threads without a recipient-count ceiling",async()=>{
+    const fixture=batchObservationFixture(346);
+    for(const value of fixture.threads.values())value.messages=value.messages.slice(0,1);
+    const fetchMock=vi.fn().mockImplementation(async(url:string)=>url.includes("/profile")?json({emailAddress:"mrosser@rossergallery.com"}):json(fixture.threads.get(new URL(url).pathname.split("/").at(-1)!)));
+    await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"finite-large-queue",db:fixture.db,fetchImpl:fetchMock});
+    expect(fixture.cap()).toBe(347);expect(fetchMock).toHaveBeenCalledTimes(347);
+    expect(fixture.saved()).toMatchObject({status:"complete",inspectedThreads:346,expectedThreads:346,events:[]});
+  });
+
+  it("bounds slow 100-thread refreshes including profile reads and advances past failed waves",async()=>{
+    vi.useFakeTimers();vi.setSystemTime(date);
+    const timeouts:number[]=[];
+    vi.spyOn(AbortSignal,"timeout").mockImplementation(milliseconds=>{
+      timeouts.push(milliseconds);const controller=new AbortController();
+      setTimeout(()=>controller.abort(),milliseconds);return controller.signal;
+    });
+    const fixture=batchObservationFixture(100);const readIds:string[]=[];let active=0;let peak=0;
+    const fetchMock=vi.fn().mockImplementation(async(url:string,options:RequestInit)=>{
+      if(url.includes("/profile"))return new Promise<Response>(resolve=>setTimeout(()=>resolve(json({emailAddress:"mrosser@rossergallery.com"})),15_000));
+      readIds.push(new URL(url).pathname.split("/").at(-1)!);active++;peak=Math.max(peak,active);
+      try{return await new Promise<Response>((_resolve,reject)=>options.signal!.addEventListener("abort",()=>reject(new Error("aborted")),{once:true}));}
+      finally{active--;}
+    });
+    for(let round=0;round<4;round++){
+      const started=Date.now();const refresh=refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"bounded-slow-refresh",db:fixture.db,fetchImpl:fetchMock});
+      await vi.advanceTimersByTimeAsync(60_000);await refresh;
+      expect(Date.now()-started).toBe(60_000);expect(active).toBe(0);
+      expect(fixture.saved()).toMatchObject({status:"partial",inspectedThreads:0,expectedThreads:100,nextThreadOffset:((round+1)*30)%100});
+    }
+    expect(peak).toBe(10);expect(new Set(readIds).size).toBe(100);
+    expect(timeouts.every(value=>value>0&&value<=20_000)).toBe(true);expect(timeouts).toContain(5_000);
+    expect(fixture.saved()?.events).toEqual([]);
+  });
+
+  it("does not reuse a refresh cursor bound to a different sent audience",async()=>{
+    const fixture=batchObservationFixture(100,{schemaVersion:"crm.warm-reconnect-response-observation.v1",pilotId:"pilot",workspaceId,ownerUid:"owner",accountEmail:"mrosser@rossergallery.com",sentMessageIds:["different"],nextThreadOffset:50});
+    const readIds:string[]=[];
+    const fetchMock=vi.fn().mockImplementation(async(url:string)=>{
+      if(url.includes("/profile"))return json({emailAddress:"mrosser@rossergallery.com"});
+      const id=new URL(url).pathname.split("/").at(-1)!;readIds.push(id);return json(fixture.threads.get(id));
+    });
+    await refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"changed-audience",db:fixture.db,fetchImpl:fetchMock});
+    expect(readIds[0]).toBe("ab0");expect(fixture.saved()).toMatchObject({status:"complete",inspectedThreads:100,nextThreadOffset:0});
+  });
+
+  it.each([401,403,429])("stops scheduling further waves after provider denial %i and reports partial evidence",async(status)=>{
+    const fixture=batchObservationFixture(100);
+    const fetchMock=vi.fn().mockImplementation(async(url:string)=>url.includes("/profile")?json({emailAddress:"mrosser@rossergallery.com"}):json({error:"private-provider-error"},status));
+    await expect(refreshWarmReconnectResponsesForUid({uid:"owner",pilotId:"pilot",correlationId:"provider-denied",db:fixture.db,fetchImpl:fetchMock})).rejects.toMatchObject({status:status===429?429:403});
+    expect(fetchMock).toHaveBeenCalledTimes(11);
+    expect(fixture.saved()).toMatchObject({status:"partial",inspectedThreads:0,expectedThreads:100,nextThreadOffset:10});
+    expect(JSON.stringify(fixture.saved())).not.toContain("private-provider-error");
   });
 });

@@ -220,7 +220,7 @@ function completionFixture(parent = initialPilot()) {
 }
 
 describe("warm reconnect follow-on batch contract", () => {
-  it.each([1, 4, 10, 11, 20])("accepts an exact follow-on audience of %i", (size) => {
+  it.each([1, 4, 10, 11, 20, 21, 50, 100, 101, 346])("accepts an exact follow-on audience of %i", (size) => {
     const pilot = followOn(undefined, size);
     expect(() => assertWarmReconnectBatchShape(pilot)).not.toThrow();
     expect(warmReconnectApprovalScopeForPilot(pilot)).toBe("exact_batch_one_time_reconnection_emails");
@@ -248,16 +248,27 @@ describe("warm reconnect follow-on batch contract", () => {
     }));
   });
 
-  it("preserves a four-person approval and refuses to enlarge it under the higher maximum", () => {
-    const approved = followOn(undefined, 4);
+  it.each([4, 20])("preserves an existing %i-person approval and refuses to enlarge it under the higher maximum", (size) => {
+    const approved = followOn(undefined, size);
     const saved = structuredClone(approved);
     expect(() => assertWarmReconnectPilotFingerprints(approved)).not.toThrow();
     expect(approved).toEqual(saved);
-    const largerAudience = followOn(undefined, 20);
-    const changed = { ...approved, recipientCap: 20, recipients: largerAudience.recipients };
+    const largerAudience = followOn(undefined, 100);
+    const changed = { ...approved, recipientCap: 100, recipients: largerAudience.recipients };
     expect(() => assertWarmReconnectPilotFingerprints(changed)).toThrow("fingerprint contract drifted");
     expect(saved.approval?.actionFingerprint).not.toBe(largerAudience.fingerprints.actionFingerprint);
-    expect(saved.recipients).toHaveLength(4);
+    expect(saved.recipients).toHaveLength(size);
+    expect(saved.approval).toEqual(approved.approval);
+  });
+
+  it("keeps the frozen twenty-person approval fingerprints unchanged", () => {
+    expect(followOn(undefined, 20).fingerprints).toMatchInlineSnapshot(`
+      {
+        "actionFingerprint": "sha256:b360cc84d69837e5c62f06c41e12deb78c6dd2f83d1887be931ae2537a79b92f",
+        "artifactFingerprint": "sha256:988911ec3a32b395e24c40e34ad55d671afc4c850e028cb1cf0be955084edfe9",
+        "audienceFingerprint": "sha256:b890254c22d8ce521cad3fba82b6c38f37db61ce5245aec3554d80ed22a25438",
+      }
+    `);
   });
 
   it.each([
@@ -267,7 +278,7 @@ describe("warm reconnect follow-on batch contract", () => {
   });
 
   it.each([
-    { recipientCap: 0 }, { recipientCap: 21 }, { recipientCap: 1.5 },
+    { recipientCap: 0 }, { recipientCap: Number.MAX_SAFE_INTEGER }, { recipientCap: 1.5 },
     { parentPilotId: "" }, { parentPilotId: undefined },
     { batchSequence: 0 }, { batchSequence: 1.5 }, { batchSequence: Number.MAX_SAFE_INTEGER + 1 },
     { followOnNotBeforeMs: -1 }, { followOnNotBeforeMs: Number.NaN },
@@ -336,12 +347,26 @@ describe("warm reconnect follow-on batch contract", () => {
 });
 
 describe("warm reconnect durable parent completion", () => {
-  it.each([1, 4, 10, 11, 20])("accepts exact durable completion of %i follow-on recipients", (size) => {
+  it.each([1, 4, 10, 11, 20, 21, 50, 100, 101, 346])("accepts exact durable completion of %i follow-on recipients", (size) => {
     const fixture = completionFixture(followOn(undefined, size));
     expect(assertWarmReconnectParentCompletion(fixture)).toEqual({
       notBeforeMs: fixture.state.nextEligibleAtMs,
     });
   });
+
+  it.each(["missing receipt", "extra receipt", "duplicate receipt", "missing ledger", "extra ledger", "short claimed count", "short sent count"])(
+    "refuses a 346-person completion with %s", (change) => {
+      const fixture = completionFixture(followOn(undefined, 346));
+      if (change === "missing receipt") fixture.receipts.pop();
+      if (change === "extra receipt") fixture.receipts.push({ ...fixture.receipts[0], receiptId: "stray-receipt" });
+      if (change === "duplicate receipt") fixture.receipts[345] = { ...fixture.receipts[0] };
+      if (change === "missing ledger") fixture.ledgers.pop();
+      if (change === "extra ledger") fixture.ledgers.push({ ...fixture.ledgers[0], reservationId: "stray-ledger" });
+      if (change === "short claimed count") fixture.state.claimedCount = 345;
+      if (change === "short sent count") fixture.state.sentCount = 345;
+      expect(() => assertWarmReconnectParentCompletion(fixture)).toThrow();
+    }
+  );
 
   it("accepts initial completion after approval expiry without imposing an observation wait", () => {
     const fixture = completionFixture();

@@ -92,7 +92,7 @@ describe("warm reconnect follow-on route contracts", () => {
     launchMock.mockResolvedValue({ pilot: { pilotId, status: "launch_requested" }, replayed: false } as never);
   });
 
-  it.each(Array.from({ length: 20 }, (_, i) => i + 1))("accepts a distinct exact %i-recipient batch with predecessor binding", async (count) => {
+  it.each([...Array.from({ length: 20 }, (_, i) => i + 1), 21, 50, 100, 101, 346])("accepts a distinct exact %i-recipient batch with predecessor binding", async (count) => {
     const body = followOnRequest(count);
     const response = await createPilot(request(body) as never, context({}));
     expect(response.status).toBe(201);
@@ -106,7 +106,7 @@ describe("warm reconnect follow-on route contracts", () => {
   it.each([
     { candidateRecipientIds: ["recipient-1", "recipient-1"] },
     { candidateRecipientIds: ["recipient-1", " recipient-1 "] },
-    { recipientCap: 3 }, { recipientCap: 0 }, { recipientCap: 21 }, { recipientCap: 1.5 },
+    { recipientCap: 3 }, { recipientCap: 0 }, { recipientCap: 101 }, { recipientCap: 1.5 },
     { parentPilotId: undefined }, { parentPilotId: "../other-pilot" },
     { batchSequence: undefined }, { batchSequence: 0 }, { batchSequence: 1.5 },
     { batchSequence: Number.MAX_SAFE_INTEGER + 1 },
@@ -117,7 +117,7 @@ describe("warm reconnect follow-on route contracts", () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it.each([0, 21])("rejects %i distinct recipients beyond the follow-on bounds", async (count) => {
+  it.each([0])("rejects an empty follow-on queue of %i recipients", async (count) => {
     const response = await createPilot(request(followOnRequest(count)) as never, context({}));
     expect(response.status).toBe(400);
     expect(createMock).not.toHaveBeenCalled();
@@ -129,11 +129,17 @@ describe("warm reconnect follow-on route contracts", () => {
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it.each([6, 20])("does not expand the initial-five contract to %i recipients", async (count) => {
+  it.each([6, 20, 21, 50, 100, 101, 346])("does not expand the initial-five contract to %i recipients", async (count) => {
     const body: Record<string, unknown> = { ...followOnRequest(count), tranche: "initial_5" };
     delete body.parentPilotId;
     delete body.batchSequence;
     expect((await createPilot(request(body) as never, context({}))).status).toBe(400);
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("retains the 32 KiB request limit for a hundred-recipient batch", async () => {
+    const oversized = request({ ...followOnRequest(100), oversized: "x".repeat(32 * 1024) });
+    expect((await createPilot(oversized as never, context({}))).status).toBe(413);
     expect(createMock).not.toHaveBeenCalled();
   });
 

@@ -5,14 +5,13 @@ import { ApiError } from "@/lib/api/handler";
 import { getAdminDb } from "@/lib/firebase-admin";
 import { assertPortfolioRegistryAccess } from "@/lib/crm/portfolio-registry";
 import type { Logger } from "@/lib/logging";
-import { WARM_RECONNECT_MAX_PILOT_SIZE } from "./warm-reconnect-activation-types";
+import { assertWarmReconnectRecipientQueue } from "./warm-reconnect-recipient-queue";
 import type { WarmReconnectOutcomeMetric, WarmReconnectPilotResult, WarmReconnectResultsResponse } from "./warm-reconnect-results-types";
 
 export const RESULTS_PILOT_COLLECTION = "crm_warm_reconnect_pilots";
 export const RESULTS_OBSERVATION_COLLECTION = "response_observations";
 const MAX_PILOTS = 100;
 const MAX_EVENTS = 100;
-const MAX_RECIPIENTS = WARM_RECONNECT_MAX_PILOT_SIZE;
 const RECEIPT_STATUSES = new Set(["claimed", "capabilities_prepared", "provider_inflight", "sent", "delivery_unknown", "stopped_before_provider"]);
 const SAFE_ID = /^[A-Za-z0-9_.:-]{1,160}$/;
 const PROVIDER_ID = /^[a-f0-9]{1,64}$/;
@@ -84,17 +83,19 @@ export function buildWarmReconnectPilotResult(input: {
   const recipients = Array.isArray(pilot.recipients) ? pilot.recipients.map(resultObject) : [];
   const recipientIds = recipients.map(row => resultText(row.recipientId));
   let receiptRead = input.receipts;
-  if (recipientIds.length < 1 || recipientIds.length > MAX_RECIPIENTS || recipientIds.some(id => !SAFE_ID.test(id)) || new Set(recipientIds).size !== recipientIds.length ||
+  let queueValid = true;
+  try { assertWarmReconnectRecipientQueue(pilot); } catch { queueValid = false; }
+  if (!queueValid || recipientIds.some(id => !SAFE_ID.test(id)) || new Set(recipientIds).size !== recipientIds.length ||
     (receiptRead.status === "observed" && (receiptRead.value.some(receipt => !validBoundReceipt(pilot, receipt)) || new Set(receiptRead.value.map(row => row.recipientId)).size !== receiptRead.value.length))) {
     receiptRead = { status: "unknown", reason: "Delivery records need reconciliation." };
   }
   const receipts = receiptRead.status === "observed" ? receiptRead.value : [];
   const sent = receipts.filter(row => row.status === "sent");
   let eventRead = input.events;
-  if (eventRead.status === "observed" && eventRead.value.some(event => event.workspaceId !== pilot.workspaceId || event.pilotId !== pilot.pilotId || !recipientIds.includes(resultText(event.recipientId)) ||
+  if (eventRead.status === "observed" && (eventRead.value.length > MAX_EVENTS || eventRead.value.some(event => event.workspaceId !== pilot.workspaceId || event.pilotId !== pilot.pilotId || !recipientIds.includes(resultText(event.recipientId)) ||
     !["preferences_updated", "unsubscribed"].includes(resultText(event.eventType)) || !resultIso(event.occurredAt) ||
     event.campaignApprovalId !== resultObject(pilot.approval).approvalId || ["artifactFingerprint", "audienceFingerprint", "actionFingerprint"].some(key => event[key] !== resultObject(pilot.fingerprints)[key]) ||
-    (event.eventType === "preferences_updated" && ["rosser_gallery","rt_solutions"].some(key=>typeof resultObject(event.topics)[key]!=="boolean")))) {
+    (event.eventType === "preferences_updated" && ["rosser_gallery","rt_solutions"].some(key=>typeof resultObject(event.topics)[key]!=="boolean"))))) {
     eventRead = { status: "unknown", reason: "Preference records need reconciliation." };
   }
   const events = eventRead.status === "observed" ? eventRead.value : [];
@@ -150,16 +151,23 @@ export async function loadOwnedResultsPilot(uid: string, workspaceId: string, pi
 async function readResult<T>(read: () => Promise<T>, reason: string, log?: Logger): Promise<ResultRead<T>> {
   try { return {status:"observed",value:await read()}; } catch { log?.warn("warm_reconnect.results.read_unavailable",{stage:reason}); return {status:"unknown",reason}; }
 }
-export async function readResultsReceipts(pilotId: string, db: Firestore): Promise<ResultDocument[]> {
-  const snapshots = await db.collection(RESULTS_PILOT_COLLECTION).doc(pilotId).collection("delivery_receipts").select("receiptId","pilotId","workspaceId","ownerUid","recipientId","personId","contactPointId","emailKey","approvalId","artifactFingerprint","audienceFingerprint","actionFingerprint","status","sentAtMs","providerMessageId","providerThreadId","terminalReason").limit(MAX_RECIPIENTS+1).get();
-  if (snapshots.size > MAX_RECIPIENTS) throw new ApiError(409,"Delivery records exceed the reporting bound.");
+export async function readResultsReceipts(pilot: ResultDocument, db: Firestore): Promise<ResultDocument[]> {
+  const recipientCount = assertWarmReconnectRecipientQueue(pilot);
+  const pilotId = resultText(pilot.pilotId);
+  assertResultsPilotId(pilotId);
+  const snapshots = await db.collection(RESULTS_PILOT_COLLECTION).doc(pilotId).collection("delivery_receipts").select("receiptId","pilotId","workspaceId","ownerUid","recipientId","personId","contactPointId","emailKey","approvalId","artifactFingerprint","audienceFingerprint","actionFingerprint","status","sentAtMs","providerMessageId","providerThreadId","terminalReason").limit(recipientCount+1).get();
+  if (snapshots.size > recipientCount) throw new ApiError(409,"Delivery records exceed the reporting bound.");
   if (snapshots.docs.some(doc => doc.id !== doc.data().receiptId)) throw new ApiError(409,"Delivery document identities need reconciliation.");
-  return snapshots.docs.map(doc=>doc.data());
+  const receipts = snapshots.docs.map(doc=>doc.data());
+  if (receipts.some(receipt=>!validBoundReceipt(pilot,receipt)) || new Set(receipts.map(receipt=>receipt.recipientId)).size !== receipts.length) {
+    throw new ApiError(409,"Delivery records do not match the exact frozen recipient queue.");
+  }
+  return receipts;
 }
 async function loadPilotResult(pilot: ResultDocument, db: Firestore, observedAt: string, log?: Logger): Promise<WarmReconnectPilotResult> {
   const ref=db.collection(RESULTS_PILOT_COLLECTION).doc(resultText(pilot.pilotId));
   const [receipts,events,executor,observation]=await Promise.all([
-    readResult(()=>readResultsReceipts(resultText(pilot.pilotId),db),"Delivery records unavailable.",log),
+    readResult(()=>readResultsReceipts(pilot,db),"Delivery records unavailable.",log),
     readResult(async()=>{const snapshots=await db.collection("crm_permission_events").where("pilotId","==",pilot.pilotId).select("workspaceId","pilotId","recipientId","eventType","topics","occurredAt","campaignApprovalId","artifactFingerprint","audienceFingerprint","actionFingerprint").limit(MAX_EVENTS+1).get();if(snapshots.size>MAX_EVENTS)throw Error("EVENT_CAP");return snapshots.docs.map(doc=>doc.data());},"Preference records unavailable or capped.",log),
     readResult(async()=>(await ref.collection("executor").doc("state").get()).data()||null,"Executor state unavailable.",log),
     readResult(async()=>(await ref.collection(RESULTS_OBSERVATION_COLLECTION).doc("latest").get()).data()||null,"Reply observation unavailable.",log),

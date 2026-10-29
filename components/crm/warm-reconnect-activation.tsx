@@ -36,7 +36,6 @@ import type {
   WarmReconnectRecipientDecisionRequest,
 } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectCampaignDraft } from "@/lib/crm/warm-reconnect-types";
-import { WARM_RECONNECT_MAX_PILOT_SIZE } from "@/lib/crm/warm-reconnect-activation-types";
 import type { WarmReconnectResultsResponse } from "@/lib/crm/warm-reconnect-results-types";
 import { WarmReconnectResults } from "./warm-reconnect-results";
 import { isRosserGallerySendingProfile, ROSSER_GALLERY_SENDING_EMAIL, RT_SOLUTIONS_SENDING_EMAIL } from "@/lib/google/business-profiles";
@@ -194,8 +193,11 @@ export function WarmReconnectActivation({ campaign }: Props) {
     ? [activePilot.pilotId, activePilot.fingerprints.audienceFingerprint, activePilot.fingerprints.actionFingerprint, activePilot.recipientCopyReviewFingerprint].join(":") : null;
   const recipientCopyConfirmed = !copyReviewBinding || recipientCopyAssent === copyReviewBinding;
   const followOnParent = activation?.pilots.find(pilot => pilot.pilotId === activation.control?.followOnParentPilotId) ?? null;
-  const selectionCap = followOnParent ? WARM_RECONNECT_MAX_PILOT_SIZE : 5;
   const availableCandidates = activation?.candidates ?? [];
+  const availableRecipientIds = new Set(availableCandidates.map(candidate => candidate.recipientId));
+  const selectionIsCurrent = selectedRecipientIds.length > 0 &&
+    new Set(selectedRecipientIds).size === selectedRecipientIds.length &&
+    selectedRecipientIds.every(id => availableRecipientIds.has(id));
   const completionRefreshRef = useRef<string | null>(null);
   const controlsUnavailable = loading || activationNeedsRefresh || Boolean(error) || !activation;
 
@@ -378,7 +380,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
   async function createPilot() {
     if (!createReady || controlsUnavailable || mutation) return;
     const recipients = followOnParent
-      ? selectedRecipientIds.length >= 1 && selectedRecipientIds.length <= WARM_RECONNECT_MAX_PILOT_SIZE ? [...selectedRecipientIds] : null
+      ? selectionIsCurrent ? [...selectedRecipientIds] : null
       : selectedTuple(selectedRecipientIds);
     const selectedSender = followOnParent?.sender ?? sender;
     const profile = activation?.googleProfiles.find((item) => item.profileId === selectedSender.profileId);
@@ -591,7 +593,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const allConfirmationsChecked = visibleConfirmations.every(([key]) => confirmations[key]) && recipientCopyConfirmed;
   const selectedProfile = activation?.googleProfiles.find((profile) => profile.profileId === (followOnParent?.sender.profileId ?? sender.profileId));
   const createReady = Boolean(
-    (followOnParent ? selectedRecipientIds.length >= 1 && selectedRecipientIds.length <= WARM_RECONNECT_MAX_PILOT_SIZE : selectedRecipientIds.length === 5) &&
+    (selectionIsCurrent && (followOnParent || selectedRecipientIds.length === 5)) &&
     campaign &&
     activation &&
     !controlsUnavailable &&
@@ -627,7 +629,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
               Permission first. Approval and launch stay separate.
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Review the first five recipients, then continue in batches of up to {WARM_RECONNECT_MAX_PILOT_SIZE} using the same approved email. Each list is reviewed before sending, and invitations never subscribe anyone automatically.
+              Review the first five recipients, then continue through your eligible contacts using the same approved email. Each exact list is reviewed before sending, and invitations never subscribe anyone automatically.
             </p>
           </div>
           <div className="flex items-center gap-2 self-start rounded-full border border-amber-300/30 bg-amber-300/10 px-3 py-1.5 text-xs font-semibold text-amber-100">
@@ -759,11 +761,15 @@ export function WarmReconnectActivation({ campaign }: Props) {
                 <div className="mt-4 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                   <fieldset className="max-h-[28rem] space-y-2 overflow-y-auto rounded-xl border border-white/10 p-3">
                     <legend className="px-1 text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
-                      {followOnParent ? `Select 1–${WARM_RECONNECT_MAX_PILOT_SIZE}` : "Select 5"} · {selectedRecipientIds.length} selected
+                      {followOnParent ? "Select contacts for review" : "Select 5"} · {selectedRecipientIds.length} selected
                     </legend>
+                    {followOnParent && <Button type="button" disabled={controlsUnavailable || Boolean(mutation)}
+                      onClick={() => setSelectedRecipientIds(availableCandidates.map(candidate => candidate.recipientId))}>
+                      Select all available for review
+                    </Button>}
                     {availableCandidates.map((candidate) => {
                       const checked = candidateSelected(selectedRecipientIds, candidate);
-                      const selectionFull = selectedRecipientIds.length >= selectionCap && !checked;
+                      const selectionFull = !followOnParent && selectedRecipientIds.length >= 5 && !checked;
                       return (
                         <label key={candidate.recipientId} className="flex cursor-pointer items-start gap-3 rounded-lg border border-white/10 bg-white/[0.025] p-3">
                           <input
@@ -795,7 +801,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                       <p className="text-xs leading-5 text-zinc-300">The next batch uses the same design, sender, reply-to, address and preference links as your completed batch. Review the new people, then approve and start this list.</p>
                       <p className="text-xs text-zinc-400">From: {followOnParent.sender.fromEmail}</p>
                       <p className="text-xs text-zinc-400">Reply to: {followOnParent.sender.replyTo}</p>
-                      <p className="text-xs text-zinc-400">Up to {WARM_RECONNECT_MAX_PILOT_SIZE} invitations. Previously invited people remain excluded.</p>
+                      <p className="text-xs text-zinc-400">Review any of the available contacts. Previously invited people remain excluded. Large lists may need separate review windows; sending stays paced and each list needs approval.</p>
                       <Button type="button" disabled={!createReady || Boolean(mutation)} onClick={() => void createPilot()} className="w-full bg-cyan-200 text-[#061012] hover:bg-cyan-100">
                         {mutation?.action === "create" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <UsersRound aria-hidden="true" />}
                         Prepare next batch for review

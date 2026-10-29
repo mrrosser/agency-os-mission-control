@@ -73,7 +73,7 @@
     "lucide-react": "^0.563.0",
     "mammoth": "^1.11.0",
     "matter-js": "^0.20.0",
-    "next": "15.5.25",
+    "next": "15.5.28",
     "next-themes": "^0.4.6",
     "pdf-parse": "^2.4.5",
     "react": "19.2.3",
@@ -84,7 +84,7 @@
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
     "twilio": "^5.12.0",
-    "zod": "^4.3.6"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.1",
@@ -94,11 +94,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "15.5.25",
+    "eslint-config-next": "15.5.28",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "4.1.11",
-    "vite": "7.3.6"
+    "vite": "7.3.7",
+    "vitest": "4.1.11"
   },
   "overrides": {
     "firebase-frameworks": {
@@ -113,7 +113,7 @@
     },
     "sharp": "$sharp",
     "@grpc/grpc-js": "1.14.5",
-    "@next/eslint-plugin-next@15.5.25": {
+    "@next/eslint-plugin-next@15.5.28": {
       "fast-glob": "npm:tinyglobby@0.2.17"
     }
   }

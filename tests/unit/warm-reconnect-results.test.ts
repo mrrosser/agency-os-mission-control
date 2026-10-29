@@ -7,7 +7,7 @@ vi.mock("@/lib/crm/portfolio-registry",()=>({assertPortfolioRegistryAccess:vi.fn
 const now="2026-10-08T20:00:00.000Z";
 const fingerprints={artifactFingerprint:"artifact",audienceFingerprint:"audience",actionFingerprint:"action"};
 const recipients=Array.from({length:5},(_,index)=>({recipientId:`recipient-${index}`,personId:`person-${index}`,contactPointId:`point-${index}`,emailKey:`email-${index}`,greetingName:`Person ${index}`}));
-const pilot:ResultDocument={pilotId:"pilot-1",workspaceId:"workspace",ownerUid:"owner",status:"launch_requested",tranche:"initial_5",createdAt:now,recipients,approval:{approvalId:"approval-1"},fingerprints,sender:{fromEmail:"mrosser@rossergallery.com"}};
+const pilot:ResultDocument={pilotId:"pilot-1",workspaceId:"workspace",ownerUid:"owner",status:"launch_requested",tranche:"initial_5",recipientCap:5,createdAt:now,recipients,approval:{approvalId:"approval-1"},fingerprints,sender:{fromEmail:"mrosser@rossergallery.com"}};
 const receipts=recipients.map((recipient,index)=>({...recipient,...fingerprints,receiptId:`receipt-${index}`,pilotId:pilot.pilotId,workspaceId:pilot.workspaceId,ownerUid:pilot.ownerUid,approvalId:"approval-1",status:"sent",sentAtMs:Date.parse(now)-1000,providerMessageId:`ab${index}`,providerThreadId:`ab${index}`}));
 const executor={pilotId:pilot.pilotId,workspaceId:pilot.workspaceId,complete:true,halted:false,activeReceiptId:null,sentCount:5,claimedCount:5};
 const observed=<T,>(value:T)=>({status:"observed" as const,value});
@@ -21,13 +21,13 @@ function batchFixture(count:number){
 }
 
 describe("warm outreach results projection",()=>{
-  it.each([11,20])("reports all %i follow-on sends without treating supported batches as capped",count=>{
+  it.each([11,20,21,50,100,101,346])("reports all %i follow-on sends without treating supported batches as capped",count=>{
     const fixture=batchFixture(count);const result=project(fixture);
     expect(result.sent).toMatchObject({status:"observed",value:count});expect(result.complete).toBe(true);expect(result.recipients).toHaveLength(count);
     expect(project({...fixture,receipts:observed(fixture.receipts.value.slice(0,count-1))}).complete).toBe(false);
   });
-  it("keeps an oversized twenty-one-person report unknown and incomplete",()=>{
-    const result=project(batchFixture(21));expect(result.sent).toMatchObject({status:"unknown",value:null});expect(result.complete).toBe(false);
+  it("keeps a corrupt huge numeric cap unknown without trusting it as a queue",()=>{
+    const result=project({pilot:{...pilot,recipientCap:Number.MAX_SAFE_INTEGER}});expect(result.sent).toMatchObject({status:"unknown",value:null});expect(result.complete).toBe(false);
   });
   it("reports five durable sends and observed zero confirmations, but unknown uncollected outcomes",()=>{
     const result=project();expect(result.complete).toBe(true);expect(result.sent.value).toBe(5);expect(result.confirmedChoices.any).toMatchObject({status:"observed",value:0});expect(result.unsubscribed.value).toBe(0);
@@ -53,6 +53,20 @@ describe("warm outreach results projection",()=>{
     for(const events of [{status:"unknown" as const,reason:"capped"},observed([event("recipient-0",now,{workspaceId:"other"})]),observed([event("recipient-0",now,{topics:{}})])])expect(project({events}).confirmedChoices.any.value).toBeNull();
     expect(project({receipts:{status:"unknown",reason:"unavailable"}}).sent.value).toBeNull();
   });
+  it("keeps the preference-event bound separate from a 346-recipient queue",()=>{
+    const fixture=batchFixture(346);
+    const events=Array.from({length:101},(_,index)=>event(`recipient-${index}`,now));
+    const result=project({...fixture,events:observed(events)});
+    expect(result.sent.value).toBe(346);expect(result.complete).toBe(true);
+    expect(result.confirmedChoices.any).toMatchObject({status:"unknown",value:null});
+  });
+  it("keeps more than 200 observed response events unknown without hiding 346 sent receipts",()=>{
+    const fixture=batchFixture(346);
+    const responseEvents=fixture.receipts.value.slice(0,201).map((row,index)=>({providerMessageId:`cc${index.toString(16)}`,providerThreadId:row.providerThreadId,receiptId:row.receiptId,recipientId:row.recipientId,kind:"reply",occurredAt:now}));
+    const observation={schemaVersion:"crm.warm-reconnect-response-observation.v1",pilotId:pilot.pilotId,workspaceId:pilot.workspaceId,ownerUid:pilot.ownerUid,accountEmail:"mrosser@rossergallery.com",status:"complete",observedAt:now,inspectedThreads:346,expectedThreads:346,sentMessageIds:fixture.receipts.value.map(row=>row.providerMessageId).sort(),events:responseEvents};
+    const result=project({...fixture,observation:observed(observation)});
+    expect(result.sent.value).toBe(346);expect(result.replies).toMatchObject({status:"unknown",value:null});
+  });
   it("counts deduplicated attributed response observations only for the exact current sent set",()=>{
     const response={providerMessageId:"cc1",providerThreadId:"ab0",receiptId:"receipt-0",recipientId:"recipient-0",kind:"reply",occurredAt:now};
     const observation={schemaVersion:"crm.warm-reconnect-response-observation.v1",pilotId:pilot.pilotId,workspaceId:pilot.workspaceId,ownerUid:pilot.ownerUid,accountEmail:"mrosser@rossergallery.com",status:"complete",observedAt:now,inspectedThreads:5,expectedThreads:5,sentMessageIds:receipts.map(row=>row.providerMessageId),events:[response,response]};
@@ -68,13 +82,28 @@ describe("warm outreach results projection",()=>{
 });
 
 describe("outcome ownership",()=>{
-  it.each([20,21])("reads the overflow sentinel and handles %i receipt rows without silent truncation",async(count)=>{
+  it.each([Number.MAX_SAFE_INTEGER,346,0])("rejects a corrupt stored count %i before any receipt query",async(recipientCap)=>{
+    const collection=vi.fn();
+    await expect(readResultsReceipts({...pilot,recipientCap},{collection} as unknown as Firestore)).rejects.toMatchObject({status:409});
+    expect(collection).not.toHaveBeenCalled();
+  });
+  it.each(["extra","duplicate","foreign"])("rejects %s receipt evidence for an exact 346-recipient queue",async(change)=>{
+    const fixture=batchFixture(346);const rows=[...fixture.receipts.value];
+    if(change==="extra")rows.push({...rows[0],receiptId:"extra-receipt"});
+    if(change==="duplicate")rows[345]={...rows[0],receiptId:"duplicate-recipient"};
+    if(change==="foreign")rows[345]={...rows[345],ownerUid:"other-owner"};
+    let cap=0;const query={select:()=>query,limit:(value:number)=>{cap=value;return query;},get:async()=>({size:rows.length,docs:rows.map(row=>({id:row.receiptId,data:()=>row}))})};
+    const db={collection:()=>({doc:()=>({collection:()=>query})})} as unknown as Firestore;
+    await expect(readResultsReceipts(fixture.pilot,db)).rejects.toMatchObject({status:409});
+    expect(cap).toBe(347);
+  });
+  it.each([20,21,50,100,101,346])("reads the overflow sentinel and handles %i receipt rows without silent truncation",async(count)=>{
     const rows=batchFixture(count).receipts.value;let cap=Infinity;
     const query={select:()=>query,limit:(limit:number)=>{cap=limit;return query;},get:async()=>({size:Math.min(rows.length,cap),docs:rows.slice(0,cap).map(row=>({id:row.receiptId,data:()=>row}))})};
     const db={collection:()=>({doc:()=>({collection:()=>query})})} as unknown as Firestore;
-    const result=readResultsReceipts("pilot-1",db);
-    if(count===20)await expect(result).resolves.toHaveLength(20);else await expect(result).rejects.toMatchObject({status:409});
-    expect(cap).toBe(21);
+    const result=readResultsReceipts(batchFixture(count).pilot,db);
+    await expect(result).resolves.toHaveLength(count);
+    expect(cap).toBe(count+1);
   });
   beforeEach(()=>vi.mocked(assertPortfolioRegistryAccess).mockResolvedValue({workspaceId:"workspace",role:"owner"}));
   it("requires owner role even when an admin has registry access",async()=>{
@@ -89,6 +118,6 @@ describe("outcome ownership",()=>{
   it("rejects a receipt whose stored identifier differs from its document",async()=>{
     const query={select:()=>query,limit:()=>query,get:async()=>({size:1,docs:[{id:"different-document",data:()=>receipts[0]}]})};
     const db={collection:()=>({doc:()=>({collection:()=>query})})} as unknown as Firestore;
-    await expect(readResultsReceipts("pilot-1",db)).rejects.toMatchObject({status:409});
+    await expect(readResultsReceipts(pilot,db)).rejects.toMatchObject({status:409});
   });
 });

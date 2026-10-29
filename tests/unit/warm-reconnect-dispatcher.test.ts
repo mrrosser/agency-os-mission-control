@@ -92,7 +92,7 @@ describe("warm reconnect batch dispatcher", () => {
     ["campaignId", "other-campaign"], ["campaignVersion", "other-version"],
     ["tranche", "initial_5"], ["pilotId", "../other-pilot"], ["parentPilotId", "invalid"],
     ["batchSequence", 0], ["batchSequence", 1.5], ["recipientCap", 0],
-    ["recipientCap", 21], ["recipientCap", 2.5], ["state", "unknown"],
+    ["recipientCap", Number.MAX_SAFE_INTEGER], ["recipientCap", 2.5], ["state", "unknown"],
   ])("rejects a malformed or foreign lock: %s = %j", async (key, value) => {
     const { lock, db, reads } = fixture();
     lock[key as string] = value;
@@ -124,6 +124,22 @@ describe("warm reconnect batch dispatcher", () => {
     const { documents, db } = fixture();
     documents.delete(pilotPath);
     await expect(dispatch(db)).rejects.toMatchObject({ status: 409 });
+    expect(executorMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a large lock count that has no matching stored queue before executor state or provider work", async () => {
+    const { lock, pilot, db, reads } = fixture();
+    lock.recipientCap = pilot.recipientCap = Number.MAX_SAFE_INTEGER - 1;
+    await expect(dispatch(db)).rejects.toMatchObject({ status: 409 });
+    expect(reads).toEqual([lockPath, pilotPath]);
+    expect(executorMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate queue identities before executor state or provider work", async () => {
+    const { pilot, db, reads } = fixture();
+    pilot.recipients = [{ recipientId: "duplicate" }, { recipientId: "duplicate" }];
+    await expect(dispatch(db)).rejects.toMatchObject({ status: 409 });
+    expect(reads).toEqual([lockPath, pilotPath]);
     expect(executorMock).not.toHaveBeenCalled();
   });
 
@@ -168,7 +184,7 @@ describe("warm reconnect batch dispatcher", () => {
     expect(executorMock).toHaveBeenCalledOnce();
   });
 
-  it.each([11, 20])("dispatches one recipient per invocation for a launched %i-person batch", async (cap) => {
+  it.each([11, 20, 21, 50, 100, 101, 346])("dispatches one recipient per invocation for a launched %i-person batch", async (cap) => {
     const { lock, pilot, db } = fixture();
     lock.recipientCap = cap;
     pilot.recipientCap = cap;
@@ -184,6 +200,15 @@ describe("warm reconnect batch dispatcher", () => {
     documents.set(`${pilotPath}/executor/state`, { pilotId, workspaceId, complete: true, sentCount, claimedCount: 20, activeReceiptId: null, halted: false });
     expect((await dispatch(db)).outcome).toBe(sentCount === 20 ? "complete" : "sent");
     expect(executorMock).toHaveBeenCalledTimes(sentCount === 20 ? 0 : 1);
+  });
+
+  it.each([99, 100, 101])("requires the exact hundred-recipient completion count, not %i alone", async (sentCount) => {
+    const { lock, pilot, db, documents } = fixture();
+    lock.recipientCap = pilot.recipientCap = 100;
+    pilot.recipients = Array.from({ length: 100 }, (_, index) => ({ recipientId: `recipient-${index}` }));
+    documents.set(`${pilotPath}/executor/state`, { pilotId, workspaceId, complete: true, sentCount, claimedCount: 100, activeReceiptId: null, halted: false });
+    expect((await dispatch(db)).outcome).toBe(sentCount === 100 ? "complete" : "sent");
+    expect(executorMock).toHaveBeenCalledTimes(sentCount === 100 ? 0 : 1);
   });
 
   it.each([

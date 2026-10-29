@@ -1,4 +1,5 @@
 import "server-only";
+import { assertWarmReconnectRecipientQueue } from "@/lib/crm/warm-reconnect-recipient-queue";
 import { warmReconnectRecipientCopyReviewFingerprint, warmReconnectRecipientCreationIdentity } from "@/lib/crm/warm-reconnect-recipient-copy";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -20,7 +21,6 @@ import {
   WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES,
   WARM_RECONNECT_APPROVAL_TTL_HOURS,
   WARM_RECONNECT_INITIAL_PILOT_SIZE,
-  WARM_RECONNECT_MAX_PILOT_SIZE,
   type CreateWarmReconnectPilotRequest,
   type WarmReconnectActivationResponse,
   type WarmReconnectCandidate,
@@ -499,6 +499,7 @@ function pilotFromSnapshot(snapshot: { exists: boolean; data: () => DocumentData
   if (!pilot || pilot.schemaVersion !== "crm.warm-reconnect-pilot.v1") {
     throw new ApiError(409, "Warm reconnect pilot schema could not be reconciled.");
   }
+  assertWarmReconnectRecipientQueue(pilot);
   return pilot;
 }
 
@@ -741,7 +742,7 @@ export async function loadWarmReconnectActivationForUid(
       initialPilotSize: WARM_RECONNECT_INITIAL_PILOT_SIZE,
       expandedPilotRange: [6, 10],
       expandedPilotRequiresNewApproval: true,
-      followOnBatchRange: [1, WARM_RECONNECT_MAX_PILOT_SIZE],
+      followOnBatchRange: [1, null],
       approvalTtlHours: WARM_RECONNECT_APPROVAL_TTL_HOURS,
       launchAuthorizesExactProviderExecution: true,
       providerExecutionEnabled: isWarmReconnectProviderSendEnabled(),

@@ -7,7 +7,7 @@ import type { Logger } from "@/lib/logging";
 import { warmReconnectFollowOnPilotLockId, WARM_RECONNECT_CAMPAIGN_LOCK_COLLECTION } from "@/lib/crm/warm-reconnect-batches";
 import { WARM_RECONNECT_CAMPAIGN_ID, WARM_RECONNECT_CAMPAIGN_VERSION } from "@/lib/crm/warm-reconnect-types";
 import { runWarmReconnectPilotExecutor } from "@/lib/crm/warm-reconnect-executor";
-import { WARM_RECONNECT_MAX_PILOT_SIZE } from "@/lib/crm/warm-reconnect-activation-types";
+import { assertWarmReconnectRecipientQueue } from "@/lib/crm/warm-reconnect-recipient-queue";
 
 type Target = { outcome: "idle" | "awaiting_launch" | "complete" | "inactive"; pilotId?: string } | { outcome: "ready"; pilotId: string };
 
@@ -25,7 +25,7 @@ export async function resolveWarmReconnectDispatchTarget(uid: string, db: Firest
     !/^wrp_[a-f0-9]{32}$/.test(lock.pilotId ?? "") ||
     !/^wrp_[a-f0-9]{32}$/.test(lock.parentPilotId ?? "") ||
     !Number.isSafeInteger(lock.batchSequence) || lock.batchSequence < 1 ||
-    !Number.isSafeInteger(lock.recipientCap) || lock.recipientCap < 1 || lock.recipientCap > WARM_RECONNECT_MAX_PILOT_SIZE ||
+    !Number.isSafeInteger(lock.recipientCap) || lock.recipientCap < 1 || !Number.isSafeInteger(lock.recipientCap + 1) ||
     !["active", "released_before_provider"].includes(lock.state)) {
     throw new ApiError(409, "The follow-on dispatch lock is invalid.");
   }
@@ -40,6 +40,7 @@ export async function resolveWarmReconnectDispatchTarget(uid: string, db: Firest
     pilot.recipients.length !== lock.recipientCap) {
     throw new ApiError(409, "The active batch does not match its dispatch lock.");
   }
+  assertWarmReconnectRecipientQueue(pilot);
   if (["stopped", "stale", "rejected"].includes(pilot.status)) return { outcome: "inactive", pilotId: pilot.pilotId };
   if (pilot.status !== "launch_requested") return { outcome: "awaiting_launch", pilotId: pilot.pilotId };
   const stateSnapshot = await pilotRef.collection("executor").doc("state").get();

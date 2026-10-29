@@ -152,6 +152,47 @@ function approve(pilot: WarmReconnectPilot, now = new Date("2026-08-12T14:00:00.
 }
 
 describe("warm reconnect activation state machine", () => {
+  it("freezes an exact 100-person audience without approving or starting it", () => {
+    const candidates = Array.from({ length: 100 }, (_, index) => candidate(index + 1));
+    const base = request();
+    const pilot = createWarmReconnectPilot({
+      pilotId: "large-pilot", workspaceId: "workspace-1", ownerUid: "owner-1",
+      legacyDncOrgId: "org-1", candidates, googleReady: true,
+      fromEmail: "mrosser@rossergallery.com", accountId: "google-account-1",
+      preferenceOrigin: "https://leadflow-review.web.app", followOnNotBeforeMs: 0,
+      request: { ...base, tranche: "follow_on", parentPilotId: "parent", batchSequence: 1,
+        recipientCap: 100, candidateRecipientIds: candidates.map(row => row.recipientId) },
+    });
+    expect(pilot.recipients).toHaveLength(100);
+    expect(pilot.status).toBe("needs_recipient_review");
+    expect(pilot.approval).toBeNull();
+    expect(pilot.launchRequestedAt).toBeNull();
+    expect(pilot.availableActions.canLaunch).toBe(false);
+    expect(() => assertWarmReconnectPilotFingerprints(pilot)).not.toThrow();
+  });
+
+  it("rejects a source-heavy frozen audience by UTF-8 bytes before it can be persisted", () => {
+    const candidates = Array.from({ length: 100 }, (_, index) => candidate(index + 1));
+    for (const row of candidates) row.sourceEvidence = Array.from({ length: 10 }, (_, index) => ({
+      ...row.sourceEvidence[0], evidenceRef: `crm_source_records/${index}-${"a".repeat(90)}`,
+    }));
+    const input = {
+      pilotId: "large-pilot", workspaceId: "workspace-1", ownerUid: "owner-1",
+      legacyDncOrgId: "org-1", candidates, googleReady: true,
+      fromEmail: "mrosser@rossergallery.com", accountId: "google-account-1",
+      preferenceOrigin: "https://leadflow-review.web.app", followOnNotBeforeMs: 0,
+      request: { ...request(), tranche: "follow_on" as const, parentPilotId: "parent", batchSequence: 1,
+        recipientCap: 100, candidateRecipientIds: candidates.map(row => row.recipientId) },
+    };
+    expect(() => createWarmReconnectPilot(input)).not.toThrow();
+    for (const row of candidates) for (const evidence of row.sourceEvidence) {
+      evidence.evidenceRef = evidence.evidenceRef.replace("a".repeat(90), "é".repeat(90));
+    }
+    expect(() => createWarmReconnectPilot(input)).toThrowError(
+      "The frozen audience exceeds the review storage bound. Create a smaller batch."
+    );
+  });
+
   it("freezes neutral greetings before review without changing source names or consent", () => {
     const candidates = [1, 2, 3, 4, 5].map(candidate);
     const names = ["Contact", "Dr. Taylor Example", "Example, Jordan", "Screen Printing", "alex Example"];

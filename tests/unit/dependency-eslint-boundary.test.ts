@@ -169,7 +169,7 @@ describe("application-scoped Next lint dependency boundary", () => {
     const lock = JSON.parse(readFileSync(join(projectRoot, "package-lock.json"), "utf8")) as {
       packages: Record<string, LockedPackage>;
     };
-    expect(manifest.overrides["@next/eslint-plugin-next@15.5.25"]).toEqual({
+    expect(manifest.overrides["@next/eslint-plugin-next@15.5.28"]).toEqual({
       "fast-glob": "npm:tinyglobby@0.2.17",
     });
     expect(manifest.overrides["fast-glob"]).toBeUndefined();
@@ -180,7 +180,7 @@ describe("application-scoped Next lint dependency boundary", () => {
     );
     expect(consumers.map(([name]) => name), "A new fast-glob consumer needs its own reviewed compatibility decision")
       .toEqual(["node_modules/@next/eslint-plugin-next"]);
-    expect(consumers[0][1].version).toBe("15.5.25");
+    expect(consumers[0][1].version).toBe("15.5.28");
     const aliases = entries.filter(([name]) => /(?:^|\/)node_modules\/fast-glob$/.test(name));
     expect(aliases).toHaveLength(1);
     expect(aliases[0][1]).toMatchObject({

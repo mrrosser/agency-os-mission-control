@@ -4,7 +4,7 @@
 
 Remove the artificial follow-on recipient-count ceiling. Each stored audience remains an exact finite queue, bounded by request/storage bytes and the complete available candidate evidence. Existing business-card contacts are the finite campaign audience; this does not authorize recurring acquisition or newsletter enrollment. Keep the campaign version, renderer, initial-five contract, exact approvals, invitation ledger, suppressions, failure holds, one claim per invocation, cadence, and provider controls unchanged.
 
-The combined local release candidate also updates only Vite 7.3.6 to 7.3.7 and the existing transitive follow-redirects 1.16.0 to 1.16.1, using official npm registry artifacts. No other dependency version, override, or direct runtime dependency changes.
+The initial combined candidate updates Vite 7.3.6 to 7.3.7 and transitive follow-redirects 1.16.0 to 1.16.1. The October 29 PR audit also identified existing high/critical advisories in Next.js, body-parser and Zod. The correction uses official Next.js 15.5.28 with its matching lint package, body-parser 1.20.9 and Zod 4.6.6. Retarget the existing version-specific lint alias and its exact version assertions without relaxing the dependency boundary. Keep the audit threshold, all other security overrides, and the complete regression suite intact. No major dependency upgrade is included.
 
 ## Definition of done
 

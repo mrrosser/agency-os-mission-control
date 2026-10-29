@@ -13,7 +13,6 @@ export const WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES = [
 
 export const WARM_RECONNECT_APPROVAL_TTL_HOURS = 24 as const;
 export const WARM_RECONNECT_INITIAL_PILOT_SIZE = 5 as const;
-export const WARM_RECONNECT_MAX_PILOT_SIZE = 20 as const;
 export type WarmReconnectApprovalScope =
   | "exact_five_one_time_reconnection_emails"
   | "exact_batch_one_time_reconnection_emails";
@@ -334,7 +333,8 @@ export interface WarmReconnectActivationResponse {
     initialPilotSize: typeof WARM_RECONNECT_INITIAL_PILOT_SIZE;
     expandedPilotRange: readonly [6, 10];
     expandedPilotRequiresNewApproval: true;
-    followOnBatchRange: readonly [1, typeof WARM_RECONNECT_MAX_PILOT_SIZE];
+    /** Null means no application recipient-count ceiling; byte bounds still apply. */
+    followOnBatchRange: readonly [1, null];
     approvalTtlHours: typeof WARM_RECONNECT_APPROVAL_TTL_HOURS;
     launchAuthorizesExactProviderExecution: true;
     providerExecutionEnabled: boolean;

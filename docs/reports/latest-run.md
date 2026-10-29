@@ -1,30 +1,31 @@
-# Local recipient-copy support — 2026-10-19
+# Finite CRM audiences without a recipient-count ceiling - 2026-10-28
 
-Status: locally prepared and reviewed; not deployed or release-ready. All proposed recipient copy remains unapproved.
+Status: local successor candidate prepared for review against base 5cb1115af17ab0a92240d56b5bbb2aadc7884671. Not published, merged or deployed. The previous 16-file candidate remains unchanged. A fresh dependency advisory check is outstanding; do not describe this as release-approved.
 
-The isolated implementation adds optional recipient-scoped greeting and first-paragraph records for the existing approved-design format. Identity, candidate fingerprint, exact content, renderer implementation and normalized rendered output are frozen into audience/action approval. Both creation replay paths bind the layer. Approval requires an explicit current copy-review fingerprint and all-recipient previews. Later variants are visible in review; checkbox assent does not survive a changed pilot or content binding.
+## Change and preserved behavior
 
-The shared parent artifact and exact shared-content comparison remain intact. A personalized completed parent must also retain its exact copy-review approval binding. Existing consent, suppression, prior-invitation, duplicate, cadence, capability and ambiguous-outcome protections remain in place. Historical renderer, MIME, greeting and permission sources are unchanged.
+Remove the artificial follow-on recipient-count maximum across UI, API, domain validation, dispatch and results. Initial-five behavior remains. The explicit Select all available for review action captures only the current candidate snapshot; it does not approve, launch or add later arrivals. Selection must remain distinct and present in complete current evidence.
 
-## Validation
+The frozen recipient array remains the finite work queue. Before deriving receipt-read limits, validate its positive safe integer count, exact array length and distinct recipient identities. Read at most the exact count plus one and reject extra or malformed receipts. Released-holder recovery validates the holder before reading its receipts. Existing fingerprints, renderer, campaign version, exact approvals, 24-hour approval expiry, invitation ledgers, suppressions, failure holds and concurrency controls remain unchanged. Workers still claim one recipient per invocation, with at least 60 seconds between provider attempts and no automatic retry of uncertain outcomes.
 
-- Full unit/smoke run: 2,362/2,370 passed across 270 files. All eight failures were Windows sandbox EACCES connecting to local gRPC fixture servers.
-- Focused local compatibility rerun: 18/18 passed, including all eight failed cases. Its eight connections were permitted only to literal 127.0.0.1 server ports opened in the same process; no external connections executed.
-- New feature cases: 79/79 passed under strict offline isolation.
-- Independent focused review: 170/170 passed, including actual claim and provider transaction-boundary drift, all variants, approval replay, UI assent invalidation and parent completion.
-- TypeScript passed. ESLint passed with the two existing unrelated Google callback unused-variable warnings.
-- Gitleaks patch scan: zero findings.
-- Independent five-mode source/runtime comparison preserves legacy renderer/MIME implementation fingerprints, all pilot fingerprints, approved/launched snapshots and previews. This does not prove production-bundled function-source parity.
-- Private mapping outside the repository reproduces all twenty proposed messages exactly after inert-link placeholder normalization. Four opening changes and two greeting changes affect five recipients; sixteen openings and eighteen greetings stay unchanged.
+The 32 KiB request and 512 KiB initial frozen-record budgets remain. Large or copy-heavy audiences may need separate review windows through the existing predecessor/approval workflow. Registry and reporting bounds still fail closed or report unknown. Removing a marketing count ceiling does not grant unlimited storage, source scans, provider quota or recurring contact acquisition.
 
-## Limitations
+The prior narrow dependency fixes remain exactly Vite 7.3.7 and follow-redirects 1.16.1. Package manifests and lockfile are byte-identical to the earlier combined candidate; no further package change was made.
 
-The production build failed within the offline boundary: eight existing Google Fonts connection attempts were blocked before execution, and a generated `.next/types` directory returned EPERM. The guard was not relaxed. No complete production build or production-bundled `Function.toString()` parity has been established.
+## Local validation
 
-No fresh registry audit ran. Package manifests match the earlier same-day audit exactly; that historical audit reported eighteen moderate and zero high/critical findings. This is not a current advisory refresh.
+- Full unit/smoke run covered 271 files and 2,502 tests. Initially 2,492 passed; eight synthetic gRPC tests were blocked by sandbox loopback restrictions and two UI tests needed fixture/text-expectation corrections.
+- Approved isolated gRPC rerun: all 8 passed, with connections restricted to in-process fixture ports on literal 127.0.0.1. Corrected full UI file rerun: all 43 passed. Thus all 2,502 tests have passing coverage across the main run and focused reruns; this is not a claim of one clean all-suite invocation.
+- Independent backend runs: 611 tests passed across 12 files, covering 101/346 synthetic audiences, corrupt counts before queries, exact/extra/duplicate receipts, unchanged historical fingerprints, reporting overflow and one provider call per invocation.
+- Full ESLint passed with zero errors and the two existing Google callback unused-variable warnings. Full tsc --noEmit passed.
+- Production Next.js build passed, including its application type check. The first restricted attempt failed on font DNS and build-directory permissions. The approved rerun allowed only public Google Fonts and loopback traffic; its connection log contains only fonts.googleapis.com and fonts.gstatic.com. Sending and telemetry were disabled.
+- Test network guards prevented external connections. Independent source review found no concrete defect or provider-control weakening.
+- Code-only export reverse-apply validation and Gitleaks scan passed. Final exported code and documentation are scanned separately from private operational evidence.
 
-No deployment, PR, merge, live smoke, pilot creation, capability issuance, provider call, DNS lookup, contact write, consent write or email send occurred. Owner approval of the exact recipients and proposed copy, current relationship/permission/prior-send checks, authorized fresh domain checks, and the separate application approval/launch workflow remain outstanding.
+A fresh npm audit did not complete: the initial restricted invocation could not resolve the registry, and the subsequent approval review denied metadata disclosure. No alternate audit route was used. The unchanged earlier candidate's October 21 installed audit reported zero high/critical and 16 moderate findings; that historical result is not a current advisory refresh.
 
-## Evidence outside this isolated repository
+## Release and execution boundary
 
-The workspace contains the final code freeze, code patch, complete patch, aggregate readiness receipt, private mapping, original test receipts and independent review artifacts under the `CRM_RECIPIENT_COPY_` / `CRM_NEXT_TWENTY_RECIPIENT_COPY_` prefixes. The canonical source checkout remains clean at a55a81cc0394f7ec5f7a7c37e73ceaff27f163cf (deployed tree 9437c0a64fe82e2a86852f5fc7bcbf9ad46ffc73). No private recipient identity or proposed personal prose is included in source or tests.
+Use the protected PR and normal main-branch Firebase workflow after permitted repository access, current checks and review. Merge to main triggers deployment and requires its own authorization; no manual deployment around a blocked publication route is part of this work.
+
+Before launch, reconcile current Sent, responses, suppression and failures, establish the applicable account edition and documented provider limits with recent usage/status evidence, and complete exact-message application approval. Gmail REST does not document a remaining daily-send counter. Absence of that counter alone is not a denial, and a successful Gmail read does not prove capacity. Follow the batch runbook's capacity assessment, pacing, retry-time and uncertain-outcome rules. No contact data, private reports, credentials, scheduler changes or provider settings are included in this candidate.

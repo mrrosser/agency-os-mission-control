@@ -5,7 +5,6 @@ import { requireFirebaseAuth } from "@/lib/api/auth";
 import { parseBoundedWarmReconnectJson } from "@/lib/crm/warm-reconnect-activation";
 import { createWarmReconnectPilotForUid } from "@/lib/crm/warm-reconnect-repository";
 import { warmReconnectRecipientCopyInputSchema } from "@/lib/crm/warm-reconnect-recipient-copy";
-import { WARM_RECONNECT_MAX_PILOT_SIZE } from "@/lib/crm/warm-reconnect-activation-types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,7 +40,7 @@ const commonFields = {
     idempotencyKey: identifier,
     campaignPreviewFingerprint: sha256,
     sender: senderSchema,
-    recipientCopies: z.array(warmReconnectRecipientCopyInputSchema).min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE).optional(),
+    recipientCopies: z.array(warmReconnectRecipientCopyInputSchema).min(1).optional(),
     contentMode: z.enum(["artwork_html", "plain_text", "preference_buttons", "approved_design_v2"]).optional(),
     artworkEmailApproval: z
       .object({
@@ -62,8 +61,8 @@ const bodySchema = z.discriminatedUnion("tranche", [
     tranche: z.literal("follow_on"),
     parentPilotId: z.string().regex(/^wrp_[a-f0-9]{32}$/),
     batchSequence: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    recipientCap: z.number().int().min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE),
-    candidateRecipientIds: z.array(identifier).min(1).max(WARM_RECONNECT_MAX_PILOT_SIZE),
+    recipientCap: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER - 1),
+    candidateRecipientIds: z.array(identifier).min(1),
   }).strict(),
 ])
   .superRefine((body, context) => {

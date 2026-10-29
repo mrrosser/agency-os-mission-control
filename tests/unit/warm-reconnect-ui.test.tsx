@@ -117,7 +117,7 @@ function completedInitialFixture() {
       profileId: "rosser_gallery_send", businessId: "rosser_nft_gallery", label: "Gallery",
       connected: true, gmailCapable: true, accountEmail: "mrosser@rossergallery.com", state: "connected",
     }],
-    candidates: Array.from({ length: 21 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`)),
+    candidates: Array.from({ length: 346 }, (_, index) => recipient(`next-${index + 1}`, `Next ${index + 1}`)),
     control: { ...activation.control, initialPilotId: "completed-initial" as string | null, activePilotId: null as string | null, followOnParentPilotId: "completed-initial" as string | null },
     history: { ...activation.history, pilotIds: ["completed-initial"] },
     pilots: [{
@@ -346,7 +346,7 @@ describe("warm reconnect campaign UI", () => {
     expect(html).toContain("Activation desk · controlled pilot");
     expect(html).toContain("Permission first. Approval and launch stay separate.");
     expect(html).toContain("Prepare a recipient list before approving and starting a batch.");
-    expect(html).toContain("Each list is reviewed before sending");
+    expect(html).toContain("Each exact list is reviewed before sending");
     expect(launchButton(html)).toBeUndefined();
     expect(buttonContaining(html, "Approve exact pilot")).toBeUndefined();
     expect(html).toContain("Provider execution status is unknown until live controls load.");
@@ -454,11 +454,12 @@ describe("warm reconnect campaign UI", () => {
     expect(html).not.toContain("fixture-pilot");
   });
 
-  it.each([1, 4, 10, 11, 20])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
+  it.each([1, 4, 10, 11, 20, 21, 50, 100, 101, 346])("offers a reviewed follow-on list of %i after proven completion and excludes old recipients", (count) => {
     loadCompletedInitialResults(true, Array.from({ length: count }, (_, index) => `next-${index + 1}`));
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
 
-    expect(html).toContain("Select 1–20");
+    const selectionLegend = html.match(/<legend\b[^>]*>([\s\S]*?)<\/legend>/)?.[1];
+    expect(selectionLegend).toContain("Select contacts for review");
     expect(html).toContain("Keep the approved email");
     expect(html).toContain("next-1@example.test");
     expect(html).not.toContain("invited-1@example.test");
@@ -466,9 +467,9 @@ describe("warm reconnect campaign UI", () => {
     expect(buttonContaining(html, "Prepare next batch for review")).not.toContain('disabled=""');
     expect(launchButton(html)).toBeUndefined();
     expect(buttonContaining(html, "Start approved")).toBeUndefined();
-    if (count === 20) {
-      const extraCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-21@example.test"));
-      expect(extraCandidate).toContain('disabled=""');
+    if (count === 100) {
+      const extraCandidate = html.match(/<label\b[^>]*>[\s\S]*?<\/label>/g)?.find((label) => label.includes("next-101@example.test"));
+      expect(extraCandidate).not.toContain('disabled=""');
     }
   });
 
@@ -476,16 +477,34 @@ describe("warm reconnect campaign UI", () => {
     loadCompletedInitialResults(false, ["next-1"]);
     if (completion === null) hookState.overrides[15] = null;
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={null} />);
-    expect(html).not.toContain("Select 1–20");
+    expect(html).not.toContain("Select contacts for review");
     expect(buttonContaining(html, "Prepare next batch for review")).toBeUndefined();
     expect(html).toContain("invited-1@example.test");
     expect(launchButton(html)).toContain('disabled=""');
   });
 
-  it("does not prepare a twenty-one-person selection even when client state is oversized", () => {
-    loadCompletedInitialResults(true, Array.from({ length: 21 }, (_, index) => `next-${index + 1}`));
+  it.each([
+    ["next-1", "next-1"],
+    ["next-1", "not-in-current-candidates"],
+  ])("does not prepare duplicate or stale client selections: %j", (...selected) => {
+    loadCompletedInitialResults(true, selected);
     const html = renderToStaticMarkup(<WarmReconnectActivation campaign={buildWarmReconnectCampaignDraft(summary)} />);
     expect(buttonContaining(html, "Prepare next batch for review")).toContain('disabled=""');
+  });
+
+  it("selects only the current candidate snapshot without preparing or enrolling later arrivals", () => {
+    loadCompletedInitialResults(true);
+    hookState.interactive = true;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    treeButton(renderInteractive(), "Select all available for review")!.props.onClick();
+    expect(hookState.values?.[4]).toHaveLength(346);
+    const activation = hookState.values![0] as ReturnType<typeof completedInitialFixture>;
+    activation.candidates.push({ ...activation.candidates[0], recipientId: "later-arrival", displayName: "Later arrival", email: "later@example.test" });
+    renderInteractive();
+    expect(hookState.values?.[4]).toHaveLength(346);
+    expect(hookState.values?.[4]).not.toContain("later-arrival");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([false, true])("labels an active three-recipient batch and requires its explicit approval to launch: %s", (approved) => {

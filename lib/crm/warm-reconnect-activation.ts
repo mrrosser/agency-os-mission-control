@@ -1,5 +1,6 @@
 import "server-only";
 
+import { assertWarmReconnectRecipientQueue } from "@/lib/crm/warm-reconnect-recipient-queue";
 import { ApiError } from "@/lib/api/handler";
 import { readBoundedRequestBody } from "@/lib/api/bounded-body";
 import { z } from "zod";
@@ -388,6 +389,7 @@ export function assertWarmReconnectPilotFingerprints(
   pilot: WarmReconnectPilot
 ): WarmReconnectPilot["fingerprints"] {
   assertWarmReconnectBatchShape(pilot);
+  assertWarmReconnectRecipientQueue(pilot);
   const current = computeWarmReconnectPilotFingerprints(pilot);
   if (
     current.artifactFingerprint !== pilot.fingerprints.artifactFingerprint ||
@@ -717,6 +719,9 @@ export function materializeWarmReconnectPilot(
   };
 }
 
+// Leave space for subsequent decisions/approval metadata below the storage document limit.
+const MAX_FROZEN_PILOT_BYTES = 512 * 1024;
+
 export function createWarmReconnectPilot(input: {
   pilotId: string;
   workspaceId: string;
@@ -874,6 +879,9 @@ export function createWarmReconnectPilot(input: {
       launchAuthorizesExactProviderExecution: true,
     },
   };
+  if (Buffer.byteLength(JSON.stringify(pilot), "utf8") > MAX_FROZEN_PILOT_BYTES) {
+    throw new ApiError(413, "The frozen audience exceeds the review storage bound. Create a smaller batch.");
+  }
   return materializeWarmReconnectPilot(pilot, { googleReady: input.googleReady, now: new Date(now) });
 }
 

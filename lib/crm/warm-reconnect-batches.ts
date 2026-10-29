@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { warmReconnectRecipientCopyReviewFingerprint } from "@/lib/crm/warm-reconnect-recipient-copy";
 import { ApiError } from "@/lib/api/handler";
-import { WARM_RECONNECT_INITIAL_PILOT_SIZE, WARM_RECONNECT_MAX_PILOT_SIZE, type WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
+import { WARM_RECONNECT_INITIAL_PILOT_SIZE, type WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
 import { resolveWarmReconnectCampaignContentMode } from "@/lib/crm/warm-reconnect-campaign-design";
 import { warmReconnectFingerprint } from "@/lib/crm/warm-reconnect-dedupe";
 import { parseWarmReconnectInvitationLedgerDocument, warmReconnectInvitationBindingMatches, warmReconnectInvitationReservationBindingForPilot } from "@/lib/crm/warm-reconnect-invitation-ledger";
@@ -18,7 +18,7 @@ export function assertWarmReconnectBatchShape(pilot: BatchShape): void {
     ? pilot.recipientCap === WARM_RECONNECT_INITIAL_PILOT_SIZE &&
       pilot.parentPilotId === undefined && pilot.batchSequence === undefined && pilot.followOnNotBeforeMs === undefined
     : pilot.tranche === "follow_on" && Number.isSafeInteger(pilot.recipientCap) &&
-      pilot.recipientCap >= 1 && pilot.recipientCap <= WARM_RECONNECT_MAX_PILOT_SIZE &&
+      pilot.recipientCap >= 1 && Number.isSafeInteger(pilot.recipientCap + 1) &&
       typeof pilot.parentPilotId === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(pilot.parentPilotId) &&
       pilot.parentPilotId !== pilot.pilotId && Number.isSafeInteger(pilot.batchSequence) &&
       Number(pilot.batchSequence) >= 1 && Number.isSafeInteger(pilot.followOnNotBeforeMs) && Number(pilot.followOnNotBeforeMs) >= 0;

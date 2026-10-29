@@ -362,7 +362,7 @@ function followOnExecutorFixture(cap: number) {
 }
 
 describe("warm reconnect provider executor", () => {
-  it.each([1, 4, 10, 11, 20])("completes a follow-on batch at its exact cap %i", async (cap) => {
+  it.each([1, 4, 10, 11, 20, 21, 50, 100, 101, 346])("completes a follow-on batch at its exact cap %i", async (cap) => {
     const fixture = followOnExecutorFixture(cap);
     const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-final", providerThreadId: "thread-final", correlationId: "batch-completion", now: RUN_AT, db: fixture.input.db });
     expect(result).toEqual({ complete: true });
@@ -388,6 +388,30 @@ describe("warm reconnect provider executor", () => {
       expect.objectContaining({ path: `crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state` }),
       expect.objectContaining({ sentCount: priorSends + 1, complete: false }), { merge: true }
     );
+  });
+
+  it.each([19, 49, 98])("keeps a hundred-person batch open after advancing from %i prior sends", async (priorSends) => {
+    const fixture = followOnExecutorFixture(100);
+    fixture.documents.get(`crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state`)!.sentCount = priorSends;
+    const result = await recordWarmReconnectSent({ claim: fixture.claim, providerMessageId: "gmail-next", providerThreadId: "thread-next", correlationId: "batch-progress", now: RUN_AT, db: fixture.input.db });
+    expect(result).toEqual({ complete: false });
+    expect(fixture.set).toHaveBeenCalledWith(
+      expect.objectContaining({ path: `crm_warm_reconnect_pilots/${fixture.claim.pilot.pilotId}/executor/state` }),
+      expect.objectContaining({ sentCount: priorSends + 1, complete: false }), { merge: true }
+    );
+  });
+
+  it.each([21, 50, 100, 101, 346])("claims and sends only once per invocation for a %i-person batch", async (cap) => {
+    const { claim } = followOnExecutorFixture(cap);
+    const deps = dependencies({ claimNext: vi.fn(async () => ({ kind: "claimed" as const, claim })) });
+    const result = await runWarmReconnectPilotExecutor({
+      uid: claim.pilot.ownerUid, pilotId: claim.pilot.pilotId, correlationId: "finite-batch-single-claim", log, db,
+      now: RUN_AT, dependencies: deps,
+    });
+    expect(result).toMatchObject({ outcome: "sent", providerCalled: true, complete: false });
+    expect(deps.claimNext).toHaveBeenCalledOnce();
+    expect(deps.sendMessage).toHaveBeenCalledOnce();
+    expect(deps.recordSent).toHaveBeenCalledOnce();
   });
 
   it("waits for the parent cadence without creating an executor or claiming a recipient", async () => {

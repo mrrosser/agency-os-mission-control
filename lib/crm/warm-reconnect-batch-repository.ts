@@ -3,7 +3,8 @@ import { warmReconnectRecipientCreationIdentity } from "@/lib/crm/warm-reconnect
 import { randomUUID } from "node:crypto";
 import { FieldValue, type DocumentData, type Firestore, type Transaction } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
-import { WARM_RECONNECT_MAX_PILOT_SIZE, type WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
+import type { WarmReconnectPilot } from "@/lib/crm/warm-reconnect-activation-types";
+import { assertWarmReconnectRecipientQueue } from "@/lib/crm/warm-reconnect-recipient-queue";
 import { assertWarmReconnectPilotFingerprints, canReleaseWarmReconnectInitialPilotLock, warmReconnectInitialPilotLockId, WARM_RECONNECT_EXECUTION_POLICY } from "@/lib/crm/warm-reconnect-activation";
 import { assertWarmReconnectFollowOnContent, assertWarmReconnectFollowOnReservation, assertWarmReconnectParentCompletion, warmReconnectFollowOnPilotLockId, warmReconnectBatchReceiptId, WARM_RECONNECT_CAMPAIGN_LOCK_COLLECTION, WARM_RECONNECT_FOLLOW_ON_LOCK_SCHEMA_VERSION } from "@/lib/crm/warm-reconnect-batches";
 import { WARM_RECONNECT_INVITATION_LEDGER_COLLECTION, parseWarmReconnectInvitationLedgerDocument, warmReconnectInvitationBindingMatches, warmReconnectInvitationReservationBindingForPilot } from "@/lib/crm/warm-reconnect-invitation-ledger";
@@ -40,23 +41,26 @@ async function assertReleasedHolderNeverSent(input: {
   db: Firestore; transaction: Transaction; lock: DocumentData; parent: WarmReconnectPilot;
 }): Promise<void> {
   const ref = input.db.collection(PILOTS).doc(String(input.lock.pilotId || "invalid"));
-  const [snapshot, state, receipts] = await Promise.all([
+  const [snapshot, state] = await Promise.all([
     input.transaction.get(ref), input.transaction.get(ref.collection("executor").doc("state")),
-    input.transaction.get(ref.collection("delivery_receipts").limit(WARM_RECONNECT_MAX_PILOT_SIZE + 1)),
   ]);
   const holder = snapshot.data() as WarmReconnectPilot | undefined;
   if (!holder || holder.pilotId !== snapshot.id || holder.pilotId !== input.lock.pilotId ||
       !["stopped", "rejected"].includes(holder.status) || holder.workspaceId !== input.parent.workspaceId ||
       holder.ownerUid !== input.parent.ownerUid || holder.parentPilotId !== input.parent.pilotId ||
-      holder.batchSequence !== input.lock.batchSequence || holder.recipientCap !== input.lock.recipientCap ||
-      !canReleaseWarmReconnectInitialPilotLock({ executorState: state.data(), receipts: receipts.docs.map(doc => doc.data()), recipientCap: holder.recipientCap }) ||
+      holder.batchSequence !== input.lock.batchSequence || holder.recipientCap !== input.lock.recipientCap) {
+    throw new ApiError(409, "The released follow-on batch has unresolved execution evidence.");
+  }
+  assertWarmReconnectPilotFingerprints(holder);
+  const recipientCount = assertWarmReconnectRecipientQueue(holder);
+  const receipts = await input.transaction.get(ref.collection("delivery_receipts").limit(recipientCount + 1));
+  if (!canReleaseWarmReconnectInitialPilotLock({ executorState: state.data(), receipts: receipts.docs.map(doc => doc.data()), recipientCap: recipientCount }) ||
       receipts.docs.some(doc => {
         const receipt = doc.data();
         return doc.id !== receipt.receiptId || receipt.status !== "stopped_before_provider" ||
           receipt.pilotId !== holder.pilotId || receipt.workspaceId !== holder.workspaceId || receipt.ownerUid !== holder.ownerUid ||
           receipt.providerMessageId || receipt.providerThreadId || receipt.sentAtMs;
       })) throw new ApiError(409, "The released follow-on batch has unresolved execution evidence.");
-  assertWarmReconnectPilotFingerprints(holder);
   const ledgers = await Promise.all(holder.recipients.map(recipient => input.transaction.get(
     input.db.collection(WARM_RECONNECT_INVITATION_LEDGER_COLLECTION).doc(
       warmReconnectInvitationReservationBindingForPilot(holder, recipient, warmReconnectBatchReceiptId(holder, recipient.recipientId)).reservationId

@@ -28,6 +28,7 @@ function memoryFirestore() {
   const records = new Map<string, Data>();
   const versions = new Map<string, number>();
   const writes: string[] = [];
+  const queryReads: Array<{ path: string; cap?: number }> = [];
   let attempts = 0;
   let beforeCommit: (() => void) | undefined;
   function touch(path: string) {
@@ -63,6 +64,7 @@ function memoryFirestore() {
   }
   function read(ref: Ref, store: Map<string, Data>) {
     if (!ref.query) return snapshot(ref.path, store);
+    queryReads.push({ path: ref.path, cap: ref.cap });
     const paths = [...store.keys()].filter((path) =>
       path.startsWith(`${ref.path}/`) && !path.slice(ref.path.length + 1).includes("/") &&
       (ref.filters || []).every(([field, value]) => store.get(path)?.[field] === value)
@@ -103,7 +105,7 @@ function memoryFirestore() {
     },
   } as unknown as Firestore;
   return {
-    db, records, writes, put, remove,
+    db, records, writes, queryReads, put, remove,
     attempts: () => attempts,
     beforeCommit: (hook: () => void) => { beforeCommit = hook; },
   };
@@ -348,6 +350,25 @@ describe("warm reconnect follow-on repository transactions", () => {
     expect((await f.reserve()).replayed).toBe(false);
     expect(f.records.get(FOLLOW_ON_LOCK)).toMatchObject({ state: "active", pilotId: "child-a", priorPilotId: "released-holder" });
     for (const [path, data] of preserved) expect(f.records.get(path)).toEqual(data);
+  });
+
+  it("derives a released 346-person holder receipt bound from its exact stored queue", async () => {
+    const f = fixture();
+    const old = seedReleasedHolder(f, 346);
+    expect((await f.reserve()).replayed).toBe(false);
+    expect(f.queryReads.filter(read => read.path === `${old.holderPath}/delivery_receipts`)).toEqual([
+      { path: `${old.holderPath}/delivery_receipts`, cap: 347 },
+    ]);
+  });
+
+  it("rejects a corrupted released holder count before querying its receipts", async () => {
+    const f = fixture();
+    const old = seedReleasedHolder(f);
+    f.put(old.holderPath, { ...f.records.get(old.holderPath), recipientCap: Number.MAX_SAFE_INTEGER - 1 });
+    f.put(FOLLOW_ON_LOCK, { ...f.records.get(FOLLOW_ON_LOCK), recipientCap: Number.MAX_SAFE_INTEGER - 1 });
+    await expect(f.reserve()).rejects.toMatchObject({ status: 409 });
+    expect(f.queryReads.some(read => read.path === `${old.holderPath}/delivery_receipts`)).toBe(false);
+    expect(f.writes).toEqual([]);
   });
 
   it("checks a twenty-person released holder beyond the former eleven-receipt read bound", async () => {

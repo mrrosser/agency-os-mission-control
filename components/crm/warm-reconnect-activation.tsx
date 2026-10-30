@@ -4,14 +4,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
+  CheckCheck,
   CircleStop,
   ExternalLink,
   KeyRound,
+  LayoutGrid,
+  List,
   Loader2,
   MailCheck,
   RefreshCw,
+  Search,
   ShieldCheck,
   UsersRound,
+  Zap,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { Button } from "@/components/ui/button";
@@ -184,6 +189,10 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const [resultsRefresh, setResultsRefresh] = useState(0);
   const [activationNeedsRefresh, setActivationNeedsRefresh] = useState(false);
   const [recipientCopyAssent, setRecipientCopyAssent] = useState<string | null>(null);
+  const [bulkAttestProgress, setBulkAttestProgress] = useState<{ current: number; total: number } | null>(null);
+  const [bulkAttestNote, setBulkAttestNote] = useState("Personally recognized from prior business networking arrangements, workshops, and career engagements.");
+  const [recipientSearch, setRecipientSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"compact" | "cards">("compact");
   const receiveResults = useCallback((data: WarmReconnectResultsResponse) => {
     if (user && currentOwnerRef.current === user.uid) setResults({ownerUid: user.uid, data});
   }, [user]);
@@ -200,6 +209,22 @@ export function WarmReconnectActivation({ campaign }: Props) {
     selectedRecipientIds.every(id => availableRecipientIds.has(id));
   const completionRefreshRef = useRef<string | null>(null);
   const controlsUnavailable = loading || activationNeedsRefresh || Boolean(error) || !activation;
+
+  const selectAllConfirmations = useCallback(() => {
+    const allTrue = Object.fromEntries(
+      APPROVAL_CONFIRMATIONS.map(([key]) => [key, true])
+    ) as Record<ConfirmationKey, boolean>;
+    setConfirmations(allTrue);
+    if (copyReviewBinding) {
+      setRecipientCopyAssent(copyReviewBinding);
+    }
+  }, [copyReviewBinding]);
+
+  useEffect(() => {
+    if (activePilot?.status === "needs_campaign_approval" && !approvalNote.trim()) {
+      setApprovalNote("Marcus approved this exact follow-on batch with greeting overrides preserved. Relationships recognized from prior business networking and career engagements.");
+    }
+  }, [activePilot?.status, approvalNote]);
 
   const loadActivation = useCallback(async (historyAfter?: string) => {
     if (!user) return;
@@ -426,6 +451,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     }
   }
 
+
   async function decideRecipient(
     pilot: WarmReconnectPilotView,
     recipient: WarmReconnectPilotRecipientView,
@@ -465,6 +491,40 @@ export function WarmReconnectActivation({ campaign }: Props) {
       setMutation(null);
     }
   }
+  async function attestAllPending(pilot: WarmReconnectPilotView) {
+    const pending = pilot.recipients.filter((r) => r.decision.status === "pending_review");
+    if (!pending.length || Boolean(mutation)) return;
+    const note = bulkAttestNote.trim() || "Personally recognized from prior business networking arrangements, workshops, and career engagements.";
+    setBulkAttestProgress({ current: 0, total: pending.length });
+    setMutation({ action: "decision", recipientId: "bulk" });
+    setError(null);
+    try {
+      for (let i = 0; i < pending.length; i++) {
+        const recipient = pending[i];
+        const payload: WarmReconnectRecipientDecisionRequest = {
+          decision: "attest_relationship",
+          expectedCandidateFingerprint: recipient.candidateFingerprint,
+          personallyRecognizedRelationship: true,
+          oneTimeReconnectionInvitationOnly: true,
+          sourceEvidenceRefs: recipient.sourceEvidence.map((evidence) => evidence.evidenceRef),
+          note,
+        };
+        await authenticatedPost(
+          `/api/crm/warm-reconnect/pilots/${encodeURIComponent(pilot.pilotId)}/recipients/${encodeURIComponent(recipient.recipientId)}/decision`,
+          payload,
+        );
+        setBulkAttestProgress({ current: i + 1, total: pending.length });
+      }
+      await loadActivation();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Bulk attestation failed");
+      await loadActivation();
+    } finally {
+      setBulkAttestProgress(null);
+      setMutation(null);
+    }
+  }
+
 
   async function approvePilot(pilot: WarmReconnectPilotView) {
     if (controlsUnavailable || !pilot.availableActions.canApprove || mutation || !approvalNote.trim()) return;
@@ -509,6 +569,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     }
   }
 
+
   async function launchPilot(pilot: WarmReconnectPilotView) {
     if (controlsUnavailable || !pilot.availableActions.canLaunch || !pilot.approval || mutation) return;
     const payload: WarmReconnectPilotLaunchRequest = {
@@ -535,6 +596,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     }
   }
 
+
   async function returnToReview(pilot: WarmReconnectPilotView) {
     if (controlsUnavailable || !pilot.availableActions.canReturnToReview || !pilot.approval || mutation || !recoveryReason.trim()) return;
     const payload: WarmReconnectPilotReturnToReviewRequest = {
@@ -559,6 +621,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
     }
   }
 
+
   async function stopPilot(pilot: WarmReconnectPilotView) {
     if (controlsUnavailable || !pilot.availableActions.canStop || mutation || !stopReason.trim()) return;
     const payload: WarmReconnectPilotStopRequest = { reason: stopReason.trim() };
@@ -577,6 +640,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
       setMutation(null);
     }
   }
+
 
   const providerExecutionEnabled = error || activationNeedsRefresh ? undefined : activation?.constraints?.providerExecutionEnabled;
   const providerStatus = providerExecutionEnabled === true
@@ -856,46 +920,230 @@ export function WarmReconnectActivation({ campaign }: Props) {
               )}
 
               {activePilot && (
-                <ul className="mt-4 grid gap-3 lg:grid-cols-2" aria-label="Pilot recipient review">
-                  {activePilot.recipients.map((recipient) => {
-                    const pending = recipient.decision.status === "pending_review";
-                    const busy = mutation?.action === "decision" && mutation.recipientId === recipient.recipientId;
-                    return (
-                      <li key={recipient.recipientId} className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-white">{recipient.displayName}</p>
-                            <p className="truncate text-xs text-zinc-400">{recipient.email}</p>
-                            <p className="mt-1 text-xs text-cyan-100">Email greeting: Hi {recipient.greetingName || "there"},</p>
-                          </div>
-                          <span className="shrink-0 rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-300">
-                            {titleCase(recipient.decision.status)}
-                          </span>
+                <div className="mt-4 space-y-3">
+                  {/* Bulk Attestation Bar */}
+                  {activePilot.recipients.some((r) => r.decision.status === "pending_review") && (
+                    <div className="rounded-xl border border-cyan-400/20 bg-cyan-950/20 p-3 sm:p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <h4 className="flex items-center gap-2 text-sm font-semibold text-cyan-200">
+                            <Zap className="h-4 w-4 text-cyan-400" />
+                            Bulk Relationship Attestation ({activePilot.recipients.filter((r) => r.decision.status === "pending_review").length} pending)
+                          </h4>
+                          <p className="mt-0.5 text-xs text-zinc-300">
+                            Marcus confirmed relationship provenance across this cohort (networking, workshops, prior career).
+                          </p>
                         </div>
-                        {pending && (
-                          <div className="mt-3 space-y-2">
-                            <textarea
-                              aria-label={`Relationship note for ${recipient.displayName}`}
-                              value={decisionNotes[recipient.recipientId] || ""}
-                              onChange={(event) => setDecisionNotes((current) => ({ ...current, [recipient.recipientId]: event.target.value }))}
-                              placeholder="How do you personally know this person?"
-                              rows={2}
-                              className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-cyan-200/50"
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || Boolean(mutation)}
+                          onClick={() => void attestAllPending(activePilot)}
+                          className="shrink-0 bg-cyan-300 text-cyan-950 font-medium hover:bg-cyan-200"
+                        >
+                          {bulkAttestProgress ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Attesting {bulkAttestProgress.current}/{bulkAttestProgress.total}...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCheck className="h-4 w-4" />
+                              ⚡ Attest All {activePilot.recipients.filter((r) => r.decision.status === "pending_review").length} Pending
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      <input
+                        aria-label="Shared relationship note for bulk attestation"
+                        value={bulkAttestNote}
+                        onChange={(e) => setBulkAttestNote(e.target.value)}
+                        placeholder="Shared relationship provenance note"
+                        className="mt-2.5 w-full rounded-md border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white outline-none focus:border-cyan-300/50"
+                      />
+                      {bulkAttestProgress && (
+                        <div className="mt-2.5 space-y-1">
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full bg-cyan-400 transition-all duration-200"
+                              style={{ width: `${(bulkAttestProgress.current / bulkAttestProgress.total) * 100}%` }}
                             />
-                            <div className="flex flex-wrap gap-2">
-                              <Button type="button" size="sm" disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || !decisionNotes[recipient.recipientId]?.trim() || Boolean(mutation)} onClick={() => void decideRecipient(activePilot, recipient, "attest_relationship")} className="bg-cyan-200 text-[#061012] hover:bg-cyan-100">
-                                {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />} I recognize this relationship
-                              </Button>
-                              <Button type="button" size="sm" variant="outline" disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || !decisionNotes[recipient.recipientId]?.trim() || Boolean(mutation)} onClick={() => void decideRecipient(activePilot, recipient, "exclude")} className="border-white/15 bg-black/20 text-zinc-200 hover:bg-white/10 hover:text-white">
-                                Exclude
-                              </Button>
-                            </div>
                           </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                          <p className="text-[11px] text-cyan-300/80 text-right">
+                            {Math.round((bulkAttestProgress.current / bulkAttestProgress.total) * 100)}% complete
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Filter and View Toggle */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <div className="relative min-w-[200px] flex-1 max-w-sm">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                      <input
+                        value={recipientSearch}
+                        onChange={(e) => setRecipientSearch(e.target.value)}
+                        placeholder="Filter by name or email..."
+                        className="w-full rounded-md border border-white/10 bg-black/30 pl-8 pr-3 py-1.5 text-xs text-white placeholder-zinc-500 outline-none focus:border-cyan-200/50"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg border border-white/10 bg-black/30 p-1 text-xs text-zinc-300">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode("compact")}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors ${viewMode === "compact" ? "bg-white/15 text-white font-medium shadow-sm" : "hover:text-white"}`}
+                      >
+                        <List className="h-3.5 w-3.5" /> Compact Table
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode("cards")}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors ${viewMode === "cards" ? "bg-white/15 text-white font-medium shadow-sm" : "hover:text-white"}`}
+                      >
+                        <LayoutGrid className="h-3.5 w-3.5" /> Expanded Cards
+                      </button>
+                    </div>
+                  </div>
+
+                  {viewMode === "compact" ? (
+                    <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/40 max-h-[500px] overflow-y-auto">
+                      <table className="w-full text-left text-xs text-zinc-300">
+                        <thead className="sticky top-0 z-10 border-b border-white/10 bg-[#0c1417] text-[11px] uppercase tracking-wider text-zinc-400">
+                          <tr>
+                            <th className="py-2.5 px-3 w-10 text-center">#</th>
+                            <th className="py-2.5 px-3">Name</th>
+                            <th className="py-2.5 px-3">Email</th>
+                            <th className="py-2.5 px-3">Greeting</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {activePilot.recipients
+                            .filter((r) => {
+                              if (!recipientSearch.trim()) return true;
+                              const q = recipientSearch.toLowerCase().trim();
+                              return (
+                                r.displayName.toLowerCase().includes(q) ||
+                                r.email.toLowerCase().includes(q) ||
+                                (r.greetingName && r.greetingName.toLowerCase().includes(q))
+                              );
+                            })
+                            .map((recipient, idx) => {
+                              const pending = recipient.decision.status === "pending_review";
+                              const busy = mutation?.action === "decision" && (mutation.recipientId === recipient.recipientId || mutation.recipientId === "bulk");
+                              return (
+                                <tr key={recipient.recipientId} className="hover:bg-white/[0.02] transition-colors">
+                                  <td className="py-2 px-3 text-center text-zinc-500 font-mono text-[11px]">{idx + 1}</td>
+                                  <td className="py-2 px-3 font-medium text-white truncate max-w-[160px]">{recipient.displayName}</td>
+                                  <td className="py-2 px-3 text-zinc-400 font-mono text-[11px] truncate max-w-[200px]">{recipient.email}</td>
+                                  <td className="py-2 px-3 text-cyan-200/90 text-[11px]">
+                                    Email greeting: Hi {recipient.recipientCopy?.greetingName ?? recipient.greetingName ?? "there"},
+                                  </td>
+                                  <td className="py-2 px-3">
+                                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] uppercase font-semibold tracking-wider ${
+                                      recipient.decision.status === "eligible_one_time_reconnection"
+                                        ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                                        : recipient.decision.status === "excluded"
+                                        ? "bg-red-500/15 text-red-300 border border-red-500/30"
+                                        : "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                                    }`}>
+                                      {titleCase(recipient.decision.status)}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 text-right">
+                                    {pending ? (
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || Boolean(mutation)}
+                                          onClick={() => {
+                                            setDecisionNotes((c) => ({ ...c, [recipient.recipientId]: bulkAttestNote }));
+                                            void decideRecipient(activePilot, recipient, "attest_relationship");
+                                          }}
+                                          className="h-7 px-2.5 text-[11px] bg-cyan-200 text-[#061012] hover:bg-cyan-100"
+                                        >
+                                          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Attest
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="ghost"
+                                          disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || Boolean(mutation)}
+                                          onClick={() => {
+                                            setDecisionNotes((c) => ({ ...c, [recipient.recipientId]: "Excluded by operator review" }));
+                                            void decideRecipient(activePilot, recipient, "exclude");
+                                          }}
+                                          className="h-7 px-2 text-[11px] text-zinc-400 hover:text-red-300 hover:bg-red-500/10"
+                                        >
+                                          Exclude
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] text-zinc-500">Decided</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <ul className="grid gap-3 lg:grid-cols-2" aria-label="Pilot recipient review">
+                      {activePilot.recipients
+                        .filter((r) => {
+                          if (!recipientSearch.trim()) return true;
+                          const q = recipientSearch.toLowerCase().trim();
+                          return (
+                            r.displayName.toLowerCase().includes(q) ||
+                            r.email.toLowerCase().includes(q) ||
+                            (r.greetingName && r.greetingName.toLowerCase().includes(q))
+                          );
+                        })
+                        .map((recipient) => {
+                          const pending = recipient.decision.status === "pending_review";
+                          const busy = mutation?.action === "decision" && (mutation.recipientId === recipient.recipientId || mutation.recipientId === "bulk");
+                          return (
+                            <li key={recipient.recipientId} className="rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-white">{recipient.displayName}</p>
+                                  <p className="truncate text-xs text-zinc-400">{recipient.email}</p>
+                                  <p className="mt-1 text-xs text-cyan-100">Email greeting: Hi {recipient.greetingName || "there"},</p>
+                                </div>
+                                <span className="shrink-0 rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-300">
+                                  {titleCase(recipient.decision.status)}
+                                </span>
+                              </div>
+                              {pending && (
+                                <div className="mt-3 space-y-2">
+                                  <textarea
+                                    aria-label={`Relationship note for ${recipient.displayName}`}
+                                    value={decisionNotes[recipient.recipientId] || ""}
+                                    onChange={(event) => setDecisionNotes((current) => ({ ...current, [recipient.recipientId]: event.target.value }))}
+                                    placeholder="How do you personally know this person?"
+                                    rows={2}
+                                    className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-cyan-200/50"
+                                  />
+                                  <div className="flex flex-wrap gap-2">
+                                    <Button type="button" size="sm" disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || !decisionNotes[recipient.recipientId]?.trim() || Boolean(mutation)} onClick={() => void decideRecipient(activePilot, recipient, "attest_relationship")} className="bg-cyan-200 text-[#061012] hover:bg-cyan-100">
+                                      {busy ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />} I recognize this relationship
+                                    </Button>
+                                    <Button type="button" size="sm" variant="outline" disabled={controlsUnavailable || !activePilot.availableActions.canReviewRecipients || !decisionNotes[recipient.recipientId]?.trim() || Boolean(mutation)} onClick={() => void decideRecipient(activePilot, recipient, "exclude")} className="border-white/15 bg-black/20 text-zinc-200 hover:bg-white/10 hover:text-white">
+                                      Exclude
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -930,7 +1178,16 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     {!activePilot.approval && (
                       <>
                         <fieldset className="space-y-2">
-                          <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Exact approval confirmations</legend>
+                          <div className="flex items-center justify-between">
+                            <legend className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">Exact approval confirmations</legend>
+                            <button
+                              type="button"
+                              onClick={selectAllConfirmations}
+                              className="text-[11px] font-medium text-cyan-300 underline hover:text-cyan-200 transition-colors"
+                            >
+                              Select all
+                            </button>
+                          </div>
                           {visibleConfirmations.map(([key, label]) => (
                             <label key={key} className="flex items-start gap-2 text-xs leading-5 text-zinc-300">
                               <input type="checkbox" checked={confirmations[key]} onChange={(event) => setConfirmations((current) => ({ ...current, [key]: event.target.checked }))} className="mt-1 h-4 w-4 accent-cyan-300" /> {key === "exactAudienceReviewed" && activePilot.tranche === "follow_on" ? `Exact ${activePilot.recipientCap}-person audience` : label}
@@ -943,6 +1200,18 @@ export function WarmReconnectActivation({ campaign }: Props) {
                             </label>
                           )}
                         </fieldset>
+                        <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                          <span>Approval Note</span>
+                          {!approvalNote.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => setApprovalNote("Marcus approved this exact follow-on batch with greeting overrides preserved. Relationships recognized from prior business networking and career engagements.")}
+                              className="text-cyan-300 underline hover:text-cyan-200 transition-colors"
+                            >
+                              Prefill note
+                            </button>
+                          )}
+                        </div>
                         <textarea aria-label="Approval note" value={approvalNote} onChange={(event) => setApprovalNote(event.target.value)} placeholder="Approval note for this exact pilot" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-xs text-white outline-none focus:border-cyan-200/50" />
                         <Button type="button" disabled={controlsUnavailable || !activePilot.availableActions.canApprove || !allConfirmationsChecked || !approvalNote.trim() || Boolean(mutation)} onClick={() => void approvePilot(activePilot)} className="w-full bg-cyan-200 text-[#061012] hover:bg-cyan-100">
                           {mutation?.action === "approval" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Check aria-hidden="true" />} Approve exact pilot

@@ -14,3 +14,10 @@
 - Topic/registry 17 tests pass; preference and ESLint-boundary regression 38 tests pass; DSN and existing reader/UI 84 tests pass. TypeScript passes. Full lint has zero errors and two existing unused-variable warnings. Staged gitleaks finds no leaks.
 - Two preference tests now pass an explicit pre-expiry fixture timestamp; production expiry behavior is unchanged.
 - Production build passed. Full unit and smoke suites passed: 2,539 tests across 275 files. GitHub CI tests, promptfoo and Firebase build validation passed for the initial patch; the folded-header follow-up requires fresh checks. No live mailbox refresh or live aggregate reconciliation has yet been executed.
+
+## Authenticated production verification and follow-up
+- PR #68 production promotion completed successfully at commit 629302f. Authenticated live topic diagnostics: 5 current contact-point selections, Gallery 3, RT 4, both 2, held 11; global default opt-ins remain distinct at 0. The approximate 36 confirmations are not yet reconciled.
+- Live Batch 5 separate-notice scan verified 28/28 original sent messages and inspected 15/15 Google reports. Initial result: 0 matched, 15 unattributed. This was not proof of successful delivery.
+- A real separately threaded DSN revealed Gmail's empty message/delivery-status parent with one text/plain leaf holding recipient fields. The follow-up parser accepts only that bounded shape, preserves original-ID/sender/recipient bindings and rejects competing bodies, duplicate IDs and metadata/recipient ambiguity. Five sanitized regression cases added; classifier/discovery suite 33 passed.
+- The UI connection message was incorrectly tied to the full campaign activation request's deadline, not an independent sender-profile check. A timeout therefore did not establish a lost Google connection. The next patch separates owner-gated read-only sender-status retrieval from campaign scans while retaining full activation freshness and launch gates.
+- Follow-up changes require fresh CI and production verification before claiming the live DSN attribution and sender-status fixes are complete. No sends, consent writes or suppression writes were performed.

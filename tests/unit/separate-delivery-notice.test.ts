@@ -82,3 +82,36 @@ describe("folded MIME report fields", () => {
     expect(attributeSeparateDeliveryNotice(message,target)).toBeNull();
   });
 });
+
+
+describe("Gmail nested delivery-status representation", () => {
+  // Sanitized shape from a separately threaded Google DSN: empty report parent,
+  // per-message fields as child headers, recipient status in child body.
+  function nested() {
+    const message = fixture();
+    const status = message.payload!.parts![1];
+    status.parts = [{mimeType:"text/plain", headers:[{name:"Reporting-MTA",value:"dns; googlemail.com"},{name:"X-Original-Message-ID",value:target.rfcMessageId}],body:status.body}];
+    status.body = {};
+    return message;
+  }
+  it("attributes the nested recipient block using the separately verified original", () => {
+    expect(attributeSeparateDeliveryNotice(nested(),target)).toMatchObject({reportedAction:"failed",enhancedStatus:"5.1.1",providerThreadId:"bb2",originalProviderThreadId:"aa2"});
+  });
+  it("still requires attached original identity and exact recipient", () => {
+    const message=nested();message.payload!.parts!.pop();expect(attributeSeparateDeliveryNotice(message,target)).toBeNull();
+    const changed=nested();changed.payload!.parts![1].parts![0].body!.data=encode("Final-Recipient: rfc822; other@example.com\r\nAction: failed\r\nStatus: 5.1.1");expect(attributeSeparateDeliveryNotice(changed,target)).toBeNull();
+  });
+  it("rejects ambiguous nested parts or simultaneous inline data", () => {
+    const multiple=nested();multiple.payload!.parts![1].parts!.push(multiple.payload!.parts![1].parts![0]);expect(attributeSeparateDeliveryNotice(multiple,target)).toBeNull();
+    const both=nested();both.payload!.parts![1].body=both.payload!.parts![1].parts![0].body;expect(attributeSeparateDeliveryNotice(both,target)).toBeNull();
+  });
+  it("rejects conflicting or duplicate original IDs and status fields hidden in headers", () => {
+    for (const headers of [[{name:"X-Original-Message-ID",value:"<wrong@example.com>"}],[{name:"X-Original-Message-ID",value:target.rfcMessageId},{name:"X-Original-Message-ID",value:target.rfcMessageId}],[{name:"Final-Recipient",value:"rfc822; other@example.com"}]]) {
+      const message=nested();message.payload!.parts![1].parts![0].headers=headers;expect(attributeSeparateDeliveryNotice(message,target)).toBeNull();
+    }
+  });
+  it("does not treat same-thread nested notices as separate or retain message text", () => {
+    expect(attributeSeparateDeliveryNotice({...nested(),threadId:target.providerThreadId},target)).toBeNull();
+    expect(JSON.stringify(attributeSeparateDeliveryNotice(nested(),target))).not.toMatch(/example.com|headers|payload|googlemail/);
+  });
+});

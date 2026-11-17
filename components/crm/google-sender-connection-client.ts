@@ -1,4 +1,5 @@
-import type { WarmReconnectBusinessId, WarmReconnectGoogleProfileId } from "@/lib/crm/warm-reconnect-activation-types";
+import { WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES } from "@/lib/crm/warm-reconnect-activation-types";
+import type { WarmReconnectActivationResponse, WarmReconnectBusinessId, WarmReconnectGoogleProfileId } from "@/lib/crm/warm-reconnect-activation-types";
 
 export const GOOGLE_CONNECTION_TIMEOUT_MS = 20_000;
 
@@ -85,4 +86,27 @@ export async function requestGoogleSenderConnection(input: {
     }
     return authUrl.toString();
   }, { signal: input.signal, timeoutMs: input.timeoutMs });
+}
+
+
+/** Validate server profile data before rendering it or using it as a connect target. */
+export function parseGoogleSenderProfiles(value: unknown): WarmReconnectActivationResponse["googleProfiles"] {
+  const invalid = () => new Error("Sender connection status could not be verified.");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  const row = value as Record<string, unknown>;
+  if (row.schemaVersion !== "crm.warm-reconnect-sender-profiles.v1" || row.providerActions !== "none" ||
+      !Array.isArray(row.googleProfiles) || row.googleProfiles.length > WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES.length) throw invalid();
+  const seen = new Set<string>();
+  for (const item of row.googleProfiles) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw invalid();
+    const profile = item as Record<string, unknown>;
+    const allowed = WARM_RECONNECT_ALLOWED_GOOGLE_PROFILES.find(candidate => candidate.profileId === profile.profileId && candidate.businessId === profile.businessId);
+    if (!allowed || seen.has(allowed.profileId) || typeof profile.label !== "string" || !profile.label.trim() || profile.label.length > 100 ||
+        typeof profile.connected !== "boolean" || typeof profile.gmailCapable !== "boolean" ||
+        (typeof profile.state !== "string" || !["connected", "not_connected", "reconnect_required", "unavailable"].includes(profile.state)) ||
+        !(profile.accountEmail === null || (typeof profile.accountEmail === "string" && profile.accountEmail.length <= 320 && /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(profile.accountEmail))) ||
+        !(profile.accountId === null || (typeof profile.accountId === "string" && profile.accountId.length > 0 && profile.accountId.length <= 256))) throw invalid();
+    seen.add(allowed.profileId);
+  }
+  return row.googleProfiles as WarmReconnectActivationResponse["googleProfiles"];
 }

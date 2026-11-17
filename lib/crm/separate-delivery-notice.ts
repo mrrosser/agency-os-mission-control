@@ -109,7 +109,25 @@ export function attributeSeparateDeliveryNotice(message: SeparateNoticeMessage, 
   if (!originalFields || one(originalFields,"message-id") !== target.rfcMessageId || address(one(originalFields,"from")) !== sender || address(one(originalFields,"to")) !== recipient) return null;
   const statuses = parts.filter(p => p.mimeType?.toLowerCase() === "message/delivery-status");
   if (statuses.length !== 1) return null;
-  const statusText = decode(statuses[0]); if (!statusText) return null;
+  const statusPart = statuses[0];
+  let statusText: string | null;
+  if (statusPart.body?.data) {
+    // Never choose between competing inline and nested status representations.
+    if (statusPart.parts?.length) return null;
+    statusText = decode(statusPart);
+  } else {
+    // Gmail represents some DSNs as an empty message/delivery-status parent
+    // with one text/plain child. Per-message fields are child headers and
+    // the recipient block is the child's body, not the parent's body.
+    if (statusPart.parts?.length !== 1) return null;
+    const child = statusPart.parts[0];
+    if (child.mimeType?.toLowerCase() !== "text/plain" || child.parts?.length) return null;
+    if (child.headers?.some(h => ["final-recipient", "action", "status"].includes(h.name?.toLowerCase() || ""))) return null;
+    const originalIds = child.headers?.filter(h => h.name?.toLowerCase() === "x-original-message-id") || [];
+    if (originalIds.length && (originalIds.length !== 1 || originalIds[0].value?.trim() !== target.rfcMessageId)) return null;
+    statusText = decode(child);
+  }
+  if (!statusText) return null;
   const blocks = statusText.split(/\r?\n\r?\n/).filter(block => block.trim()).map(fields);
   if (blocks.some(block => !block)) return null;
   const recipients = blocks.filter(block => block!.has("final-recipient"));

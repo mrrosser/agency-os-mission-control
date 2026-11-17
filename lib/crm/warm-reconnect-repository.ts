@@ -689,6 +689,17 @@ function preferenceOriginFromEnv(): string {
   return url.origin;
 }
 
+/** Connection status must not wait for candidate scans, history or pilot hydration. */
+export async function loadWarmReconnectSenderProfilesForUid(uid: string, db: Firestore = getAdminDb()) {
+  const access = await assertPortfolioRegistryAccess(uid, db);
+  assertOwnerAccess(uid, access.workspaceId, access.role);
+  return {
+    schemaVersion: "crm.warm-reconnect-sender-profiles.v1" as const,
+    providerActions: "none" as const,
+    googleProfiles: await loadGoogleProfileStates(uid),
+  };
+}
+
 export async function loadWarmReconnectActivationForUid(
   uid: string,
   log: Logger,

@@ -735,4 +735,55 @@ describe("warm reconnect campaign UI", () => {
     expect(source).toContain("no partial audience can be approved");
     expect(source).not.toMatch(/console\.(?:log|info|warn|error)/);
   });
+  it("loads sender profiles independently of missing campaign activation without refreshing authority", async()=>{
+    authState.user={uid:"synthetic-owner"};hookState.interactive=true;
+    const profiles=completedInitialFixture().googleProfiles.map(profile=>({...profile,accountId:"synthetic-account"}));
+    const fetchMock=vi.fn().mockResolvedValue(Response.json({schemaVersion:"crm.warm-reconnect-sender-profiles.v1",providerActions:"none",googleProfiles:profiles}));vi.stubGlobal("fetch",fetchMock);
+    treeButton(renderInteractive(),"Refresh connection status")!.props.onClick();
+    await vi.waitFor(()=>expect(treeText(renderInteractive())).toContain("Gmail send connected"));
+    expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][0]).toBe("/api/crm/warm-reconnect/sender-profiles");expect(fetchMock.mock.calls[0][1].method).toBe("GET");
+    expect(hookState.values?.[0]).toBeNull();
+  });
+  it("keeps failed sender status unknown rather than claiming disconnection",async()=>{
+    authState.user={uid:"synthetic-owner"};hookState.interactive=true;
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(Response.json({error:"Sender status unavailable"},{status:503})));
+    treeButton(renderInteractive(),"Refresh connection status")!.props.onClick();
+    await vi.waitFor(()=>expect(treeText(renderInteractive())).toContain("Sender status unavailable"));
+    expect(treeText(renderInteractive())).toContain("This does not mean an existing Google connection is disconnected");
+  });
+  it("bounds slow sender reads and ignores their later completion",async()=>{
+    vi.useFakeTimers();
+    try{
+      authState.user={uid:"synthetic-owner"};hookState.interactive=true;
+      let resolve!:(value:Response)=>void;vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(r=>{resolve=r;})));
+      treeButton(renderInteractive(),"Refresh connection status")!.props.onClick();
+      await vi.advanceTimersByTimeAsync(20001);
+      expect(treeText(renderInteractive())).toContain("This does not establish that Google disconnected");
+      resolve(Response.json({schemaVersion:"crm.warm-reconnect-sender-profiles.v1",providerActions:"none",googleProfiles:completedInitialFixture().googleProfiles.map(profile=>({...profile,accountId:"synthetic-account"}))}));
+      await vi.advanceTimersByTimeAsync(1);
+      expect(treeText(renderInteractive())).not.toContain("Gmail send connected");
+    }finally{vi.useRealTimers();}
+  });
+  it("discards a sender response after authenticated owner changes",async()=>{
+    authState.user={uid:"synthetic-owner"};hookState.interactive=true;
+    let resolve!:(value:Response)=>void;const fetchMock=vi.fn(()=>new Promise<Response>(r=>{resolve=r;}));vi.stubGlobal("fetch",fetchMock);
+    treeButton(renderInteractive(),"Refresh connection status")!.props.onClick();
+    await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(1));
+    authState.user={uid:"different-owner"};renderInteractive();
+    resolve(Response.json({schemaVersion:"crm.warm-reconnect-sender-profiles.v1",providerActions:"none",googleProfiles:completedInitialFixture().googleProfiles.map(profile=>({...profile,accountId:"synthetic-account"}))}));
+    await new Promise(r=>setTimeout(r,0));
+    expect(treeText(renderInteractive())).not.toContain("Gmail send connected");
+  });
+
+  it("does not retain a ready sender display when its status refresh fails", async () => {
+    loadCompletedInitialResults(true);
+    hookState.interactive = true;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({error:"Status unavailable"}, {status:503})));
+    expect(treeText(renderInteractive())).toContain("Gmail send connected");
+    treeButton(renderInteractive(), "Refresh connection status")!.props.onClick();
+    await vi.waitFor(() => expect(treeText(renderInteractive())).toContain("Status unavailable"));
+    expect(treeText(renderInteractive())).not.toContain("Gmail send connected");
+    expect(treeText(renderInteractive())).toContain("Sender profiles have not been observed yet");
+  });
+
 });

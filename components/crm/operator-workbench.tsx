@@ -70,12 +70,12 @@ export function OperatorWorkbench({ active, onChange, onAdd, registry, loading, 
       <div className="crm-evidence-strip" aria-label="Canonical registry status">
         <div><strong>{metric(registry?.totals.people)}</strong><span>Registry people</span></div>
         <div><strong>{metric(registry?.totals.openConflicts)}</strong><span>Identity conflicts</span></div>
-        <div><strong>{metric(registry?.permissions.contactPointStates.opted_in)}</strong><span>Opted-in contact points</span></div>
+        <div><strong>{registry?.topicSelections?.status === "observed" ? metric(registry.topicSelections.any ?? undefined) : "Not observed"}</strong><span>Current topic selections</span></div>
         <button type="button" onClick={() => openWorkspace("outreach")}>
           {loading ? "Checking outreach…" : registry ? "Review outreach readiness" : "Readiness unavailable · check connection"}
         </button>
       </div>
-      <p className="crm-evidence-note">Registry totals are not newsletter recipient counts. Consent and suppression checks still apply.</p>
+      <p className="crm-evidence-note">Registry totals are not newsletter recipient counts. Global default opt-ins exclude Gallery and RT.Solutions topic choices. Review Outreach results for each batch’s confirmed choices. These are not a reconciled newsletter audience; consent and suppression checks still apply.</p>
       <div role="tablist" aria-label="CRM workspaces" className="crm-workspace-tabs crm-workspace-tabs--assistant">
         {CRM_WORKSPACES.map((workspace) => (
           <button key={workspace} type="button" role="tab" id={`crm-tab-${workspace}`}

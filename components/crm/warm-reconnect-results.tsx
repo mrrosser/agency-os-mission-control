@@ -5,6 +5,8 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { buildAuthHeaders, getResponseCorrelationId } from "@/lib/api/client";
 import type { WarmReconnectOutcomeMetric, WarmReconnectResultsResponse } from "@/lib/crm/warm-reconnect-results-types";
 
+import type { SeparateDeliveryObservation } from "@/lib/crm/separate-delivery-discovery";
+
 type Props={pilotId?:string;refreshKey?:string|number;onLoaded?:(response:WarmReconnectResultsResponse)=>void};
 const metricText=(metric:WarmReconnectOutcomeMetric)=>metric.status==="observed"?String(metric.value):"Not observed";
 function dateText(value:string|null){return value?new Date(value).toLocaleString():"Not observed";}
@@ -16,6 +18,9 @@ export function WarmReconnectResults({pilotId,refreshKey,onLoaded}:Props){
   const callback=useRef(onLoaded);callback.current=onLoaded;
   const [saved,setSaved]=useState<{uid:string;data:WarmReconnectResultsResponse}|null>(null);
   const [selectedId,setSelectedId]=useState<string|undefined>();
+  const [notice,setNotice]=useState<{uid:string;observation:SeparateDeliveryObservation}|null>(null);
+  const [noticePending,setNoticePending]=useState(false);
+  const noticeSequence=useRef(0);
   const [pending,setPending]=useState(false);const [error,setError]=useState<string|null>(null);
   const data=saved?.uid===user?.uid?saved?.data:null;
   const selected=data?.selectedPilot;
@@ -38,15 +43,31 @@ export function WarmReconnectResults({pilotId,refreshKey,onLoaded}:Props){
     }catch(caught){if(isCurrent())setError(caught instanceof Error?caught.message:"Outreach results are unavailable.");}
     finally{if(isCurrent())setPending(false);}
   },[user,pilotId,selectedId]);
-  useEffect(()=>{setSaved(null);setSelectedId(undefined);setError(null);setPending(false);},[user?.uid]);
+  useEffect(()=>{setSaved(null);setSelectedId(undefined);setError(null);setPending(false);setNotice(null);setNoticePending(false);noticeSequence.current++;},[user?.uid]);
   useEffect(()=>{void load();},[load,refreshKey]);
   async function refreshReplies(){
     if(!selected||pending||!user)return;
     await load(true,selected.pilotId);
   }
+  async function refreshNotices(){
+    if(!selected||!user||noticePending)return;
+    const uid=user.uid,target=selected.pilotId,startedEpoch=epoch.current,sequence=++noticeSequence.current;
+    const current=()=>owner.current===uid&&epoch.current===startedEpoch&&noticeSequence.current===sequence;
+    setNoticePending(true);setError(null);
+    try{
+      const headers=await buildAuthHeaders(user);if(!current())return;
+      const response=await fetch("/api/crm/warm-reconnect/delivery-notices/refresh",{method:"POST",headers,cache:"no-store",signal:AbortSignal.timeout(90_000),body:JSON.stringify({pilotId:target})});
+      const body=await response.json();if(!current())return;
+      const observation=body.observation;
+      if(!response.ok||observation?.schemaVersion!=="crm.separate-delivery-observation.v1"||observation.pilotId!==target||observation.ownerUid!==uid||!Array.isArray(observation.events))throw new Error("Separate delivery report check is unavailable. Existing results are unchanged.");
+      setNotice({uid,observation});
+    }catch(caught){if(current())setError(caught instanceof Error?caught.message:"Separate delivery report check is unavailable.");}
+    finally{if(current())setNoticePending(false);}
+  }
+  const shownNotice=notice&&notice.uid===user?.uid&&notice.observation.pilotId===selected?.pilotId?notice.observation:null;
   return <section className="mt-6 rounded-xl border border-white/15 bg-white/[0.03] p-5" aria-labelledby="outreach-results-heading" data-testid="warm-reconnect-results">
     <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="outreach-results-heading" className="font-semibold text-zinc-100">Outreach results</h2><button type="button" disabled={!user||pending} onClick={()=>void load()} className="rounded-md border border-white/20 px-3 py-2 text-sm disabled:opacity-40">{pending?"Loading…":"Refresh results"}</button></div>
-    <p className="mt-2 text-sm text-zinc-400">Confirmed sends and recipient choices for each reviewed batch. Sent means accepted by Gmail; it does not confirm an opening or a sale.</p>
+    <p className="mt-2 text-sm text-zinc-400">Selected-batch results, not all-time subscriber totals. Both-topic recipients appear in both topic counts but once in Confirmed choices. Reconcile other batches and current suppressions before sending. Gallery and RT.Solutions topic choices are separate from global default opt-ins. Sent means accepted by Gmail; it does not confirm an opening or a sale.</p>
     {error&&<p role="alert" className="mt-3 text-sm text-amber-200">{error}</p>}
     {data&&data.pilots.length===0&&<p className="mt-3 text-sm text-zinc-300">No outreach batches yet.</p>}
     {data&&data.pilots.length>0&&<>
@@ -59,6 +80,8 @@ export function WarmReconnectResults({pilotId,refreshKey,onLoaded}:Props){
         ] as const).map(([label,metric])=><div key={label} className="rounded-lg border border-white/10 p-3" title={metric.reason}><p className="text-xs text-zinc-400">{label}</p><p className="mt-1 text-lg text-zinc-100">{metricText(metric)}</p></div>)}</div>
         <p className="mt-3 text-xs text-zinc-400">Choices and unsubscribes were confirmed through this batch’s preference links. Reply check: {dateText(selected.replyObservation.observedAt)} · {selected.replyObservation.inspectedThreads}/{selected.replyObservation.expectedThreads} exact sent threads. Automatic responses: {metricText(selected.automaticResponses)}. Delivery notices in these threads: {metricText(selected.deliveryNotices)}.</p>
         <button type="button" disabled={pending||!user||selected.sent.status!=="observed"||!selected.sent.value} onClick={()=>void refreshReplies()} className="mt-3 rounded-md border border-white/20 px-3 py-2 text-sm disabled:opacity-40">Check replies in sent threads</button>
+        <button type="button" disabled={noticePending||pending||!user||selected.sent.status!=="observed"||!selected.sent.value} onClick={()=>void refreshNotices()} className="ml-3 mt-3 rounded-md border border-white/20 px-3 py-2 text-sm disabled:opacity-40">{noticePending?"Checking separate reports...":"Check separate delivery reports"}</button>
+        {shownNotice&&<p role="status" className="mt-2 text-xs text-zinc-300">Separate Google delivery report scan: {shownNotice.status}. Verified originals: {shownNotice.verifiedOriginals}/{shownNotice.expectedOriginals}; inspected candidates: {shownNotice.inspectedCandidates}/{shownNotice.listedCandidates}. Matched reports: {shownNotice.events.length}; not attributed by this scan: {shownNotice.inspectedCandidates-shownNotice.events.length}; reported failures: {shownNotice.events.filter(e=>e.reportedAction==="failed").length}; reported delays: {shownNotice.events.filter(e=>e.reportedAction==="delayed").length}. {shownNotice.truncated?"More candidates exist beyond the scan limit. ":""}This is a bounded 30-day report scan, not total bounces or confirmation of delivery. No contacts, permissions or suppression records were changed.</p>}
         <p className="mt-2 text-xs text-zinc-400">The reply check reads the existing Gallery mailbox. Total bounces, opens, ordinary clicks and sales conversions are not collected.</p>
         <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-zinc-400"><tr><th className="py-2">Recipient</th><th>Delivery</th><th>Sent at</th><th>Confirmed choices</th></tr></thead><tbody>{selected.recipients.map(recipient=><tr key={recipient.recipientId} className="border-t border-white/10"><td className="py-2 pr-3">{recipient.greetingName}</td><td className="pr-3" title={recipient.terminalReason||undefined}>{recipient.deliveryStatus.replaceAll("_"," ")}</td><td className="pr-3">{recipient.sentAt?dateText(recipient.sentAt):"—"}</td><td>{recipient.unsubscribedThroughBatch?"Unsubscribed":recipient.topics===null?"Not observed":[recipient.topics.rosser_gallery?"Gallery":null,recipient.topics.rt_solutions?"RT.Solutions":null].filter(Boolean).join(", ")||"None confirmed"}</td></tr>)}</tbody></table></div>
       </>}

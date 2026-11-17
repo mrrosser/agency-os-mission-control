@@ -74,3 +74,23 @@ describe("portfolio registry summary UI", () => {
     expect(html).toContain("Membership not reconciled");
   });
 });
+
+it("distinguishes global defaults from scoped subscriber evidence", () => {
+  const html = renderToStaticMarkup(<PortfolioRegistrySummary summary={summary} loading={false} error={null} />);
+  expect(html).toContain("Global default opt-ins");
+  expect(html).toContain("Permission events (not unique subscribers)");
+  expect(html).toContain("A zero here does not mean nobody chose Gallery or RT.Solutions updates");
+});
+
+it("renders topic counts separately and keeps their limits visible", () => {
+  const html = renderToStaticMarkup(<PortfolioRegistrySummary summary={{...summary,topicSelections:{status:"observed",any:5,gallery:3,rt:4,both:2,held:1,observedAt:"2026-11-16T00:00:00Z",scope:"current_topic_records_not_send_authority"}}} loading={false} error={null} />);
+  expect(html).toContain("Current topic selections");
+  expect(html).toContain("Any topic");
+  expect(html).toContain("Held records");
+  expect(html).toContain("These counts are not send authorization");
+});
+it("does not imply zero topic selections when the evidence is missing", () => {
+  const html = renderToStaticMarkup(<PortfolioRegistrySummary summary={summary} loading={false} error={null} />);
+  expect(html).toContain("Current topic counts not observed");
+  expect(html).toContain("no zero inferred");
+});

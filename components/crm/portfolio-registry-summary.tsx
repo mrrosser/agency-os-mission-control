@@ -115,6 +115,20 @@ export function PortfolioRegistrySummary({ summary, loading, error }: Props) {
         <Metric label="Open conflicts" value={summary.totals.openConflicts} />
       </div>
 
+      <section aria-label="Current topic selections" className="mt-4 rounded-lg border border-cyan-500/20 p-3">
+        <h3 className="font-medium text-zinc-200">Current topic selections</h3>
+        {summary.topicSelections?.status === "observed" ? <>
+          <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-5">
+            <Metric label="Any topic" value={summary.topicSelections.any!} />
+            <Metric label="Gallery" value={summary.topicSelections.gallery!} />
+            <Metric label="RT.Solutions" value={summary.topicSelections.rt!} />
+            <Metric label="Both" value={summary.topicSelections.both!} />
+            <Metric label="Held records" value={summary.topicSelections.held!} />
+          </div>
+          <p className="mt-2 text-xs text-zinc-400">Current preference records, deduplicated by contact point with ambiguous email identities and canonical suppressions held. Both is included in each topic but only once in Any topic. These counts are not send authorization: delivery, legacy do-not-contact and campaign-specific checks remain required.</p>
+        </> : <p className="mt-2 text-xs text-amber-200">{summary.topicSelections?.reason || "Current topic counts not observed. Review per-batch choices; no zero inferred."}</p>}
+      </section>
+
       <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="min-w-0 rounded-lg border border-zinc-800 p-3">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
@@ -140,15 +154,16 @@ export function PortfolioRegistrySummary({ summary, loading, error }: Props) {
 
         <div className="min-w-0 rounded-lg border border-zinc-800 p-3">
           <p className="text-sm font-medium text-zinc-200">Permission evidence</p>
+          <p className="mt-2 text-xs text-zinc-400">Topic choices are stored separately from global defaults. A zero here does not mean nobody chose Gallery or RT.Solutions updates. See per-batch Outreach results; do not add event counts or batch counts to infer a unique sendable audience.</p>
           <dl className="mt-2 space-y-2 text-xs">
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Unknown contact points</dt><dd className="tabular-nums text-amber-200">{number(summary.permissions.contactPointStates.unknown)}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-zinc-500">Opted in</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.opted_in)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-zinc-500">Global default opt-ins</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.opted_in)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Opted out</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.opted_out)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Reconfirm required</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.reconfirm_required)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Transactional only</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.transactional_only)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Other states</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.contactPointStates.other)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">No permission basis</dt><dd className="tabular-nums text-amber-200">{number(summary.permissions.sourceRecordsWithNoPermissionBasis)}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-zinc-500">Permission events</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.permissionEvents)}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-zinc-500">Permission events (not unique subscribers)</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.permissionEvents)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-zinc-500">Suppressions</dt><dd className="tabular-nums text-zinc-200">{number(summary.permissions.suppressions)}</dd></div>
           </dl>
         </div>

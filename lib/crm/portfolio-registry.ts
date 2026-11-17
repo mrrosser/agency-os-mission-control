@@ -1,4 +1,5 @@
 import "server-only";
+import { loadTopicSummary } from "./topic-summary";
 
 import type { DocumentData, Firestore, Query } from "firebase-admin/firestore";
 import { ApiError } from "@/lib/api/handler";
@@ -27,7 +28,8 @@ const COLLECTIONS = {
 } as const;
 
 // Two access reads plus this fixed aggregate/freshness plan. The route accepts
-// no caller-supplied filters or pagination, so its Firestore cost is bounded.
+// no caller-supplied filters or pagination. Topic diagnostics add three bounded
+// queries (at most 15,003 document reads), outside this aggregate-operation cap.
 export const PORTFOLIO_CRM_MAX_READ_OPERATIONS = 26;
 
 type RegistryAccess = {
@@ -355,6 +357,9 @@ export async function loadPortfolioCrmSummaryForUid(
       sourceRecordsUpdatedAt,
     },
   });
+
+  // Separate bounded diagnostic reads. No eligibility or permission updates.
+  summary.topicSelections = await loadTopicSummary(access.workspaceId, db);
 
   log.info("crm.portfolio_registry.summary_loaded", {
     sourceScope: "authenticated_default_workspace",

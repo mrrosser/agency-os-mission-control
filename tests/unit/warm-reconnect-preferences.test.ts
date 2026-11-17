@@ -382,7 +382,7 @@ describe("warm reconnect preference capabilities", () => {
         rt_solutions: false,
       },
     };
-    await processWarmReconnectPreferenceMutation(first, { db: fake.db });
+    await processWarmReconnectPreferenceMutation(first, { db: fake.db, observedNowMs: Date.parse("2026-08-12T12:00:00Z") });
     const writeCount = fake.writes.length;
     const changed = await processWarmReconnectPreferenceMutation(
       {
@@ -392,7 +392,7 @@ describe("warm reconnect preference capabilities", () => {
           rt_solutions: true,
         },
       },
-      { db: fake.db }
+      { db: fake.db, observedNowMs: Date.parse("2026-08-12T12:00:00Z") }
     );
 
     expect(changed).toMatchObject({ available: false, canUpdatePreferences: false });
@@ -560,7 +560,7 @@ describe("warm reconnect preference capabilities", () => {
     });
     const beforeInspect = [...fake.records.entries()];
     const inspected = await processWarmReconnectPreferenceMutation(
-      { action: "inspect", token: preferenceToken }, { db: fake.db }
+      { action: "inspect", token: preferenceToken }, { db: fake.db, observedNowMs: Date.parse("2026-08-12T12:00:00Z") }
     );
     expect(inspected.topics).toEqual({ rosser_gallery: false, rt_solutions: false });
     expect([...fake.records.entries()]).toEqual(beforeInspect);
@@ -569,7 +569,7 @@ describe("warm reconnect preference capabilities", () => {
     const saved = await processWarmReconnectPreferenceMutation({
       action: "save_preferences", token: preferenceToken, requestId: "business-choice",
       topics: { rosser_gallery: true, rt_solutions: true },
-    }, { db: fake.db });
+    }, { db: fake.db, observedNowMs: Date.parse("2026-08-12T12:00:00Z") });
     expect(saved.topics).toEqual({ rosser_gallery: true, rt_solutions: true });
     expect(fake.records.get(preferenceStatePath())).toMatchObject({
       topics: { marcus_rosser_art: true, rosser_gallery: true, rt_solutions: true },

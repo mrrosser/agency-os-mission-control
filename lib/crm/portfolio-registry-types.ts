@@ -1,3 +1,4 @@
+import type { TopicSummary } from "./topic-summary";
 export const PORTFOLIO_CRM_SCHEMA_VERSION = 1 as const;
 
 export const PORTFOLIO_CRM_BRANDS = [
@@ -46,6 +47,7 @@ export interface PortfolioCrmRegistrySummary {
   sources: Record<PortfolioCrmSourceSystem, number> & {
     other: number;
   };
+  topicSelections?: TopicSummary;
   permissions: {
     contactPointStates: Record<PortfolioCrmPermissionState, number> & {
       other: number;

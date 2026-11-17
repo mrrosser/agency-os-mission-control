@@ -1,3 +1,10 @@
+# CRM topic diagnostics and separate delivery evidence - 2026-11-17
+
+PR #68 is deployed and authenticated live topic counts verified. PR #69 is the follow-up for nested Gmail delivery-status attribution and independent owner-gated sender-status loading; deployment remains pending. No sends or consent/suppression writes.
+
+See [current evidence and limitations](2026-11-17-crm-topic-delivery-evidence.md). The owner's approximate 36 confirmations remain unreconciled; current topic counts are diagnostic, not a sendable audience.
+
+---
 # Finite CRM audiences without a recipient-count ceiling - 2026-10-29
 
 Status: draft PR #66 is open against base 5cb1115af17ab0a92240d56b5bbb2aadc7884671. The first published commit, c43d5a68eabe930ff8d29aa74e897577741f4b65, passed CI tests and Promptfoo evaluations, but the fresh dependency audit blocked the build. This follow-up corrects those dependency blockers. Current-head CI and review remain required before merge; nothing has been merged, deployed or sent.

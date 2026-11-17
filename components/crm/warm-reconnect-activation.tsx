@@ -48,6 +48,7 @@ import {
   assertGoogleConnectionActive,
   GoogleConnectionCancelledError,
   requestGoogleSenderConnection,
+  parseGoogleSenderProfiles,
   withGoogleConnectionDeadline,
 } from "./google-sender-connection-client";
 
@@ -193,6 +194,62 @@ export function WarmReconnectActivation({ campaign }: Props) {
   const [bulkAttestNote, setBulkAttestNote] = useState("Personally recognized from prior business networking arrangements, workshops, and career engagements.");
   const [recipientSearch, setRecipientSearch] = useState("");
   const [viewMode, setViewMode] = useState<"compact" | "cards">("compact");
+  const [profileStatus, setProfileStatus] = useState<{
+    ownerUid: string;
+    profiles: WarmReconnectActivationResponse["googleProfiles"];
+  } | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const profileRequestRef = useRef<AbortController | null>(null);
+  const senderProfiles = profileStatus?.ownerUid === user?.uid
+    ? profileStatus?.profiles || []
+    : activation?.googleProfiles || [];
+
+  const loadSenderProfiles = useCallback(async () => {
+    if (!user) return;
+    profileRequestRef.current?.abort();
+    const controller = new AbortController();
+    profileRequestRef.current = controller;
+    const current = () => mountedRef.current && currentOwnerRef.current === user.uid &&
+      profileRequestRef.current === controller && !controller.signal.aborted;
+    setProfileLoading(true);
+    setConnectionError(null);
+    // Do not display an older ready status as current if this refresh fails.
+    setProfileStatus({ ownerUid: user.uid, profiles: [] });
+    try {
+      const profiles = await withGoogleConnectionDeadline(async (signal) => {
+        const headers = await buildAuthHeaders(user);
+        assertGoogleConnectionActive(signal);
+        if (!current()) throw new GoogleConnectionCancelledError();
+        const response = await fetch("/api/crm/warm-reconnect/sender-profiles", {
+          method: "GET", headers, cache: "no-store", signal,
+        });
+        const body = await readApiJson<unknown>(response);
+        assertGoogleConnectionActive(signal);
+        if (!response.ok) throw new Error(apiMessage(response, body, "Sender connection status is unavailable"));
+        return parseGoogleSenderProfiles(body);
+      }, {
+        signal: controller.signal,
+        timeoutMessage: "Sender status did not finish loading. This does not establish that Google disconnected; try Refresh connection status again.",
+      });
+      if (current()) setProfileStatus({ ownerUid: user.uid, profiles });
+    } catch (caught) {
+      if (current() && !(caught instanceof GoogleConnectionCancelledError)) {
+        setConnectionError(caught instanceof Error ? caught.message : "Sender status is unavailable.");
+      }
+    } finally {
+      if (current()) {
+        profileRequestRef.current = null;
+        setProfileLoading(false);
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
+    setProfileStatus(null);
+    setProfileLoading(false);
+    void loadSenderProfiles();
+    return () => profileRequestRef.current?.abort();
+  }, [loadSenderProfiles]);
   const receiveResults = useCallback((data: WarmReconnectResultsResponse) => {
     if (user && currentOwnerRef.current === user.uid) setResults({ownerUid: user.uid, data});
   }, [user]);
@@ -245,7 +302,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
         assertGoogleConnectionActive(signal);
         if (!response.ok) throw new Error(apiMessage(response, result, "Activation controls are unavailable"));
         return result;
-      }, { signal: controller.signal, timeoutMessage: "Connection status did not finish loading. Refresh connection status when you are ready." });
+      }, { signal: controller.signal, timeoutMessage: "Campaign controls did not finish loading. Refresh controls before changing a campaign; this does not mean Google disconnected." });
       if (!mountedRef.current || currentOwnerRef.current !== user.uid || controller.signal.aborted || requestRef.current !== controller) return;
       if (!isActivationResponse(body)) {
         throw new Error("Campaign controls could not be verified. Refresh before making changes.");
@@ -265,7 +322,6 @@ export function WarmReconnectActivation({ campaign }: Props) {
       setActivationNeedsRefresh(true);
       const message = caught instanceof Error ? caught.message : "Activation controls are unavailable";
       setError(message);
-      setConnectionError(message);
     } finally {
       if (mountedRef.current && requestRef.current === controller) {
         requestRef.current = null;
@@ -315,16 +371,16 @@ export function WarmReconnectActivation({ campaign }: Props) {
     cancelConnection();
     setConnectionError(null);
     setConnectionNotice("Checking connection status only. Start a new connection yourself if it is still needed.");
-    void loadActivation();
-  }, [cancelConnection, loadActivation]);
+    void loadSenderProfiles();
+  }, [cancelConnection, loadSenderProfiles]);
 
   useEffect(() => {
     const restore = (event: PageTransitionEvent) => {
-      if (event.persisted) refreshConnectionStatus();
+      if (event.persisted) { refreshConnectionStatus(); void loadActivation(); }
     };
     window.addEventListener("pageshow", restore);
     return () => window.removeEventListener("pageshow", restore);
-  }, [refreshConnectionStatus]);
+  }, [refreshConnectionStatus, loadActivation]);
 
   useEffect(() => {
     if (!user) {
@@ -361,8 +417,8 @@ export function WarmReconnectActivation({ campaign }: Props) {
   }
 
   async function connectGoogle(profileId: WarmReconnectGoogleProfileId) {
-    if (!user || loading || connectionRef.current) return;
-    const profile = activation?.googleProfiles.find((item) => item.profileId === profileId);
+    if (!user || profileLoading || connectionRef.current) return;
+    const profile = senderProfiles.find((item) => item.profileId === profileId);
     if (!profile) {
       setConnectionError("The server did not authorize that Google profile. Refresh connection status before trying again.");
       return;
@@ -408,7 +464,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
       ? selectionIsCurrent ? [...selectedRecipientIds] : null
       : selectedTuple(selectedRecipientIds);
     const selectedSender = followOnParent?.sender ?? sender;
-    const profile = activation?.googleProfiles.find((item) => item.profileId === selectedSender.profileId);
+    const profile = senderProfiles.find((item) => item.profileId === selectedSender.profileId);
     if (!recipients || !profile || !campaign || mutation) return;
 
     const idempotencyKey = crypto.randomUUID();
@@ -754,7 +810,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
               {connectionNotice && <p role="status" className="mt-3 text-xs leading-5 text-cyan-100">{connectionNotice}</p>}
               {connectingProfile && <p role="status" className="mt-3 text-xs leading-5 text-zinc-300">Opening Google… You can refresh connection status below if this attempt was interrupted.</p>}
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {(activation?.googleProfiles || []).map((profile) => {
+                {senderProfiles.map((profile) => {
                   const ready = Boolean(
                     profile.connected && profile.gmailCapable && profile.accountEmail
                   );
@@ -783,7 +839,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                         type="button"
                         size="sm"
                         variant="outline"
-                        disabled={Boolean(connectingProfile) || loading}
+                        disabled={Boolean(connectingProfile) || profileLoading}
                         onClick={() => void connectGoogle(profile.profileId)}
                         className="mt-3 w-full border-white/15 bg-black/20 text-zinc-100 hover:bg-white/10 hover:text-white"
                       >
@@ -793,14 +849,14 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     </div>
                   );
                 })}
-                {!activation?.googleProfiles.length && (
+                {!senderProfiles.length && (
                   <p className="col-span-full rounded-lg border border-dashed border-amber-300/25 p-3 text-xs text-amber-100/70">
-                    No server-authorized Google profile is available.
+                    Sender profiles have not been observed yet. This does not mean an existing Google connection is disconnected.
                   </p>
                 )}
               </div>
-              <Button type="button" variant="outline" size="sm" disabled={loading} onClick={refreshConnectionStatus} className="mt-3 border-white/15 bg-black/20 text-zinc-100 hover:bg-white/10 hover:text-white">
-                <RefreshCw className={loading ? "animate-spin" : ""} aria-hidden="true" /> Refresh connection status
+              <Button type="button" variant="outline" size="sm" disabled={profileLoading} onClick={refreshConnectionStatus} className="mt-3 border-white/15 bg-black/20 text-zinc-100 hover:bg-white/10 hover:text-white">
+                <RefreshCw className={profileLoading ? "animate-spin" : ""} aria-hidden="true" /> Refresh connection status
               </Button>
             </div>
           </div>
@@ -878,7 +934,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
                     <input aria-label="Reply-to email" type="email" value={sender.replyTo} onChange={(event) => setSender((current) => ({ ...current, replyTo: event.target.value }))} placeholder="Monitored reply-to email" className="w-full rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <textarea aria-label="Physical postal address" value={sender.physicalPostalAddress} onChange={(event) => setSender((current) => ({ ...current, physicalPostalAddress: event.target.value }))} placeholder="Physical postal address shown in email" rows={2} className="w-full resize-y rounded-md border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50" />
                     <select aria-label="Sending Google profile" value={sender.profileId} onChange={(event) => setSender((current) => ({ ...current, profileId: event.target.value as SenderForm["profileId"] }))} className="w-full rounded-md border border-white/10 bg-[#091112] px-3 py-2 text-sm text-white outline-none focus:border-cyan-200/50">
-                      {(activation?.googleProfiles || []).map((profile) => <option key={profile.profileId} value={profile.profileId}>{profile.label}</option>)}
+                      {senderProfiles.map((profile) => <option key={profile.profileId} value={profile.profileId}>{profile.label}</option>)}
                     </select>
                     <label className="block text-xs text-zinc-300">
                       Email format
@@ -1302,7 +1358,7 @@ export function WarmReconnectActivation({ campaign }: Props) {
               <p>{activation ? `${availableCandidates.length} contacts available for review · ${activation.candidateSummary.excluded} excluded.` : "No activation contract loaded."}</p>
             )}
           </div>
-          <Button type="button" size="sm" variant="ghost" disabled={loading || Boolean(mutation)} onClick={refreshConnectionStatus} className="self-start text-zinc-300 hover:bg-white/10 hover:text-white sm:self-auto">
+          <Button type="button" size="sm" variant="ghost" disabled={loading || Boolean(mutation)} onClick={()=>void loadActivation()} className="self-start text-zinc-300 hover:bg-white/10 hover:text-white sm:self-auto">
             <RefreshCw className={loading ? "animate-spin" : ""} aria-hidden="true" /> Refresh controls
           </Button>
         </div>

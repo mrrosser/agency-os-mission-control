@@ -30,7 +30,11 @@ const MAX_DEPTH = 6;
 const MAX_DATA = 64 * 1024;
 function address(value: string): string | null {
   if (/[,;\r\n]/.test(value)) return null;
-  const email = (value.match(/<([^<>]+)>/)?.[1] || value).trim().toLowerCase();
+  const trimmed = value.trim();
+  // Do not discard a second address or injected field after an angle address.
+  const angled = /^[^<>@:\r\n]*<([^<>]+)>$/.exec(trimmed);
+  if (/[<>]/.test(trimmed) && !angled) return null;
+  const email = (angled?.[1] || trimmed).trim().toLowerCase();
   return /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email) ? email : null;
 }
 function header(part: Part, name: string): string {
@@ -38,18 +42,28 @@ function header(part: Part, name: string): string {
   return matches.length === 1 ? matches[0].value || "" : "";
 }
 function fields(text: string): Map<string, string[]> | null {
-  // Reject folded/ambiguous fields rather than guessing an identity.
-  if (/\r?\n[ \t]/.test(text)) return null;
+  // Unfold only continuation lines belonging to a preceding field. Keep
+  // duplicates as separate values so identity/action checks remain fail-closed.
+  if (/\r(?!\n)|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) return null;
   const result = new Map<string, string[]>();
+  let previous: string | null = null;
   for (const line of text.split(/\r?\n/)) {
+    if (/^[ \t]/.test(line)) {
+      if (!previous) return null;
+      const values = result.get(previous)!;
+      values[values.length - 1] += " " + line.trim();
+      continue;
+    }
+    if (!line) { previous = null; continue; }
     const match = /^([A-Za-z-]+):[ \t]*(.*)$/.exec(line);
-    if (!match) { if (line.trim()) return null; continue; }
+    if (!match) return null;
     const name = match[1].toLowerCase();
     result.set(name, [...(result.get(name) || []), match[2].trim()]);
+    previous = name;
   }
   return result;
 }
-function one(map: Map<string, string[]>, name: string) { const values = map.get(name); return values?.length === 1 ? values[0] : ""; }
+function one(map: Map<string, string[]>, name: string) { const values = map.get(name); return values?.length === 1 ? values[0].trim() : ""; }
 export function attributeSeparateDeliveryNotice(message: SeparateNoticeMessage, target: VerifiedSentNoticeTarget): AttributedSeparateNotice | null {
   if (!ID.test(message.id || "") || !ID.test(message.threadId || "") || !ID.test(target.providerMessageId) || !ID.test(target.providerThreadId) || message.threadId === target.providerThreadId || message.labelIds?.includes("SENT")) return null;
   if (!/^<[^\s<>]{1,500}>$/.test(target.rfcMessageId)) return null;
@@ -83,9 +97,12 @@ export function attributeSeparateDeliveryNotice(message: SeparateNoticeMessage, 
     if (sources.length === 1) {
       originalFields = new Map<string,string[]>();
       for (const h of sources[0].headers || []) {
-        if (!h.name || !h.value || /[\r\n]/.test(h.value)) return null;
+        if (!h.name || !h.value || !/^[A-Za-z-]+$/.test(h.name)) return null;
         const key = h.name.toLowerCase();
-        originalFields.set(key,[...(originalFields.get(key)||[]),h.value.trim()]);
+        const parsed = fields(`${h.name}: ${h.value}`);
+        // One structured header cannot introduce another physical header.
+        if (!parsed || parsed.size !== 1 || parsed.get(key)?.length !== 1) return null;
+        originalFields.set(key,[...(originalFields.get(key)||[]),one(parsed,key)]);
       }
     }
   }

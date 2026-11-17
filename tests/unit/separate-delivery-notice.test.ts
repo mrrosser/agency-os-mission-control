@@ -41,3 +41,44 @@ describe("separate-thread delivery report attribution", () => {
     for(const date of ["2026-11-02T08:00:00Z","2026-12-05T08:00:00Z"]) expect(attributeSeparateDeliveryNotice({...fixture(),internalDate:String(Date.parse(date))},target)).toBeNull();
   });
 });
+
+
+describe("folded MIME report fields", () => {
+  const original = (extra = "") => `Message-ID: ${target.rfcMessageId}\r\nFrom: ${target.senderEmail}\r\nTo: ${target.recipientEmail}${extra}`;
+  const report = (extra = "") => `Final-Recipient: rfc822; ${target.recipientEmail}\r\nAction: failed\r\nStatus: 5.1.1${extra}`;
+  function withBodies(originalText: string, statusText = report()) {
+    const message = fixture();
+    message.payload!.parts![2].body!.data = encode(originalText);
+    message.payload!.parts![1].body!.data = encode(statusText);
+    return message;
+  }
+  it("accepts folded DKIM and Diagnostic-Code fields unrelated to identity", () => {
+    const message = withBodies(original("\r\nDKIM-Signature: v=1; a=rsa-sha256;\r\n b=abc\r\n\tdef"), report("\r\nDiagnostic-Code: smtp; 550 mailbox unavailable\r\n please contact the recipient"));
+    expect(attributeSeparateDeliveryNotice(message,target)?.reportedAction).toBe("failed");
+  });
+  it("accepts valid boundary folding of identity and recipient fields", () => {
+    const text = `Message-ID:\r\n ${target.rfcMessageId}\r\nFrom: Marcus\r\n <${target.senderEmail}>\r\nTo:\r\n ${target.recipientEmail}`;
+    const status = `Final-Recipient: rfc822;\r\n ${target.recipientEmail}\r\nAction: failed\r\nStatus: 5.1.1`;
+    expect(attributeSeparateDeliveryNotice(withBodies(text,status),target)?.reportedAction).toBe("failed");
+  });
+  it("keeps duplicate identity and action fields ambiguous even when folded", () => {
+    for (const text of [original(`\r\nMessage-ID:\r\n ${target.rfcMessageId}`), original(`\r\nTo:\r\n ${target.recipientEmail}`)]) expect(attributeSeparateDeliveryNotice(withBodies(text),target)).toBeNull();
+    expect(attributeSeparateDeliveryNotice(withBodies(original(),report("\r\nAction:\r\n failed")),target)).toBeNull();
+  });
+  it("rejects orphan continuations, bare CR, and control-character folding", () => {
+    for (const text of [" orphan\r\n"+original(),original()+"\rInjected: x",original()+"\r\n\tbad\u0000value"]) expect(attributeSeparateDeliveryNotice(withBodies(text),target)).toBeNull();
+  });
+  it("does not treat a continuation as a new identity header or ignore trailing mailbox data", () => {
+    const injected = `Message-ID: ${target.rfcMessageId}\r\nFrom: ${target.senderEmail}\r\nDKIM-Signature: abc\r\n To: ${target.recipientEmail}`;
+    expect(attributeSeparateDeliveryNotice(withBodies(injected),target)).toBeNull();
+    const extraAddress = `Message-ID: ${target.rfcMessageId}\r\nFrom: ${target.senderEmail}\r\nTo: <${target.recipientEmail}>\r\n other@example.com`;
+    expect(attributeSeparateDeliveryNotice(withBodies(extraAddress),target)).toBeNull();
+  });
+  it("unfolds structured Gmail headers but rejects injected additional physical headers", () => {
+    const message = fixture();
+    message.payload!.parts![2] = {mimeType:"message/rfc822",headers:[{name:"Message-ID",value:target.rfcMessageId},{name:"From",value:target.senderEmail},{name:"To",value:target.recipientEmail},{name:"DKIM-Signature",value:"v=1;\r\n b=abc"}]};
+    expect(attributeSeparateDeliveryNotice(message,target)?.reportedAction).toBe("failed");
+    message.payload!.parts![2].headers![3].value = `v=1;\r\nTo: ${target.recipientEmail}`;
+    expect(attributeSeparateDeliveryNotice(message,target)).toBeNull();
+  });
+});

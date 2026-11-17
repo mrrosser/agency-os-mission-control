@@ -13,4 +13,4 @@
 - Exact lockfile dependencies restored. follow-redirects patched from 1.16.1 to compatible 1.16.3 for GHSA-mrwp-f3q8-3g9p. npm audit: 0 high/critical, 21 moderate and 1 low remain.
 - Topic/registry 17 tests pass; preference and ESLint-boundary regression 38 tests pass; DSN and existing reader/UI 84 tests pass. TypeScript passes. Full lint has zero errors and two existing unused-variable warnings. Staged gitleaks finds no leaks.
 - Two preference tests now pass an explicit pre-expiry fixture timestamp; production expiry behavior is unchanged.
-- Production build passed. Final full-suite results must be recorded before release. No live mailbox refresh or live aggregate reconciliation has yet been executed.
+- Production build passed. Full unit and smoke suites passed: 2,539 tests across 275 files. GitHub CI tests, promptfoo and Firebase build validation passed for the initial patch; the folded-header follow-up requires fresh checks. No live mailbox refresh or live aggregate reconciliation has yet been executed.
